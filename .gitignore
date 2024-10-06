@@ -18,3 +18,4 @@ compiled/
 
 # Dependency tracking files
 *.dep
+*.patch
