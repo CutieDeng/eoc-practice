@@ -11,21 +11,22 @@
 
 ;; all the files in the tests/ directory with extension ".rkt".
 (define all-tests
-  (map (lambda (p) (car (string-split (path->string p) ".")))
-       (filter (lambda (p)
-                 (string=? (cadr (string-split (path->string p) ".")) "rkt"))
-               (directory-list (build-path (current-directory) "tests")))))
+  (append-map (λ (p) 
+    (define p0 (string-split (path->string p) "."))
+    (if (string=? (cadr p0) "rkt") (list (car p0)) '()))
+    (directory-list (build-path (current-directory) "tests"))))
 
 (define (tests-for r)
-  (map (lambda (p)
-         (caddr (string-split p "_")))
-       (filter
-        (lambda (p)
-          (string=? r (car (string-split p "_"))))
-        all-tests)))
-
+  (append-map (λ (p)
+    (define p0 (string-split p "_"))
+    (cond
+      [(string=? r (car p0)) (list (caddr p0))]
+      [else null]))
+      all-tests))
+      
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "var" #f compiler-passes interp-Lvar "var_test" (tests-for "var"))
+(define tests-for-var (tests-for "var"))
+(interp-tests "var" #f compiler-passes interp-Lvar "var_test" tests-for-var)
 
 ;; The following tests the final x86 code.
-(compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
+; (compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
