@@ -10,6 +10,10 @@
 (require "utilities.rkt")
 (provide (all-defined-out))
 
+(require graph)
+(require "graph-printing.rkt")
+(require "priority_queue.rkt")
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lint examples
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -139,7 +143,7 @@
 ;; explicate-control : Lvar^mon -> Cvar
 (define (explicate-control p)
   (match p
-    [(Program info body) (CProgram info (list (cons 'start (explicate-tail body))))]))
+    [(Program info body) (CProgram info (dict-set '() 'start (explicate-tail body)))]))
 
 (define (explicate-tail p)
   (match p
@@ -191,7 +195,7 @@
   (match p
     [(CProgram info block)
       (define block-2 (select-instrs (dict-ref block 'start)))
-      (X86Program info (list (cons 'start (Block '() block-2))))]))
+      (X86Program info (dict-set '() 'start (Block '() block-2)))]))
 
 ;; assign-homes : x86var -> x86var
 (define (assign-homes p)
@@ -227,7 +231,7 @@
   (for/fold ([offset 0] [offsets '()]) ([ty types])
     (match ty
       [(cons x 'Integer)
-        (define offset-2 (aligned (+ offset 4) 4))
+        (define offset-2 (aligned (+ offset 8) 8))
         (values offset-2 (cons (cons x offset-2) offsets))])))
   
 ;; patch-instructions : x86var -> x86int
@@ -244,6 +248,10 @@
       (list (Instr 'movq (list (Deref r0 o0) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))]
     [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
       (list (Instr 'movq (list (Deref r1 o1) (Reg 'rax))) (Instr i (list (Deref r0 o0) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))]
+    [(Instr 'movq (list (Reg a) (Reg b))) 
+      (cond
+        [(equal? a b) (list )] ; optimize the useless movq op.
+        [else (list i)])]
     [e (list e)]))
 
 (define (patch-instr-block b)
@@ -253,13 +261,250 @@
 
 ;; prelude-and-conclusion : x86int -> x86int
 (define (prelude-and-conclusion p)
-  (define prelude (Block '() (list )))
-  (define conclusion (Block '() (list (Instr 'retq '()))))
   (match p
     [(X86Program info b)
-      (X86Program info (cons (cons 'prelude prelude) (cons (cons 'conclusion conclusion) b)))]))
+      (define stack-size (aligned (dict-ref info 'stack-size) 16))
+      (define prelude (Block '() 
+        (list 
+          (Instr 'pushq (list (Reg 'rbp))) 
+          (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
+          (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
+          (Jmp 'start)
+        )))
+      (define conclusion (Block '() (list 
+        (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
+        (Instr 'popq (list (Reg 'rbp)))
+        (Retq )
+      )))
+      (define b-start (dict-ref b 'start))
+      (define b-start-block (Block-instr* b-start))
+      (define b-start-2 (Block (Block-info b-start) (append b-start-block (list (Jmp 'conclusion)))))
+      (set! b (dict-set b 'start b-start-2))
+      (X86Program info (cons (cons 'main prelude) (cons (cons 'conclusion conclusion) b)))]))
 
-(debug-level 2)
+(define caller-save-regs 
+  (list 'rax 'rcx 'rdx 'rsi 'rdi 'r8 'r9 'r10 'r11)
+)
+
+(define callee-save-regs
+  (list 'rsp 'rbp 'rbx 'r12 'r13 'r14 'r15)
+)
+
+(define pass-args-regs
+  (list 'rdi 'rsi 'rdx 'rcx 'r8 'r9)
+)
+
+#;(define (uncover-live-blocks blocks)
+  (define tags (sequence->list (in-dict-keys blocks)))
+  (define blocks-2
+    (for/fold ([blocks blocks]) ([tag tags])
+      (define blocks-3 (uncover-live-block tag blocks))
+      blocks-3
+      )
+  )
+  blocks-2
+)
+
+#;(define (uncover-live-block tag blocks)
+  (match (dict-ref blocks tag)
+    [(Block i block)
+      (cond
+        [(dict-has-key? i 'live) blocks]
+        [else 
+          (define-values (b-2 blocks-2) (uncover-live-block-impl tag block blocks))
+          (define rst-blocks (dict-set blocks-2 tag b-2))
+          rst-blocks
+        ])]))
+  
+#;(define (uncover-live-block-impl tag block-inner blocks)
+  (cond
+    [(null? block-inner) (values (list ) blocks)]
+    [else
+      (define i (car block-inner))
+      (define r (cdr block-inner))
+      (define-values (l blocks-2) (uncover-live-block-impl tag r blocks))
+      (define filterimm (λ (x) (not (Imm? x))))
+      (define biop (λ (l blocks src dst)
+          (define old-set (car l))
+          (define new-set (set-union old-set (set (list src dst))))
+          (define new-set-2 (list->set (filter filterimm (set->list new-set))))
+          (values (cons new-set-2 l) blocks)))
+      (match i
+        [(Instr 'movq (list src dst))
+            (define old-set (car l))
+            (define new-set (set-union (set-subtract old-set (set (list dst))) (set (list src))))
+            (define new-set-2 (list->set (filter filterimm (set->list new-set))))
+            (values (cons new-set-2 l) blocks-2)]
+        [(Instr 'addq (list src dst))
+          (biop l blocks-2 src dst)
+        ]
+        [(Instr 'subq (list src dst))
+          (biop l blocks-2 src dst)
+        ]
+        [(Jmp tag)
+          (define blocks-2 (uncover-live-block tag blocks))
+          (define l (car (dict-ref (dict-ref blocks-2 tag) 'live)))
+          (values (list l) blocks-2)
+        ]
+      )]
+    ))
+
+(struct PendingError ())
+
+(define (inv-trans-uncover-live-set instr s blocks)
+  (match instr
+    [(Instr 'movq (list a b)) (set-union (set-subtract s (set b)) (set a))]
+    [(or (Instr 'addq (list a b)) (Instr 'subq (list a b))) (set-union s (set a b))]
+    [(Jmp tag) 
+      (define jmp-top (dict-ref blocks tag))
+      (unless (dict-has-key? (Block-info jmp-top) 'live) (raise (PendingError)))
+      (car (dict-ref (Block-info jmp-top) 'live))
+      ]
+    [(Instr 'negq (list a)) (set-union s (set a))]
+    [(Callq _ count)
+      (define s-2 (set-subtract s (set (map Reg callee-save-regs))))
+      (define s-3 (set-union s-2 (set (map Reg (take pass-args-regs count)))))
+      s-3
+      ]
+    ))
+
+(define (inv-trans-uncover-live-set-wrap . args)
+  (define rst (apply inv-trans-uncover-live-set args))
+  (define rst-2 (list->set (filter (compose not Imm?) (set->list rst))))
+  rst-2
+  )
+
+(define (uncover-live-instr* instr* blocks)
+  (match instr*
+    ['() (list (set ))]
+    [(cons instr rest)
+      (define rest-uncover (uncover-live-instr* rest blocks))
+      (define uncover (car rest-uncover))
+      (define uncover-2 (inv-trans-uncover-live-set-wrap instr uncover blocks))
+      (cons uncover-2 rest-uncover)
+      ]
+    ))
+
+(define (uncover-live-block block blocks)
+  (match block
+    [(Block info instr*)
+      (uncover-live-instr* instr* blocks)
+      ]))
+
+(define (uncover-live-blocks blocks)
+  (define-values (fail blocks-3)
+    (for/fold ([fail? #f] [blocks blocks]) ([tag (in-dict-keys blocks)])
+      (define block (dict-ref blocks tag))
+      (with-handlers ([PendingError? (λ (_) (values #t blocks))])
+        (define rst (uncover-live-block block blocks))
+        (define block-2 (Block (dict-set (Block-info block) 'live rst) (Block-instr* block)))
+        (values fail? (dict-set blocks tag block-2))
+        )
+      )
+    )
+  (if fail (uncover-live-blocks blocks-3) blocks-3)
+  )
+
+(define (uncover-live p)
+  (match p
+    [(X86Program info bs)
+      (define new-blocks (uncover-live-blocks bs))
+      (X86Program info new-blocks)
+      ]))
+
+(define (all-writes-in-instr instr)
+  (match instr
+    [(Instr 'movq (list _ dst)) (set dst)]
+    [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
+    [(Callq _ _) (list->set (map Reg caller-save-regs))]
+    [(Instr 'negq dst) (set dst)]
+    [(Jmp _) (set )]
+    ))
+
+(define (build-interference-instr* b s graph)
+  (define carb (car b))
+  (define cars (car s))
+  (define writes (all-writes-in-instr carb))
+  (for ([w (in-set writes)])
+    (for ([r (in-set cars)])
+      (unless (equal? w r) (add-edge! graph w r))
+      )
+    )
+  graph
+)
+
+(define (build-interference-block b)
+  (match b
+    [(Block info instr*)
+      (define g (build-interference-instr* instr* (dict-ref info 'live) (undirected-graph '())))
+      (define info-2 (dict-set info 'interference g))
+      (Block info-2 instr*)
+      ]))
+
+(define (build-interference p)
+  (match p
+    [(X86Program info blocks) 
+      (define blocks-2 (for/list ([b blocks])
+        (define bg (build-interference-block (cdr b)))
+        ; (print-graph (dict-ref (Block-info bg) 'interference))
+        (cons (car b) bg)))
+      (X86Program info blocks-2)
+      ]))
+
+(define (color-graph p)
+  (match p
+    [(X86Program info blocks) 
+      (define blocks-2 (map color-graph-block blocks))
+      (X86Program info blocks-2)
+    ]))
+
+(define (color-graph-block block)
+  (match block
+    [(cons tag (Block info instr*))
+      (define inte (dict-ref info 'interference))
+      (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
+      (for ([n (in-vertices inte)])
+        (pqueue-push! q (cons n 0))
+        )
+      (define neighbors-set 
+        (with-handlers ([exn:fail? (λ (_e) '())])
+          (for/fold ([nei-set '()]) ([n (in-neighbors inte (Reg 'rax))])
+            (define inner (dict-ref nei-set n '()))
+            (define inner-2 (set-add inner 0))
+            (pqueue-push! q (cons n (length inner-2)))
+            (dict-set nei-set n inner-2)
+          ))
+      )
+      (define color-g (let color-find ([neighbors-set neighbors-set] [selections (dict-set '() (Reg 'rax) 0)] #;[remain (set-subtract (sequence->list (in-vertices inte)) (set (Reg 'rax)))])
+        (cond
+          [(= (pqueue-count q) 0) selections]
+          [else
+            (define pop (pqueue-pop! q))
+            (cond
+              [(dict-has-key? selections (car pop)) (color-find neighbors-set selections)]
+              [else
+                (define color (let color-find-2 ([color 0])
+                  (if (set-member? (dict-ref neighbors-set (car pop)) color)
+                    (color-find-2 (+ color 1))
+                    color
+                    )))
+                (define neighbors-set-2 (for/fold ([n neighbors-set]) ([v (in-neighbors inte (car pop))])
+                  (define inner (dict-ref n v '()))
+                  (define inner-2 (set-add inner color))
+                  (pqueue-push! q (cons v (length inner-2)))
+                  (dict-set n v inner-2)
+                ))
+                (color-find neighbors-set-2 (dict-set selections (car pop) color))
+              ]
+            )
+          ]
+        )
+      ))
+      (define info-2 (dict-set info 'color-graph color-g))
+      (cons tag (Block info-2 instr*))
+    ]))
+
+; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
@@ -270,6 +515,9 @@
      ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
      ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
+     ("uncover live" ,uncover-live ,interp-pseudo-x86-0)
+     ("build interference graph" ,build-interference ,interp-pseudo-x86-0)
+     ("build color graph" ,color-graph ,interp-pseudo-x86-0)
      ("assign homes" ,assign-homes ,interp-x86-0)
      ("patch instructions" ,patch-instructions ,interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
