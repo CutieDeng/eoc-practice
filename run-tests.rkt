@@ -29,4 +29,4 @@
 (interp-tests "var" #f compiler-passes interp-Lvar "var_test" tests-for-var)
 
 ;; The following tests the final x86 code.
-; (compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
+(compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
