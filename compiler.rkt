@@ -252,6 +252,9 @@
       (cond
         [(equal? a b) (list )] ; optimize the useless movq op.
         [else (list i)])]
+    [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
+      (list ) ; drop the non-sense addition and subtraction.
+    ]
     [e (list e)]))
 
 (define (patch-instr-block b)
@@ -421,6 +424,16 @@
     [(Jmp _) (set )]
     ))
 
+(define (pre-build-interference b graph)
+  (match b
+    [(cons c ons)
+      (for ([w (in-set (all-writes-in-instr c))])
+        (add-vertex! graph w))
+      (pre-build-interference ons graph)
+    ]
+    ['() graph]
+  ))
+
 (define (build-interference-instr* b s graph)
   (define carb (car b))
   (define cars (car s))
@@ -430,13 +443,17 @@
       (unless (equal? w r) (add-edge! graph w r))
       )
     )
-  graph
+  (cond
+    [(null? (cdr b)) graph]
+    [else (build-interference-instr* (cdr b) (cdr s) graph)])
 )
 
 (define (build-interference-block b)
   (match b
     [(Block info instr*)
-      (define g (build-interference-instr* instr* (dict-ref info 'live) (undirected-graph '())))
+      (define g (build-interference-instr* instr* (dict-ref info 'live) 
+        (pre-build-interference instr* (undirected-graph '()))
+        ))
       (define info-2 (dict-set info 'interference g))
       (Block info-2 instr*)
       ]))
@@ -446,7 +463,6 @@
     [(X86Program info blocks) 
       (define blocks-2 (for/list ([b blocks])
         (define bg (build-interference-block (cdr b)))
-        ; (print-graph (dict-ref (Block-info bg) 'interference))
         (cons (car b) bg)))
       (X86Program info blocks-2)
       ]))
@@ -504,6 +520,46 @@
       (cons tag (Block info-2 instr*))
     ]))
 
+(define ((allocate-register m) v)
+  (match v
+    [(Imm _) v]
+    [_ 
+      (define r (dict-ref m v))
+      (cond
+        [(< r (length caller-save-regs)) (Reg (list-ref caller-save-regs r))]
+        [else (Deref 'rbp (- (* 8 (- r (length caller-save-regs))) 8))]
+      )
+    ]))
+
+(define ((allocate-instr m) instr)
+  (match instr
+    [(Instr i l) (Instr i (map (allocate-register m) l))]
+    [(Jmp _) instr]
+    [(Callq _ _) instr]
+  ))
+
+(define (allocate-registers-block block)
+  (match block
+    [(Block info instr*)
+      (define color-graph (dict-ref info 'color-graph))
+      (define count (foldl max -1 (map cdr color-graph)))
+      (when (= count -1) (error 'allocate-registers-block "no color graph"))
+      (define stack-size (* (- (+ count 1) (length caller-save-regs)) 8))
+      (define info-2 (dict-set info 'stack-size stack-size))
+      (define instr*-2 (map (allocate-instr color-graph) instr*))
+      (Block info-2 instr*-2)
+    ]))
+
+(define (allocate-registers p)
+  (match p
+    [(X86Program info blocks)
+      (define blocks-2 (for/list ([b blocks])
+        (cons (car b) (allocate-registers-block (cdr b)))))
+      (define stack-size (dict-ref (Block-info (cdar blocks-2)) 'stack-size))
+      (define info-2 (dict-set info 'stack-size (max stack-size 0)))
+      (X86Program info-2 blocks-2)
+    ]))
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -515,10 +571,15 @@
      ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
      ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
+
      ("uncover live" ,uncover-live ,interp-pseudo-x86-0)
      ("build interference graph" ,build-interference ,interp-pseudo-x86-0)
      ("build color graph" ,color-graph ,interp-pseudo-x86-0)
-     ("assign homes" ,assign-homes ,interp-x86-0)
+     ; ("assign homes" ,assign-homes ,interp-x86-0)
+     ("allocate registers" ,allocate-registers ,interp-x86-0)
+
      ("patch instructions" ,patch-instructions ,interp-x86-0)
      ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+
+     ("patch instructions" ,patch-instructions ,interp-x86-0)
      ))
