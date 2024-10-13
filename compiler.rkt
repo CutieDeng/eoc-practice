@@ -10,6 +10,9 @@
 (require "utilities.rkt")
 (provide (all-defined-out))
 
+(require "interp-Lif.rkt")
+(require "type-check-Lif.rkt")
+
 (require graph)
 (require "graph-printing.rkt")
 (require "priority_queue.rkt")
@@ -560,15 +563,32 @@
       (X86Program info-2 blocks-2)
     ]))
 
+(define (shrink-exp exp)
+  (match exp
+    [(Prim 'and (list a b)) (If a b (Bool #f))]
+    [(Prim 'or (list a b)) (If a (Bool #t) b)]
+    [(Prim '- (list a b)) (Prim '+ (list a (Prim '- (list b))))]
+    [_ exp]
+    ))
+
+(define (shrink p)
+  (match p
+    [(Program info exp)
+      (Program info (shrink-exp exp))
+    ]))
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
+
+     ("shrink" ,shrink ,interp-Lif ,type-check-Lif)
+
      ;; Uncomment the following passes as you finish them.
-     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
-     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
+     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
+     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
      ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
 
