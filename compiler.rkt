@@ -62,87 +62,6 @@
 ;; HW1 Passes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define (uniquify-var env)
-  (λ (e)
-    (cond
-      [(dict-has-key? env e) (values env (dict-ref env e))]
-      [else 
-        (define e-2 (gensym e))
-        (define env-2 (dict-set env e e-2))
-        (values env-2 e-2)])
-    ))
-
-(define (uniquify-exp env)
-  (lambda (e)
-    (match e
-      [(Var x) 
-        (define-values (env-2 x-2) ((uniquify-var env) x))
-        (values env-2 (Var x-2))]
-      [(Int n) (values env e)]
-      [(Let x e body)
-        (define-values (new-env new-x) ((uniquify-var env) x))
-        (define-values (new-env-2 new-e) ((uniquify-exp new-env) e))
-        (define-values (new-env-3 new-body) ((uniquify-exp new-env-2) body))
-        (values new-env-3 
-          (Let new-x new-e new-body))]
-      [(Prim op es)
-        (define-values (new-env new-es)
-          (for/fold ([nenv env] [nes '()]) ([e es])
-            (define-values (nenv-2 ne) ((uniquify-exp nenv) e))
-            (values nenv-2 (cons ne nes))))
-        (values new-env (Prim op (reverse new-es)))]
-    )))
-
-;; uniquify : Lvar -> Lvar
-(define (uniquify p)
-  (match p
-    [(Program info e) 
-      (define-values (_ e2) ((uniquify-exp '()) e))
-      (Program info e2)]))
-
-(define ((exp-cast-atom env) p)
-  (match p
-    [(Int _) (values env p)]
-    [(Var _) (values env p)]
-    [_ (let ([x (gensym 'tmp)])
-      (define e-2 (dict-set env x p))
-      (values e-2 (Var x)))]))
-    
-(define ((expand-lets env) p)
-  (match env
-    ['() p]
-    [(cons (cons x e) rest)
-      ((expand-lets rest) (Let x e p))]))
-
-(define ((rco-atom env) p)
-  (define p-2 (rco-exp p))
-  (define-values (env-2 p-3) ((exp-cast-atom env) p-2))
-  (values env-2 p-3))
-
-(define (rco-exp p)
-  (match p
-    [(Var _) p]
-    [(Int _) p]
-    [(Prim op es)
-      (define-values (env-2 e-2) 
-        (for/fold ([envo '()] [new-es '()]) ([e es])
-          (define-values (env-2 e-2) ((rco-atom envo) e))
-          (values env-2 (cons e-2 new-es))))
-      (define e-3 ((expand-lets env-2) (Prim op (reverse e-2))))
-      e-3]
-    [(Let x e body)
-      (define new-e (rco-exp e))
-      (define new-body (rco-exp body))
-      (Let x new-e new-body)]))
-
-;; remove-complex-opera* : Lvar -> Lvar^mon
-(define (remove-complex-opera* p)
-  (match p
-    [(Program info e)
-      (define p-2 (rco-exp e))
-      (Program info p-2)
-    ]))
-
 ;; explicate-control : Lvar^mon -> Cvar
 (define (explicate-control p)
   (match p
@@ -503,7 +422,7 @@
               [(dict-has-key? selections (car pop)) (color-find neighbors-set selections)]
               [else
                 (define color (let color-find-2 ([color 0])
-                  (if (set-member? (dict-ref neighbors-set (car pop)) color)
+                  (if (set-member? (dict-ref neighbors-set (car pop) '()) color)
                     (color-find-2 (+ color 1))
                     color
                     )))
@@ -567,7 +486,7 @@
   (match exp
     [(Prim 'and (list a b)) (If a b (Bool #f))]
     [(Prim 'or (list a b)) (If a (Bool #t) b)]
-    [(Prim '- (list a b)) (Prim '+ (list a (Prim '- (list b))))]
+    ; [(Prim '- (list a b)) (Prim '+ (list a (Prim '- (list b))))]
     [_ exp]
     ))
 
@@ -576,6 +495,122 @@
     [(Program info exp)
       (Program info (shrink-exp exp))
     ]))
+
+(define pass-abstract
+  (class object%
+    (super-new)
+    (abstract pass)
+    ))
+
+(define pass-Lvar-uniquify
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(Program info body)
+          (define body-2 ((pass-exp '()) body))
+          (Program info body-2)
+        ]))
+    (define/public ((pass-exp env) exp)
+      (match exp
+        [(Var x) 
+          (define x-2 (dict-ref env x))
+          (Var x-2)]
+        [(Int _) exp]
+        [(Let x exp body)
+          (define new-exp ((pass-exp env) exp))
+          (define new-x (gensym x))
+          (define new-env (dict-set env x new-x))
+          (define new-body ((pass-exp new-env) body))
+          (Let new-x new-exp new-body)]
+        [(Prim op es)
+          (define new-es
+            (for/fold ([nes '()]) ([e es])
+              (define nenv-2 ((pass-exp env) e))
+              (cons nenv-2 nes)))
+          (Prim op (reverse new-es))]
+      )
+    )
+  )
+)
+
+(define uniquify (λ (p) (send (new pass-Lif-uniquify) pass p)))
+
+(define pass-Lif-uniquify
+  (class pass-Lvar-uniquify
+    (super-new)
+    (define/override ((pass-exp env) exp)
+      (match exp
+        [(Bool _) exp]
+        [(If e1 e2 e3)
+          ; (define-values (new-env new-))]
+          (error )
+        ]
+        [_ ((super pass-exp env) exp)]
+      )
+    )
+  ))
+
+(define pass-Lvar-rco
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(Program info body) (Program info (pass-exp body))]))
+    (define/public ((exp-cast-atom env) p)
+      (define origin (λ () (values env p)))
+      (match p
+        [(or (Int _) (Var _)) (origin)]
+        [_ (let ([x (gensym 'tmp)])
+          (values (dict-set env x p) (Var x)))]
+        )
+    )
+    (define/public ((expand-lets env) p)
+      (match env
+        ['() p]
+        [(cons (cons x e) rest)
+          ((expand-lets rest) (Let x e p))])
+    )
+    (define/public ((pass-atom env) p)
+      ((exp-cast-atom env) (pass-exp p))
+    )
+    (define/public (pass-exp p)
+      (match p
+        [(Prim op es)
+          (define-values (env-2 es-2)
+            (for/foldr ([env-c '()] [es-c '()]) ([e es])
+              (define-values (env-nxt e-nxt) ((pass-atom env-c) e))
+              (values env-nxt (cons e-nxt es-c))
+              ))
+          ((expand-lets env-2) (Prim op es-2))
+        ]
+        [(Let x e body)
+          (define new-e (pass-exp e))
+          (define new-body (pass-exp body))
+          (Let x new-e new-body)
+        ]
+        [_ p]
+      )
+    )
+  ))
+
+(define pass-Lif-rco
+  (class pass-Lvar-rco
+    (super-new)
+    (define/override ((exp-cast-atom env) p)
+      (match p
+        [(Bool _) p]
+        [_ ((super exp-cast-atom env) p)])
+    )
+    (define/override (pass-exp p)
+      (match p
+        [(If cnd thn els)
+          (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
+        [_ (super pass-exp p)]
+      ))
+  ))
+
+(define remove-complex-opera* (λ (p) (send (new pass-Lif-rco) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -588,8 +623,11 @@
 
      ;; Uncomment the following passes as you finish them.
      ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
+
      ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
+
      ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+     
      ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
 
      ("uncover live" ,uncover-live ,interp-pseudo-x86-0)
