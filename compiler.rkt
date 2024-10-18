@@ -12,6 +12,8 @@
 
 (require "interp-Lif.rkt")
 (require "type-check-Lif.rkt")
+(require "interp-Cif.rkt")
+(require "type-check-Cif.rkt")
 
 (require graph)
 (require "graph-printing.rkt")
@@ -61,63 +63,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HW1 Passes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; explicate-control : Lvar^mon -> Cvar
-(define (explicate-control p)
-  (match p
-    [(Program info body) (CProgram info (dict-set '() 'start (explicate-tail body)))]))
-
-(define (explicate-tail p)
-  (match p
-    [(Int _) (Return p)]
-    [(Var _) (Return p)]
-    [(Prim _ _) (Return p)]
-    [(Let x e body) (explicate-assign e x (explicate-tail body))]))
-
-(define (explicate-assign p x cont)
-  (match p
-    [(Int _) (Seq (Assign (Var x) p) cont)]
-    [(Var _) (Seq (Assign (Var x) p) cont)]
-    [(Prim _ _) (Seq (Assign (Var x) p) cont)]
-    [(Let y e body) (explicate-assign e y (explicate-assign body x cont))])) 
-
-(define (select-instr p)
-  (define (cast x)
-    (match x
-      [(Int n) (Imm n)]
-      [_ x]))
-
-  (match p
-    [(Assign lhs rhs)
-      (define p-2 (match rhs
-        [(Var _) 
-          (list (Instr 'movq (list rhs lhs)))]
-        [(Int rhs-i)
-          (list (Instr 'movq (list (Imm rhs-i) lhs)))]
-        [(Prim '+ (list a b))
-          (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'addq (list (cast b) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
-        [(Prim '- (list a))
-          (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'negq (list (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
-        [(Prim 'read '()) 
-          (list (Callq 'read_int (list )) (Instr 'movq (list (Reg 'rax) lhs)))]
-        ))
-      p-2])
-)
-
-(define (select-instrs p)
-  (match p
-    [(Seq first rest)
-      (define p-2 (select-instr first))
-      (append p-2 (select-instrs rest))]
-    [(Return arg)
-      (select-instr (Assign (Reg 'rax) arg))]))
-
-;; select-instructions : Cvar -> x86var
-(define (select-instructions p)
-  (match p
-    [(CProgram info block)
-      (define block-2 (select-instrs (dict-ref block 'start)))
-      (X86Program info (dict-set '() 'start (Block '() block-2)))]))
 
 ;; assign-homes : x86var -> x86var
 (define (assign-homes p)
@@ -218,61 +163,6 @@
 (define pass-args-regs
   (list 'rdi 'rsi 'rdx 'rcx 'r8 'r9)
 )
-
-#;(define (uncover-live-blocks blocks)
-  (define tags (sequence->list (in-dict-keys blocks)))
-  (define blocks-2
-    (for/fold ([blocks blocks]) ([tag tags])
-      (define blocks-3 (uncover-live-block tag blocks))
-      blocks-3
-      )
-  )
-  blocks-2
-)
-
-#;(define (uncover-live-block tag blocks)
-  (match (dict-ref blocks tag)
-    [(Block i block)
-      (cond
-        [(dict-has-key? i 'live) blocks]
-        [else 
-          (define-values (b-2 blocks-2) (uncover-live-block-impl tag block blocks))
-          (define rst-blocks (dict-set blocks-2 tag b-2))
-          rst-blocks
-        ])]))
-  
-#;(define (uncover-live-block-impl tag block-inner blocks)
-  (cond
-    [(null? block-inner) (values (list ) blocks)]
-    [else
-      (define i (car block-inner))
-      (define r (cdr block-inner))
-      (define-values (l blocks-2) (uncover-live-block-impl tag r blocks))
-      (define filterimm (λ (x) (not (Imm? x))))
-      (define biop (λ (l blocks src dst)
-          (define old-set (car l))
-          (define new-set (set-union old-set (set (list src dst))))
-          (define new-set-2 (list->set (filter filterimm (set->list new-set))))
-          (values (cons new-set-2 l) blocks)))
-      (match i
-        [(Instr 'movq (list src dst))
-            (define old-set (car l))
-            (define new-set (set-union (set-subtract old-set (set (list dst))) (set (list src))))
-            (define new-set-2 (list->set (filter filterimm (set->list new-set))))
-            (values (cons new-set-2 l) blocks-2)]
-        [(Instr 'addq (list src dst))
-          (biop l blocks-2 src dst)
-        ]
-        [(Instr 'subq (list src dst))
-          (biop l blocks-2 src dst)
-        ]
-        [(Jmp tag)
-          (define blocks-2 (uncover-live-block tag blocks))
-          (define l (car (dict-ref (dict-ref blocks-2 tag) 'live)))
-          (values (list l) blocks-2)
-        ]
-      )]
-    ))
 
 (struct PendingError ())
 
@@ -482,25 +372,30 @@
       (X86Program info-2 blocks-2)
     ]))
 
-(define (shrink-exp exp)
-  (match exp
-    [(Prim 'and (list a b)) (If a b (Bool #f))]
-    [(Prim 'or (list a b)) (If a (Bool #t) b)]
-    ; [(Prim '- (list a b)) (Prim '+ (list a (Prim '- (list b))))]
-    [_ exp]
-    ))
-
-(define (shrink p)
-  (match p
-    [(Program info exp)
-      (Program info (shrink-exp exp))
-    ]))
-
 (define pass-abstract
   (class object%
     (super-new)
     (abstract pass)
     ))
+
+(define pass-shrink
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(Program info exp)
+          (Program info (pass-exp exp))]))
+    (define/public (pass-exp p)
+      (match p
+        [(Prim 'and (list a b)) (If a b (Bool #f))]
+        [(Prim 'or (list a b)) (If a (Bool #t) b)]
+        [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
+        [(If cnd els els) (If (pass-exp cnd) (pass-exp els) (pass-exp els))]
+        [_ p]
+      ))
+  ))
+
+(define shrink (λ (p) (send (new pass-shrink) pass p)))
 
 (define pass-Lvar-uniquify
   (class pass-abstract
@@ -525,6 +420,7 @@
           (Let new-x new-exp new-body)]
         [(Prim op es)
           (define new-es
+          ; bug consideration
             (for/fold ([nes '()]) ([e es])
               (define nenv-2 ((pass-exp env) e))
               (cons nenv-2 nes)))
@@ -542,9 +438,11 @@
     (define/override ((pass-exp env) exp)
       (match exp
         [(Bool _) exp]
-        [(If e1 e2 e3)
-          ; (define-values (new-env new-))]
-          (error )
+        [(If cnd thn els)
+          (define cnd-2 ((pass-exp env) cnd))
+          (define thn-2 ((pass-exp env) thn))
+          (define els-2 ((pass-exp env) els))
+          (If cnd-2 thn-2 els-2)
         ]
         [_ ((super pass-exp env) exp)]
       )
@@ -612,6 +510,150 @@
 
 (define remove-complex-opera* (λ (p) (send (new pass-Lif-rco) pass p)))
 
+;; explicate-control : Lvar^mon -> Cvar
+(define pass-Lvar-explicate-control
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(Program info exp)
+          (CProgram info (dict-set '() 'start (explicate-tail exp)))
+        ])
+    )
+    (define/public (explicate-tail p)
+      (match p
+        [(Let x e body) (explicate-assign e x (explicate-tail body))]
+        [_ (Return p)]
+      )
+    )
+    (define/public (explicate-assign p x cont)
+      (match p
+        [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
+        [_ (Seq (Assign (Var x) p) cont)]
+      ))
+  ))
+
+(define pass-Lif-explicate-control
+  (class pass-Lvar-explicate-control
+    (super-new)
+    (define/override ((explicate-tail env) p)
+      (match p
+        [(If cnd thn els) 
+          ((explicate-pred env) cnd thn els)
+        ]
+        [(Let x e body) 
+          (define-values (env-2 body-2) ((explicate-tail env) body))
+          ((explicate-assign env-2) e x body-2)
+        ]
+        [_ (values env (Return p))]
+    ))
+    
+    (define/override ((explicate-assign env) p x cont)
+      (match p
+        [(Let y e body) 
+          (define-values (env-2 cont-2) ((explicate-assign env) body x cont))
+          (define-values (env-3 cont-3) ((explicate-assign env-2) e y cont-2))
+          (values env-3 cont-3)
+        ]
+        [(If cnd thn els)
+          (define lbl (gensym 'label))
+          (define env-2 (dict-set env lbl cont))
+          (define cont^ (Goto lbl))
+          (define-values (env-3 thn-2) ((explicate-assign env-2) thn x cont^))
+          (define-values (env-4 els-2) ((explicate-assign env-3) els x cont^))
+          (define thn-lbl (gensym 'label))
+          (define els-lbl (gensym 'label))
+          (define env-5 (dict-set (dict-set env-4 thn-lbl thn-2) els-lbl els-2))
+          (define stmt (IfStmt cnd (Goto thn-lbl) (Goto els-lbl)))
+          (values env-5 stmt)
+        ]
+        [_ (values env (Seq (Assign (Var x) p) cont))]
+      )    
+    )
+
+    (define/public ((explicate-pred env) cnd thn els)
+      (define-values (env-2 thn-2) ((explicate-tail env) thn))
+      (define-values (env-3 els-2) ((explicate-tail env-2) els))
+      (define thn-lbl (gensym 'label))
+      (define els-lbl (gensym 'label))
+      (define env-4 (dict-set (dict-set env-3 thn-lbl thn-2) els-lbl els-2))
+      (match cnd
+        [(or (Bool _) (Var _) (Prim _ _)) 
+          (define stmt (IfStmt cnd (Goto thn-lbl) (Goto els-lbl)))
+          (values env-4 stmt)]
+        [_ 
+          (define cnd-v (gensym 'temp))
+          (define cont (IfStmt (Var cnd-v) (Goto thn-lbl) (Goto els-lbl)))
+          (define-values (env-5 stmt) ((explicate-assign env-4) cnd cnd-v cont))
+          (values env-5 stmt)
+        ]
+      )
+    )
+
+    (define/override (pass p)
+      (match p
+        [(Program info exp)
+          (define-values (env stmt) ((explicate-tail '()) exp))
+          (define env^ (dict-set env 'start stmt))
+          (printf "cprog: ~a\n" env^)
+          (CProgram info env^)
+        ]))
+  ))
+
+(define explicate-control (λ (p) (send (new pass-Lif-explicate-control) pass p)))
+
+;; select-instructions : Cvar -> x86var
+(define pass-select-instructions
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(CProgram info blocks)
+          (X86Program info (for/list ([b blocks]) (cons (car b) (pass-instr* (cdr b)))))
+        ])
+    )
+    (define/public (pass-instr* stmts)
+      (match stmts
+        [(Seq a rest)
+          (cons (pass-instr a) (pass-instr* rest))]
+        [(Return arg)
+          (list (pass-instr (Assign (Reg 'rax) arg)))]
+        ))
+    (define/public (pass-instr a)
+      (define (cast x)
+        (match x
+          [(Int n) (Imm n)]
+          [_ x]))
+      (match a
+        [(Assign lhs rhs)
+          (define p-2 (match rhs
+            [(Var _) 
+              (list (Instr 'movq (list rhs lhs)))]
+            [(Int rhs-i)
+              (list (Instr 'movq (list (Imm rhs-i) lhs)))]
+            [(Prim '+ (list a b))
+              (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'addq (list (cast b) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
+            [(Prim '- (list a))
+              (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'negq (list (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
+            [(Prim 'read '()) 
+              (list (Callq 'read_int (list )) (Instr 'movq (list (Reg 'rax) lhs)))]
+            ))
+          p-2]))
+  ))
+
+(define pass-select-instructions-If
+  (class pass-select-instructions
+    (super-new)
+    (define/override (pass-instr* stmts)
+      (match stmts
+        [(IfStmt cnd thn els)
+          (list
+            (error 'unimpl)
+          )
+        ]
+        [_ (super pass-instr* stmts)]))
+  ))
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -626,18 +668,18 @@
 
      ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
 
-     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
      
-     ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
+    ;  ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
 
-     ("uncover live" ,uncover-live ,interp-pseudo-x86-0)
-     ("build interference graph" ,build-interference ,interp-pseudo-x86-0)
-     ("build color graph" ,color-graph ,interp-pseudo-x86-0)
-     ; ("assign homes" ,assign-homes ,interp-x86-0)
-     ("allocate registers" ,allocate-registers ,interp-x86-0)
+    ;  ("uncover live" ,uncover-live ,interp-pseudo-x86-0)
+    ;  ("build interference graph" ,build-interference ,interp-pseudo-x86-0)
+    ;  ("build color graph" ,color-graph ,interp-pseudo-x86-0)
+    ;  ; ("assign homes" ,assign-homes ,interp-x86-0)
+    ;  ("allocate registers" ,allocate-registers ,interp-x86-0)
 
-     ("patch instructions" ,patch-instructions ,interp-x86-0)
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ;  ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
 
-     ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ;  ("patch instructions" ,patch-instructions ,interp-x86-0)
      ))

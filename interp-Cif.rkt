@@ -29,8 +29,11 @@
           ;; Cif cases
           [(Goto l)
            ((interp-tail env blocks) (dict-ref blocks l))]
-          [(IfStmt (Prim op arg*) (Goto thn-label) (Goto els-label))
-           (if ((interp-exp env) (Prim op arg*))
+          ; fix by cutiedeng, just ignore it as Prim or not...  
+          ; [(IfStmt (Prim op arg*) (Goto thn-label) (Goto els-label))
+          ;  (if ((interp-exp env) (Prim op arg*))
+          [(IfStmt cnd (Goto thn-label) (Goto els-label))
+           (if ((interp-exp env) cnd)
                ((interp-tail env blocks) (dict-ref blocks thn-label))
                ((interp-tail env blocks) (dict-ref blocks els-label)))]
           )))

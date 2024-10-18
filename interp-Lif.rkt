@@ -2,6 +2,7 @@
 (require racket/fixnum)
 (require "utilities.rkt")
 (require "interp-Lvar.rkt")
+
 (provide interp-Lif interp-Lif-class)
 
 ;; Note to maintainers of this code:
@@ -60,7 +61,7 @@
            [#f (match (recur e2) [#t #t] [#f #f])])]
         [(Prim op args)
          (apply (interp-op op) (for/list ([e args]) (recur e)))]
-        [else ((super interp-exp env) e)]
+        [_ ((super interp-exp env) e)]
         ))
     ))
 
