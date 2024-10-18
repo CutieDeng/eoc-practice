@@ -1645,8 +1645,8 @@ Changelog:
 (define (cmp? e)
   (match e
     [(Prim cmp (list arg1 arg2)) #t] ;; should also check cmp -Jeremy
-    [(Bool _) #t] ;; raw bool also available ) by cutiedeng, fxxk, needs more cmp... 
-    [(Var _) #t]
+    ; [(Bool _) #t] ;; raw bool also available ) by cutiedeng, fxxk, needs more cmp... 
+    ; [(Var _) #t]
     [else #f]))
 
 (define (arg? arg)
