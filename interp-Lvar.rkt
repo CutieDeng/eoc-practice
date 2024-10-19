@@ -3,7 +3,7 @@
 (require racket/dict)
 (require "utilities.rkt")
 (require "interp-Lint.rkt")
-(provide interp-Lvar interp-Lvar-class)
+(provide interp-Lvar-class)
 
 ;; Note to maintainers of this code:
 ;;   A copy of this interpreter is in the book and should be
@@ -19,7 +19,7 @@
         [(Let x e body)
          (define new-env (dict-set env x ((interp-exp env) e)))
          ((interp-exp new-env) body)]
-        [else ((super interp-exp env) e)]
+        [_ ((super interp-exp env) e)]
         ))
 
     ))
