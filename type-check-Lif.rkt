@@ -50,7 +50,16 @@
            (define-values (e2^ T2) ((type-check-exp env) e2))
            (check-type-equal? T1 T2 e)
            (values (Prim 'eq? (list e1^ e2^)) 'Boolean)]
-          [else ((super type-check-exp env) e)])))
+          ; needs impl if 
+          [(If cnd thn els)
+            (define-values (cnd^ Tb) ((type-check-exp env) cnd))
+            (define-values (thn^ Tt) ((type-check-exp env) thn))
+            (define-values (els^ Te) ((type-check-exp env) els))
+            (check-type-equal? Tb 'Boolean e)
+            (check-type-equal? Tt Te e)
+            (values (If cnd^ thn^ els^) (combine-types Tt Te))
+          ]
+          [_ ((super type-check-exp env) e)])))
     ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
