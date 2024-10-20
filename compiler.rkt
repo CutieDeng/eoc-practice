@@ -220,13 +220,6 @@
   (if fail (uncover-live-blocks blocks-3) blocks-3)
   )
 
-(define (uncover-live p)
-  (match p
-    [(X86Program info bs)
-      (define new-blocks (uncover-live-blocks bs))
-      (X86Program info new-blocks)
-      ]))
-
 (define (all-writes-in-instr instr)
   (match instr
     [(Instr 'movq (list _ dst)) (set dst)]
@@ -790,6 +783,126 @@
 
 (define select-instructions (λ (p) (send (new pass-select-instructions-If) pass p)))
 
+(require "multigraph.rkt")
+
+(define pass-uncover-live
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(X86Program info instr*)
+          (X86Program info (pass-blocks instr*))
+        ]
+      )
+    )
+    (define/public (pass-blocks blocks)
+      (define g (pass-build-graph blocks))
+      (define st (tsort (transpose g)))
+      (define-values (entries blocks^)
+        (for/fold ([entries '()] [blocks^ '()]) ([b st])
+        (match b
+          [(cons tag block^)
+            (define block^^ (pass-block block^ entries))
+            (values (dict-set entries tag block^^) (cons (cons tag block^^) blocks^))
+          ]
+        )
+      ))
+      blocks^
+    )
+    (define/public (pass-block block entries)
+      (match block
+        [(Block info instr*)
+          (define instr*-info (pass-instr* instr* entries))
+          (define info^ (dict-set info 'live instr*-info))
+          (Block info^ instr*)
+        ]
+      )
+    )
+    (define/public (default-set-to-read)
+      (set (Reg 'rax))
+    )
+    (define/public (pass-instr* instr* entries)
+      (match instr*
+        ['() (list (default-set-to-read))]
+        [(cons (Jmp lbl) rest)
+          (define s (car (dict-ref entries lbl)))
+          (define rest-set (pass-instr* rest entries))
+          (cons s rest-set)
+        ]
+        [(cons (JmpIf _ lbl) rest)
+          (define s-partial (car (dict-ref entries lbl)))
+          (define rest-set (pass-instr* rest entries))
+          (define s (set-union s-partial (car rest-set)))
+          (cons s rest-set)
+        ]
+        [(cons instr rest)
+          (define instr-write (get-write instr))
+          (define instr-read (get-read instr))
+          (define rest-set (pass-instr* rest entries))
+          (define s-m (set-subtract rest-set instr-write))
+          (define s (set-union s-m instr-write))
+          (cons s rest-set)
+        ]
+      )
+    )
+    (define/public (get-write instr)
+      (match instr
+        [(Instr (or 'addq 'subq 'movq) (list _ dst)) (set dst)]
+        [(Instr 'negq dst) (set dst)]
+        [(Callq _ _) (list->set (map Reg caller-save-regs))]
+        [(Jmp _) (set )]
+        [(JmpIf _ _) (set )]
+      )
+    )
+    (define/public (get-read instr)
+      (define raw-set (get-read-with-imm instr))
+      (define l (filter (λ (i) (not (Imm? i) (Bool? i))) (set->list raw-set)))
+      (list->set l)
+    )
+    (define/public (get-read-with-imm instr)
+      (match instr
+        [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
+        [(Instr 'movq (list src _)) (set src)]
+        [(Instr 'negq src) (set src)]
+        [(Callq _ count) 
+          (set (map Reg (take pass-args-regs count)))]
+        [(Jmp _) (set )]
+        [(JmpIf _ _) (set )]
+      )
+    )
+    (define/public (pass-build-graph blocks)
+      (define graph (make-multigraph '()))
+      (for ([block blocks])
+        (add-vertex! graph (car block))
+      )
+      (for ([block blocks])
+        (define inner-block (cdr block))
+        (define instr* (Block-instr* inner-block))
+        (define lbl (car block))
+        (define outs (get-outs instr*))
+        (for ([o outs])
+          (add-directed-edge! graph lbl o)
+        )
+      )
+      graph
+    )
+    (define/public (get-outs instr*)
+      (match instr*
+        [(cons bl rest)
+          (match bl
+            [(JmpIf _ t) (cons t (get-outs rest))]
+            [(Jmp t) (list t)]
+            [_ (get-outs rest)]
+          )
+        ]
+        ['() (list)]
+      )
+    )
+  )
+)
+
+(define uncover-live (λ (p) (send (new pass-uncover-live) pass p)))
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -808,7 +921,8 @@
      
      ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
 
-    ;  ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
+     ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
+
     ;  ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
     ;  ("build color graph" ,color-graph ,interp-pseudo-x86-1)
     ;  ; ("assign homes" ,assign-homes ,interp-x86-1)
