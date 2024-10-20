@@ -384,13 +384,15 @@
     (define/override (pass p)
       (match p
         [(Program info exp)
-          (Program info (pass-exp exp))]))
+          (define exp-2 (pass-exp exp))
+          (Program info exp-2)]))
     (define/public (pass-exp p)
       (match p
-        [(Prim 'and (list a b)) (If a b (Bool #f))]
-        [(Prim 'or (list a b)) (If a (Bool #t) b)]
+        [(Prim 'and (list a b)) (If (pass-exp a) (pass-exp b) (Bool #f))]
+        [(Prim 'or (list a b)) (If (pass-exp a) (Bool #t) (pass-exp b))]
         [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
-        [(If cnd els els) (If (pass-exp cnd) (pass-exp els) (pass-exp els))]
+        [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
+        [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
         [_ p]
       ))
   ))
@@ -615,7 +617,6 @@
         [(Program info exp)
           (define-values (env stmt) ((explicate-tail '()) exp))
           (define env^ (dict-set env 'start stmt))
-          (printf "cprog: ~a\n" env^)
           (CProgram info env^)
         ]))
   ))
@@ -630,34 +631,39 @@
     (define/override (pass p)
       (match p
         [(CProgram info blocks)
-          (X86Program info (for/list ([b blocks]) (cons (car b) (pass-instr* (cdr b)))))
+          (define blocks^ 
+            (for/list ([b blocks]) 
+              (define b^ (pass-instr* (cdr b)))
+              (cons (car b) (Block '() b^))
+            ))
+          (X86Program info 
+            blocks^
+          )
         ])
     )
     (define/public (pass-instr* stmts)
       (match stmts
         [(Seq a rest)
-          (cons (pass-instr a) (pass-instr* rest))]
+          (append (pass-instr a) (pass-instr* rest))]
         [(Return arg)
-          (list (pass-instr (Assign (Reg 'rax) arg)))]
+          (pass-instr (Assign (Reg 'rax) arg))]
         ))
+    (define/public (cast x)
+      (match x
+        [(Int n) (Imm n)]
+        [_ x]))
     (define/public (pass-instr a)
-      (define (cast x)
-        (match x
-          [(Int n) (Imm n)]
-          [_ x]))
       (match a
         [(Assign lhs rhs)
           (define p-2 (match rhs
-            [(Var _) 
-              (list (Instr 'movq (list rhs lhs)))]
-            [(Int rhs-i)
-              (list (Instr 'movq (list (Imm rhs-i) lhs)))]
+            [(or (Int _) (Var _))
+              (list (Instr 'movq (list (cast rhs) lhs)))]
             [(Prim '+ (list a b))
               (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'addq (list (cast b) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
             [(Prim '- (list a))
               (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'negq (list (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
             [(Prim 'read '()) 
-              (list (Callq 'read_int (list )) (Instr 'movq (list (Reg 'rax) lhs)))]
+              (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) lhs)))]
             ))
           p-2]))
   ))
@@ -668,12 +674,121 @@
     (define/override (pass-instr* stmts)
       (match stmts
         [(IfStmt cnd thn els)
-          (list
-            (error 'unimpl)
+         <(match cnd
+            [(Prim 'eq? (list lhs rhs))
+              (define comp-rst (λ ()
+                (if (equal? lhs rhs)
+                  (list (Jmp (Goto-label thn)))
+                  (list (Jmp (Goto-label els)))
+                  )
+              ))
+              (match* (lhs rhs)
+                [((Var _) (Var _))
+                  (list
+                    (Instr 'cmpq (list (cast lhs) (cast rhs)))
+                    (JmpIf 'e (Goto-label thn))
+                    (Jmp (Goto-label els))
+                  )
+                ]
+                [((Var _) _)
+                  (list
+                    (Instr 'movq (list (cast rhs) (Reg 'rax)))
+                    (Instr 'cmpq (list (cast lhs) (Reg 'rax)))
+                    (JmpIf 'e (Goto-label thn))
+                    (Jmp (Goto-label els))
+                  )
+                ]
+                [(_ (Var _))
+                  (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs))) thn els)
+                ]
+                [((Int _) (Int _)) 
+                  (comp-rst)
+                ]
+                [((Bool _) (Bool _))
+                  (comp-rst)
+                ]
+              )
+            ]
+            [(Prim '< (list lhs rhs))
+              (define comp-rst (lazy
+                (if (< (Imm-value lhs) (Imm-value rhs))
+                  (list (Jmp (Goto-label thn)))
+                  (list (Jmp (Goto-label els)))
+                )
+              ))
+              (match* (lhs rhs)
+                [((Var _) (Var _))
+                  (list
+                    (Instr 'cmpq (list (cast rhs) (cast lhs)))
+                    (JmpIf 'l (Goto-label thn))
+                    (Jmp (Goto-label els))
+                  )
+                ]
+                [((Var _) _)
+                  (list
+                    (Instr 'movq (list (cast rhs) (Reg 'rax)))
+                    (Instr 'cmpq (list (Reg 'rax) (cast lhs)))
+                    (JmpIf 'l (Goto-label thn))
+                    (Jmp (Goto-label els))
+                  )
+                ]
+                [(_ (Var _))
+                  (list
+                    (Instr 'movq (list (cast lhs) (Reg 'rax)))
+                    (Instr 'cmpq (list (cast rhs) (Reg 'rax)))
+                    (JmpIf 'l (Goto-label thn))
+                    (Jmp (Goto-label els))
+                  )
+                ]
+                [((Int _) (Int _)) 
+                  (comp-rst)
+                ]
+              )
+            ]
           )
         ]
+        [(Goto label)
+          (list (Jmp label))
+        ]
         [_ (super pass-instr* stmts)]))
+    (define/override (cast x)
+      (match x
+        [(Bool b) (Imm (if b 1 0))]
+        [_ (super cast x)]))
+    (define/override (pass-instr stmt)
+      (match stmt
+        [(Assign lhs rhs)
+          (match rhs
+            [(Bool _)
+              (list (Instr 'movq (list (cast rhs) lhs)))
+            ]
+            [(Prim 'not (list e))
+              (list
+                (Instr 'movq (list (cast e) lhs))
+                (Instr 'xorq (list (Imm 1) lhs))
+              )
+            ]
+            [(Prim 'eq? (list inner-lhs inner-rhs))
+              (list
+                (Instr 'cmpq (list (cast inner-lhs) (cast inner-rhs)))
+                (Instr 'sete (list (ByteReg 'al)))
+                (Instr 'movzbq (list (ByteReg 'al) lhs))
+              )
+            ]
+            [(Prim '- (list inner-lhs inner-rhs))
+              (list 
+                (Instr 'movq (list (cast inner-lhs) lhs))
+                (Instr 'subq (list (cast inner-rhs) lhs))
+              )
+            ]
+            [_ (super pass-instr stmt)]
+          )
+        ]
+      )
+    )
   ))
+
+(define select-instructions (λ (p) (send (new pass-select-instructions-If) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -691,16 +806,16 @@
 
      ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
      
-    ;  ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
+     ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
 
-    ;  ("uncover live" ,uncover-live ,interp-pseudo-x86-0)
-    ;  ("build interference graph" ,build-interference ,interp-pseudo-x86-0)
-    ;  ("build color graph" ,color-graph ,interp-pseudo-x86-0)
-    ;  ; ("assign homes" ,assign-homes ,interp-x86-0)
-    ;  ("allocate registers" ,allocate-registers ,interp-x86-0)
+    ;  ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
+    ;  ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
+    ;  ("build color graph" ,color-graph ,interp-pseudo-x86-1)
+    ;  ; ("assign homes" ,assign-homes ,interp-x86-1)
+    ;  ("allocate registers" ,allocate-registers ,interp-x86-1)
 
-    ;  ("patch instructions" ,patch-instructions ,interp-x86-0)
-    ;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
 
-    ;  ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
      ))
