@@ -522,9 +522,10 @@
       (lambda (ast)
         (when (pair? ast)
 	      (copious "R2/interp-x86-instr" (car ast)))
+        #;(with-handlers ([exn:fail? (λ (_e) (void))])
+          (printf "||| ~a\t\t~a\n" (car ast) ast)
+        )
         (match ast
-          [(Block `(lives ,lives) ss)
-           ((interp-x86-instr env) ss)]
           [(Block `(lives ,lives) ss)
            ((interp-x86-instr env) ss)]
           [(cons (Instr 'set (list cc d)) ss)
