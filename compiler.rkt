@@ -205,20 +205,16 @@
     (define/override (pass p)
       (match p
         [(Program info body) (Program info (pass-exp body))]))
-    (define/public ((exp-cast-atom env) p)
-      (define origin (λ () (values env p)))
-      (match p
-        [(or (Int _) (Var _)) (origin)]
-        [_ (let ([x (gensym 'tmp)])
-          (values (dict-set env x p) (Var x)))]
-        )
-    )
-    (define/public ((expand-lets env) p)
-      (match env
-        ['() p]
-        [(cons (cons x e) rest)
-          ((expand-lets rest) (Let x e p))])
-    )
+    (define/public ((exp-cast-atom env) p) (match p
+      [(or (Int _) (Var _)) (values env p)]
+      [_ (let ([x (gensym 'tmp)])
+        (values (dict-set env x p) (Var x)))]
+    ))
+    (define/public ((expand-lets env) p) (match env
+      ['() p]
+      [(cons (cons x e) rest)
+        ((expand-lets rest) (Let x e p))]
+    ))
     (define/public ((pass-atom env) p)
       ((exp-cast-atom env) (pass-exp p))
     )
@@ -257,8 +253,6 @@
         [_ (super pass-exp p)]
       ))
   ))
-
-(define remove-complex-opera* (λ (p) (send (new pass-Lif-rco) pass p)))
 
 ;; explicate-control : Lvar^mon -> Cvar
 (define pass-Lvar-explicate-control
@@ -969,6 +963,38 @@
 
 (define collect-set! (lambda (p) (send (new pass-collect-set!) pass p)))
 
+(define pass-uncover-get!-exp 
+  (class pass-abstract
+    (super-new)
+    (define/public ((pass-body set!-vars) body) (match body
+      [(Var x) #:when (set-member? set!-vars body) (GetBang x)]
+      [(or (Var _) (Int _) (Bool _)) body]
+      [(SetBang var rhs) (SetBang var ((pass-body set!-vars) rhs))]
+      [(Let x rhs body) (Let x ((pass-body set!-vars) rhs) ((pass-body set!-vars) body))]
+      [(If cnd thn els) (If ((pass-body set!-vars) cnd) ((pass-body set!-vars) thn) ((pass-body set!-vars) els))]
+      [(Prim op args) (Prim op (for/list ([a args]) ((pass-body set!-vars) a)))]
+    ))
+    (define/override (pass p) (match p [(Program info body)
+      (Program info ((pass-body (dict-ref info 'set!)) body))
+    ]))
+  ))
+
+(define uncover-get!-exp (λ (p) (send (new pass-uncover-get!-exp) pass p)))
+
+(define pass-Lwhile-rco
+  (class pass-Lif-rco
+    (super-new)
+    (define/override (pass-exp p) (match p
+      [(GetBang _) p] 
+      [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
+      [(SetBang var rhs) (SetBang var (pass-exp rhs))] 
+      [(Begin rs e) (Begin (for/list ([r rs]) (pass-exp r)) (pass-exp e))]
+      [_ (super pass-exp p)]
+    ))
+  ))
+
+(define remove-complex-opera* (λ (p) (send (new pass-Lwhile-rco) pass p)))
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -976,28 +1002,29 @@
 (define compiler-passes
   `(
 
-     ("shrink" ,shrink ,interp-Lwhile ,type-check-Lwhile)
+    ("shrink" ,shrink ,interp-Lwhile ,type-check-Lwhile)
 
-     ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
+    ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
 
-     ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lwhile)
+    ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lwhile)
+    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lwhile ,type-check-Lwhile)
 
-     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lwhile)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lwhile)
 
-     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
      
-     ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
+    ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
 
-     ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
+    ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
 
-     ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
+    ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
      
-     ("build color graph" ,color-graph ,interp-pseudo-x86-1)
-     ("allocate registers" ,allocate-registers ,interp-x86-1)
+    ("build color graph" ,color-graph ,interp-pseudo-x86-1)
+    ("allocate registers" ,allocate-registers ,interp-x86-1)
 
-     ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ("patch instructions" ,patch-instructions ,interp-x86-1)
 
-     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
 
     ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
-     ))
+    ))
