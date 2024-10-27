@@ -64,32 +64,6 @@
 ;; HW1 Passes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; assign-homes : x86var -> x86var
-(define (assign-homes p)
-  (match p
-    [(X86Program info b)
-      (define-values (top local-offsets) (local-types-to-offset (dict-ref info 'locals-types)))
-      (define info-2 (dict-set info 'local-offsets local-offsets))
-      (define info-3 (dict-set info-2 'stack-size (aligned top 16)))
-      (define b-2 (for/list ([x b])
-        (match x
-          [(cons l block) (cons l (assign-homes-block block local-offsets))])))
-      (X86Program info-3 b-2)]))
-
-(define (assign-homes-instr ins local-offsets)
-  (match ins
-    [(Instr i l) 
-      (Instr i (for/list ([x l])
-        (match x
-          [(Var r) (Deref 'rbp (- (dict-ref local-offsets r)))]
-          [o o])))]))
-
-(define (assign-homes-block block local-offsets)
-  (match block
-    [(Block info ins)
-      (Block info (for/list ([i ins])
-        (assign-homes-instr i local-offsets)))]))
-
 (define (aligned x a) (cond
   [(zero? (modulo x a)) x]
   [else (+ x (- a (modulo x a)))]))
@@ -165,99 +139,6 @@
 )
 
 (struct PendingError ())
-
-(define (color-graph p)
-  (match p
-    [(X86Program info blocks) 
-      (define blocks-2 (map color-graph-block blocks))
-      (X86Program info blocks-2)
-    ]))
-
-(define (color-graph-block block)
-  (match block
-    [(cons tag (Block info instr*))
-      (define inte (dict-ref info 'interference))
-      (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
-      (for ([n (in-vertices inte)])
-        (pqueue-push! q (cons n 0))
-        )
-      (define neighbors-set 
-        (with-handlers ([exn:fail? (λ (_e) '())])
-          (for/fold ([nei-set '()]) ([n (in-neighbors inte (Reg 'rax))])
-            (define inner (dict-ref nei-set n '()))
-            (define inner-2 (set-add inner 0))
-            (pqueue-push! q (cons n (length inner-2)))
-            (dict-set nei-set n inner-2)
-          ))
-      )
-      (define color-g (let color-find ([neighbors-set neighbors-set] [selections (dict-set '() (Reg 'rax) 0)] #;[remain (set-subtract (sequence->list (in-vertices inte)) (set (Reg 'rax)))])
-        (cond
-          [(= (pqueue-count q) 0) selections]
-          [else
-            (define pop (pqueue-pop! q))
-            (cond
-              [(dict-has-key? selections (car pop)) (color-find neighbors-set selections)]
-              [else
-                (define color (let color-find-2 ([color 0])
-                  (if (set-member? (dict-ref neighbors-set (car pop) '()) color)
-                    (color-find-2 (+ color 1))
-                    color
-                    )))
-                (define neighbors-set-2 (for/fold ([n neighbors-set]) ([v (in-neighbors inte (car pop))])
-                  (define inner (dict-ref n v '()))
-                  (define inner-2 (set-add inner color))
-                  (pqueue-push! q (cons v (length inner-2)))
-                  (dict-set n v inner-2)
-                ))
-                (color-find neighbors-set-2 (dict-set selections (car pop) color))
-              ]
-            )
-          ]
-        )
-      ))
-      (define info-2 (dict-set info 'color-graph color-g))
-      (cons tag (Block info-2 instr*))
-    ]))
-
-(define ((allocate-register m) v)
-  (match v
-    [(Imm _) v]
-    [_ 
-      (define r (dict-ref m v))
-      (cond
-        [(< r (length caller-save-regs)) (Reg (list-ref caller-save-regs r))]
-        [else (Deref 'rbp (- (* 8 (- r (length caller-save-regs))) 8))]
-      )
-    ]))
-
-(define ((allocate-instr m) instr)
-  (match instr
-    [(Instr i l) (Instr i (map (allocate-register m) l))]
-    [(Jmp _) instr]
-    [(Callq _ _) instr]
-  ))
-
-(define (allocate-registers-block block)
-  (match block
-    [(Block info instr*)
-      (define color-graph (dict-ref info 'color-graph))
-      (define count (foldl max -1 (map cdr color-graph)))
-      (when (= count -1) (error 'allocate-registers-block "no color graph"))
-      (define stack-size (* (- (+ count 1) (length caller-save-regs)) 8))
-      (define info-2 (dict-set info 'stack-size stack-size))
-      (define instr*-2 (map (allocate-instr color-graph) instr*))
-      (Block info-2 instr*-2)
-    ]))
-
-(define (allocate-registers p)
-  (match p
-    [(X86Program info blocks)
-      (define blocks-2 (for/list ([b blocks])
-        (cons (car b) (allocate-registers-block (cdr b)))))
-      (define stack-size (dict-ref (Block-info (cdar blocks-2)) 'stack-size))
-      (define info-2 (dict-set info 'stack-size (max stack-size 0)))
-      (X86Program info-2 blocks-2)
-    ]))
 
 (define pass-abstract
   (class object%
@@ -810,13 +691,21 @@
     (define/override (pass p)
       (match p
         [(X86Program info blocks)
-          (define blocks^ (for/list ([block blocks])
-            (define block^ (pass-block (cdr block)))
-            (cons (car block) block^)
-          ))
-          (X86Program info blocks^)
+          (define init-graph (init-build-interference-from-blocks blocks (undirected-graph '())))
+          (define pass-block^ (pass-block init-graph))
+          (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-value)
+            (define block^ (pass-block^ block-value))
+            (cons tag block^)
+          ])))
+          (X86Program (dict-set info 'interference init-graph) blocks^)
         ]
       )
+    )
+    (define/public (init-build-interference-from-blocks blocks graph)
+      (for ([b blocks]) (match b [(cons _ block)
+        (init-build-interference (Block-instr* block) graph)
+      ]))
+      graph
     )
     (define/public (init-build-interference b graph)
       (match b
@@ -828,13 +717,11 @@
         ['() graph]
       )
     )
-    (define/public (pass-block block)
+    (define/public ((pass-block interference) block)
       (match block
         [(Block info instr*)
-          (define init-graph (init-build-interference instr* (undirected-graph '())))
-          (pass-instr* instr* (dict-ref info 'live) init-graph)
-          (define info^ (dict-set info 'interference init-graph))
-          (Block info^ instr*)
+          (pass-instr* instr* (dict-ref info 'live) interference)
+          block
         ])
     )
     (define/public (pass-instr* instr* live graph)
@@ -855,6 +742,111 @@
   ))
 
 (define build-interference (λ (p) (send (new (pass-build-interference-mixin (pass-read-write-mixin pass-abstract))) pass p)))
+
+(define pass-color-graph
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(X86Program info blocks)
+          (define color-graph (build-color-graph (dict-ref info 'interference)))
+          (X86Program (dict-set info 'color-graph color-graph) blocks)
+        ]
+      )
+    )
+    (define/public (build-color-graph interference-graph)
+      (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
+      (for ([n (in-vertices interference-graph)])
+        (pqueue-push! q (cons n 0))
+      )
+      (define neighbors-set 
+        (with-handlers ([exn:fail? (λ (_e) '())])
+          (for/fold ([nei-set '()]) ([n (in-neighbors interference-graph (Reg 'rax))])
+            (define inner (dict-ref nei-set n '()))
+            (define inner-2 (set-add inner 0))
+            (pqueue-push! q (cons n (length inner-2)))
+            (dict-set nei-set n inner-2)
+          ))
+      )
+      (define color-graph-value (let color-find ([neighbors-set neighbors-set] [selections (dict-set '() (Reg 'rax) 0)])
+        (cond
+          [(= (pqueue-count q) 0) selections]
+          [else
+            (define pop (pqueue-pop! q))
+            (cond
+              [(dict-has-key? selections (car pop)) (color-find neighbors-set selections)]
+              [else
+                (define color (let color-find-2 ([color 0])
+                  (if (set-member? (dict-ref neighbors-set (car pop) '()) color)
+                    (color-find-2 (+ color 1))
+                    color
+                    )))
+                (define neighbors-set-2 (for/fold ([n neighbors-set]) ([v (in-neighbors interference-graph (car pop))])
+                  (define inner (dict-ref n v '()))
+                  (define inner-2 (set-add inner color))
+                  (pqueue-push! q (cons v (length inner-2)))
+                  (dict-set n v inner-2)
+                ))
+                (color-find neighbors-set-2 (dict-set selections (car pop) color))
+              ]
+            )
+          ]
+        )
+      ))
+      color-graph-value
+    )
+  ))
+
+(define color-graph (λ (p) (send (new pass-color-graph) pass p)))
+
+(define pass-allocate-registers
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(X86Program info blocks)
+          (define table (dict-ref info 'color-graph))
+          (define allo (allocate-registers-block table))
+          (define slot-num (+ 1 (foldl max -1 (map cdr table))))
+          (define blocks^ 
+            (for/list ([block blocks]) (match block [(cons tag block-inner)
+              (cons tag (allo block-inner))]))
+          )
+          (define stack-size (max 0 (* (- slot-num (length caller-save-regs)) 8)))
+          (X86Program (dict-set info 'stack-size stack-size) blocks^)
+        ]
+      )
+    )
+    (define/public ((allocate-instr table) instr)
+      (match instr
+        [(Instr i list-value) (Instr i (map (allocate-register table) list-value))]
+        [(or (Jmp _) (JmpIf _ _)) instr]
+        [(Callq _ _) instr]
+      ))
+    (define/public ((allocate-register table) value)
+      (match value
+        [(or (Imm _) (Bool _)) value]
+        [_
+          (define order (dict-ref table value))
+          (match order
+            [_ #:when (< order (length caller-save-regs)) (Reg (list-ref caller-save-regs order))] 
+            [_ (Deref 'rbp (- (* 8 (- order (length caller-save-regs))) 8))]
+          )
+        ]
+      )
+    )
+    (define/public ((allocate-registers-block table) block)
+      (match block
+        [(Block info instr*)
+          (define instr*^ (map (allocate-instr table) instr*))
+          (Block info instr*^)
+        ]
+      )
+    )
+  )
+)
+
+(define allocate-registers (λ (p) (send (new pass-allocate-registers) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -877,9 +869,9 @@
      ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
 
      ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
-    ;  ("build color graph" ,color-graph ,interp-pseudo-x86-1)
-    ;  ; ("assign homes" ,assign-homes ,interp-x86-1)
-    ;  ("allocate registers" ,allocate-registers ,interp-x86-1)
+     
+     ("build color graph" ,color-graph ,interp-pseudo-x86-1)
+     ("allocate registers" ,allocate-registers ,interp-x86-1)
 
     ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
     ;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
