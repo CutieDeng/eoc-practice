@@ -34,4 +34,5 @@
 (interp-tests "cond" #f compiler-passes interp-Lif "cond_test" tests-for-cond)
 
 ;; The following tests the final x86 code.
-(compiler-tests "var" #f compiler-passes "var_test" (tests-for "var"))
+(compiler-tests "var" #f compiler-passes "var_test" tests-for-var)
+(compiler-tests "cond" #f compiler-passes "cond_test" tests-for-cond)
