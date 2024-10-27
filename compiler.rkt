@@ -279,82 +279,73 @@
 
 (define pass-Lif-explicate-control
   (class pass-Lvar-explicate-control
-  
     (super-new)
-
-    (define/override ((explicate-tail env) p)
-      (match p
-        [(If cnd thn els) 
-          (define-values (env-2 thn^) ((explicate-tail env) thn))
-          (define-values (env-3 els^) ((explicate-tail env-2) els))
-          ((explicate-pred env-3) cnd thn^ els^)
-        ]
-        [(Let x e body) 
-          (define-values (env-2 body-2) ((explicate-tail env) body))
-          ((explicate-assign env-2) e x body-2)
-        ]
-        [_ (values env (Return p))]
+    (define/override ((explicate-tail env) p) (match p
+      [(If cnd thn els) 
+        (define-values (env-2 thn^) ((explicate-tail env) thn))
+        (define-values (env-3 els^) ((explicate-tail env-2) els))
+        ((explicate-pred env-3) cnd thn^ els^)
+      ]
+      [(Let x e body) 
+        (define-values (env-2 body-2) ((explicate-tail env) body))
+        ((explicate-assign env-2) e x body-2)
+      ]
+      [_ (values env (Return p))]
     ))
-    
-    (define/override ((explicate-assign env) p x cont)
-      (match p
-        [(If cnd thn els)
-          (define-values (env-2 cont^) ((create-block env) cont))
-          (define-values (env-3 thn^) ((explicate-assign env-2) thn x cont^))
-          (define-values (env-4 els^) ((explicate-assign env-3) els x cont^))
-          ((explicate-pred env-4) cnd thn^ els^)
-        ]
-        [(Let y e body)
-          (define-values (env-2 cont^) ((explicate-assign env) body x cont))
-          (define-values (env-3 body^) ((explicate-assign env-2) e y cont^))
-          (values env-3 body^)
-        ]
-        [_ (values env (Seq (Assign (Var x) p) cont))]
-      )
-    )
-
+    (define/override ((explicate-assign env) p x cont) (match p
+      [(If cnd thn els)
+        (define-values (env-2 cont^) ((create-block env) cont))
+        (define-values (env-3 thn^) ((explicate-assign env-2) thn x cont^))
+        (define-values (env-4 els^) ((explicate-assign env-3) els x cont^))
+        ((explicate-pred env-4) cnd thn^ els^)
+      ]
+      [(Let y e body)
+        (define-values (env-2 cont^) ((explicate-assign env) body x cont))
+        (define-values (env-3 body^) ((explicate-assign env-2) e y cont^))
+        (values env-3 body^)
+      ]
+      [_ (values env (Seq (Assign (Var x) p) cont))]
+    ))
     (define/public ((explicate-pred env) cnd thn els)
       (match cnd
         [(If cnd-2 thn-2 els-2)
-          (define-values (env-2 thn^) ((create-block env) thn))
-          (define-values (env-3 els^) ((create-block env-2) els))
-          (define-values (env-4 thn-2^) ((explicate-pred env-3) thn-2 thn^ els^))
-          (define-values (env-5 els-2^) ((explicate-pred env-4) els-2 thn^ els^))
-          ((explicate-pred env-5) cnd-2 thn-2^ els-2^)
+          (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
+          (define-values (env^^ thn^^) ((explicate-pred env^) thn-2 thn^ els^))
+          (define-values (env^^^ els^^) ((explicate-pred env^^) els-2 thn^ els^))
+          ((explicate-pred env^^^) cnd-2 thn^^ els^^)
         ]
         [(Let y e body)
           (define-values (env-2 body^) ((explicate-pred env) body thn els))
           ((explicate-assign env-2) e y body^)
         ]
         [_
-          (define-values (env-2 thn^) ((create-block env) thn))
-          (define-values (env-3 els^) ((create-block env-2) els))
+          (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
           (match cnd
             [(Var _)
-              (values env-3 (IfStmt (Prim 'eq (list cnd (Bool #t))) thn^ els^))]
+              (values env^ (IfStmt (Prim 'eq (list cnd (Bool #t))) thn^ els^))]
             [(Bool b)
               (values env (if b thn els))]
-            [(Prim 'not (list e))
-              (values env-3 (IfStmt (Prim 'eq (list cnd (Bool #f))) thn^ els^))]
+            [(Prim 'not (list _))
+              (values env^ (IfStmt (Prim 'eq (list cnd (Bool #f))) thn^ els^))]
             [(Prim _ (list _ _))
-              (values env-3 (IfStmt cnd thn^ els^))]
+              (values env^ (IfStmt cnd thn^ els^))]
           )
         ]
       )
     )
-
-    (define/public ((create-block env) stmt)
-      (match stmt
-        [(Goto _) 
-          (values env stmt)
-        ]
-        [_ 
-          (define lbl (gensym 'label))
-          (define env-2 (dict-set env lbl stmt))
-          (values env-2 (Goto lbl))
-        ])
+    (define/public ((create-block env) stmt) (match stmt
+      [(Goto _) (values env stmt)]
+      [_ 
+        (define lbl (gensym 'label))
+        (define env-2 (dict-set env lbl stmt))
+        (values env-2 (Goto lbl))
+      ]
+    ))
+    (define/public ((create-block-2 env) stmt0 stmt1)
+      (define-values (env^ stmt0^) ((create-block env) stmt0))
+      (define-values (env^^ stmt1^) ((create-block env^) stmt1))
+      (values env^^ stmt0^ stmt1^)
     )
-
     (define/override (pass p)
       (match p
         [(Program info exp)
