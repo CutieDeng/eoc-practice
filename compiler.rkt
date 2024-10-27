@@ -19,6 +19,8 @@
 (require "graph-printing.rkt")
 (require "priority_queue.rkt")
 
+(require data/queue)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lint examples
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -659,8 +661,6 @@
   )
 )
 
-(define uncover-live (λ (p) (send (new (pass-uncover-live-mixin (pass-read-write-mixin pass-abstract))) pass p)))
-
 (define (pass-build-interference-mixin super-class)
   (class super-class
     (super-new) 
@@ -697,7 +697,7 @@
     (define/public ((pass-block interference) block)
       (match block
         [(Block info instr*)
-          (pass-instr* instr* (dict-ref info 'live) interference)
+          (pass-instr* instr* (cdr (dict-ref info 'live)) interference)
           block
         ])
     )
@@ -713,7 +713,7 @@
             )
           (pass-instr* rest live-rest graph)
         ]
-        [('() (list _ )) (void)]
+        [(_ '()) (void)]
       )
     )
   ))
@@ -911,13 +911,18 @@
         (define prelude (get-prelude p))
         (define conclusion (get-conclusion p))
         (define blocks^
-          (for/list ([bl blocks]) (match bl
-            [(cons tag (Block info instr*))
-              (match (last instr*)
-                [(? Jmp?) bl]
-                [_ (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-              )
-            ])))
+          (for/list ([bl blocks]) 
+            (match bl
+              [(cons tag (Block info instr*))
+                (match instr*
+                  [(list) (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+                  [_ (match (last instr*)
+                    [(? Jmp?) bl]
+                    [_ (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+                  )]
+                )
+              ])
+            ))
         (X86Program info 
           (dict-set 
             (dict-set blocks^ 'main prelude)
@@ -927,6 +932,93 @@
   ))
 
 (define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
+
+(define (pass-uncover-live-mixin-2 clz)
+  (class (pass-uncover-live-mixin clz)
+    (super-new)
+    (inherit get-read get-write)
+    (inherit default-set-to-read pass-block)
+    (define/public (get-block-end instr*)
+      (match instr*
+        [(cons (or (JmpIf _ _) (Jmp _)) _) instr*]
+        [(cons _ rest) (get-block-end rest)]
+        ['() '()]
+      )
+    )
+    (define/public (get-block-next instr*)
+      (define jmps (get-block-end instr*))
+      (define get-label (lambda (instr) (match instr 
+        [(Jmp lbl) lbl]
+        [(JmpIf _ lbl) lbl]
+      )))
+      (map get-label jmps)
+    )
+    (define/override (pass-instr* instr* end) (match instr*
+      ['() (list end)]
+      [(or (list (JmpIf _ _) (Jmp _)) (list (Jmp _)))
+        (list end)
+      ]
+      [(cons instr rest)
+        (define instr-write (get-write instr))
+        (define instr-read (get-read instr))
+        (define rest-set (pass-instr* rest end))
+        (define s-m (set-subtract (car rest-set) instr-write))
+        (define s (set-union s-m instr-read))
+        (cons s rest-set)
+      ]
+    ))
+    (define/public (analyze-dataflow graph transfer bottom join)
+      (define mapping (make-hash))
+      (for ([v (in-vertices graph)])
+        (dict-set! mapping v bottom))
+      (define worklist (make-queue))
+      (for ([v (in-vertices graph)])
+        (enqueue! worklist v))
+      (define graph-t (transpose graph))
+      (while (not (queue-empty? worklist))
+        (define node (dequeue! worklist))
+        (define input (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)])
+          (join state (dict-ref mapping pred))))
+        (define output (transfer node input))
+        (cond [(not (equal? output (dict-ref mapping node))) 
+          (dict-set! mapping node output)
+          (for ([s (in-neighbors graph node)])
+            (enqueue! worklist s))]))
+      mapping
+    )
+    (define/override (pass p) (match p [(X86Program info blocks)
+      (define graph (make-multigraph '()))
+      (for ([bl blocks]) (match bl [(cons b-tag _)
+        (add-vertex! graph b-tag)
+      ]))
+      (for ([bl blocks]) (match bl [(cons b-tag b)
+        (define tos (get-block-next (Block-instr* b)))
+        (for ([to tos])
+          (add-directed-edge! graph b-tag to))
+      ]))
+      (define live-map (analyze-dataflow graph 
+        (lambda (node input)
+          (define block (dict-ref blocks node))
+          (define pass-instr*-rst (pass-instr* (Block-instr* block) input))
+          (car pass-instr*-rst)
+        )
+        (set)
+        set-union
+      ))
+      (define blocks^ (for/list ([bl blocks]) (match bl [(cons b-tag (Block info instr*))
+        (define tos (get-block-next instr*))
+        (define end (for/fold ([end-set (set)]) ([to tos])
+          (set-union (dict-ref live-map to) end-set)))
+        (cons b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*))
+      ])))
+      (X86Program info blocks^)
+    ]))
+  )
+)
+
+(define uncover-live (λ (p) (send (new 
+  (pass-uncover-live-mixin-2
+    (pass-read-write-mixin pass-abstract))) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
