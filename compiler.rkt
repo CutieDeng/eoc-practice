@@ -166,112 +166,6 @@
 
 (struct PendingError ())
 
-(define (inv-trans-uncover-live-set instr s blocks)
-  (match instr
-    [(Instr 'movq (list a b)) (set-union (set-subtract s (set b)) (set a))]
-    [(or (Instr 'addq (list a b)) (Instr 'subq (list a b))) (set-union s (set a b))]
-    [(Jmp tag) 
-      (define jmp-top (dict-ref blocks tag))
-      (unless (dict-has-key? (Block-info jmp-top) 'live) (raise (PendingError)))
-      (car (dict-ref (Block-info jmp-top) 'live))
-      ]
-    [(Instr 'negq (list a)) (set-union s (set a))]
-    [(Callq _ count)
-      (define s-2 (set-subtract s (set (map Reg callee-save-regs))))
-      (define s-3 (set-union s-2 (set (map Reg (take pass-args-regs count)))))
-      s-3
-      ]
-    ))
-
-(define (inv-trans-uncover-live-set-wrap . args)
-  (define rst (apply inv-trans-uncover-live-set args))
-  (define rst-2 (list->set (filter (compose not Imm?) (set->list rst))))
-  rst-2
-  )
-
-(define (uncover-live-instr* instr* blocks)
-  (match instr*
-    ['() (list (set ))]
-    [(cons instr rest)
-      (define rest-uncover (uncover-live-instr* rest blocks))
-      (define uncover (car rest-uncover))
-      (define uncover-2 (inv-trans-uncover-live-set-wrap instr uncover blocks))
-      (cons uncover-2 rest-uncover)
-      ]
-    ))
-
-(define (uncover-live-block block blocks)
-  (match block
-    [(Block info instr*)
-      (uncover-live-instr* instr* blocks)
-      ]))
-
-(define (uncover-live-blocks blocks)
-  (define-values (fail blocks-3)
-    (for/fold ([fail? #f] [blocks blocks]) ([tag (in-dict-keys blocks)])
-      (define block (dict-ref blocks tag))
-      (with-handlers ([PendingError? (λ (_) (values #t blocks))])
-        (define rst (uncover-live-block block blocks))
-        (define block-2 (Block (dict-set (Block-info block) 'live rst) (Block-instr* block)))
-        (values fail? (dict-set blocks tag block-2))
-        )
-      )
-    )
-  (if fail (uncover-live-blocks blocks-3) blocks-3)
-  )
-
-(define (all-writes-in-instr instr)
-  (match instr
-    [(Instr 'movq (list _ dst)) (set dst)]
-    [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
-    [(Callq _ _) (list->set (map Reg caller-save-regs))]
-    [(Instr 'negq dst) (set dst)]
-    [(Jmp _) (set )]
-    ))
-
-(define (pre-build-interference b graph)
-  (match b
-    [(cons c ons)
-      (for ([w (in-set (all-writes-in-instr c))])
-        (add-vertex! graph w))
-      (pre-build-interference ons graph)
-    ]
-    ['() graph]
-  ))
-
-(define (build-interference-instr* b s graph)
-  (define carb (car b))
-  (define cars (car s))
-  (define writes (all-writes-in-instr carb))
-  (for ([w (in-set writes)])
-    (for ([r (in-set cars)])
-      (unless (equal? w r) (add-edge! graph w r))
-      )
-    )
-  (cond
-    [(null? (cdr b)) graph]
-    [else (build-interference-instr* (cdr b) (cdr s) graph)])
-)
-
-(define (build-interference-block b)
-  (match b
-    [(Block info instr*)
-      (define g (build-interference-instr* instr* (dict-ref info 'live) 
-        (pre-build-interference instr* (undirected-graph '()))
-        ))
-      (define info-2 (dict-set info 'interference g))
-      (Block info-2 instr*)
-      ]))
-
-(define (build-interference p)
-  (match p
-    [(X86Program info blocks) 
-      (define blocks-2 (for/list ([b blocks])
-        (define bg (build-interference-block (cdr b)))
-        (cons (car b) bg)))
-      (X86Program info blocks-2)
-      ]))
-
 (define (color-graph p)
   (match p
     [(X86Program info blocks) 
@@ -785,13 +679,46 @@
 
 (require "multigraph.rkt")
 
-(define pass-uncover-live
-  (class pass-abstract
+(define (pass-read-write-mixin super-class)
+  (class super-class
     (super-new)
+    (define/public (get-write instr)
+      (match instr
+        [(Instr 'movq (list _ dst)) (set dst)]
+        [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
+        [(Callq _ _) (list->set (map Reg caller-save-regs))]
+        [(Instr 'negq dst) (set dst)]
+        [(Instr 'cmpq (list _ _)) (set )]
+        [(Jmp _) (set )]
+        [(JmpIf _ _) (set )]
+        ))
+    (define/public (get-read instr)
+      (define raw-set (get-read-with-imm instr))
+      (define l (filter (λ (i) (not (or (Imm? i) (Bool? i)))) (set->list raw-set)))
+      (list->set l)
+    )
+    (define/public (get-read-with-imm instr)
+      (match instr
+        [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
+        [(Instr 'movq (list src _)) (set src)]
+        [(Instr 'negq src) (set src)]
+        [(Callq _ count) 
+          (set (map Reg (take pass-args-regs count)))]
+        [(Jmp _) (set )]
+        [(JmpIf _ _) (set )]
+        [(Instr 'cmpq (list a b)) (set a b)]
+      )
+    )
+  ))
+
+(define (pass-uncover-live-mixin super-class)
+  (class super-class
+    (super-new)
+    (inherit get-read get-write)
     (define/override (pass p)
       (match p
-        [(X86Program info instr*)
-          (X86Program info (pass-blocks instr*))
+        [(X86Program info blocks)
+          (X86Program info (pass-blocks blocks))
         ]
       )
     )
@@ -800,13 +727,11 @@
       (define st (tsort (transpose g)))
       (define-values (entries blocks^)
         (for/fold ([entries '()] [blocks^ '()]) ([b st])
-        (match b
-          [(cons tag block^)
-            (define block^^ (pass-block block^ entries))
-            (values (dict-set entries tag block^^) (cons (cons tag block^^) blocks^))
-          ]
+          (define block (dict-ref blocks b))
+          (define block^ (pass-block block entries))
+          (values (dict-set entries b block^) (cons (cons b block^) blocks^))
         )
-      ))
+      )
       blocks^
     )
     (define/public (pass-block block entries)
@@ -825,12 +750,12 @@
       (match instr*
         ['() (list (default-set-to-read))]
         [(cons (Jmp lbl) rest)
-          (define s (car (dict-ref entries lbl)))
+          (define s (car (dict-ref (Block-info (dict-ref entries lbl)) 'live)))
           (define rest-set (pass-instr* rest entries))
           (cons s rest-set)
         ]
         [(cons (JmpIf _ lbl) rest)
-          (define s-partial (car (dict-ref entries lbl)))
+          (define s-partial (car (dict-ref (Block-info (dict-ref entries lbl)) 'live)))
           (define rest-set (pass-instr* rest entries))
           (define s (set-union s-partial (car rest-set)))
           (cons s rest-set)
@@ -839,35 +764,10 @@
           (define instr-write (get-write instr))
           (define instr-read (get-read instr))
           (define rest-set (pass-instr* rest entries))
-          (define s-m (set-subtract rest-set instr-write))
-          (define s (set-union s-m instr-write))
+          (define s-m (set-subtract (car rest-set) instr-write))
+          (define s (set-union s-m instr-read))
           (cons s rest-set)
         ]
-      )
-    )
-    (define/public (get-write instr)
-      (match instr
-        [(Instr (or 'addq 'subq 'movq) (list _ dst)) (set dst)]
-        [(Instr 'negq dst) (set dst)]
-        [(Callq _ _) (list->set (map Reg caller-save-regs))]
-        [(Jmp _) (set )]
-        [(JmpIf _ _) (set )]
-      )
-    )
-    (define/public (get-read instr)
-      (define raw-set (get-read-with-imm instr))
-      (define l (filter (λ (i) (not (Imm? i) (Bool? i))) (set->list raw-set)))
-      (list->set l)
-    )
-    (define/public (get-read-with-imm instr)
-      (match instr
-        [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
-        [(Instr 'movq (list src _)) (set src)]
-        [(Instr 'negq src) (set src)]
-        [(Callq _ count) 
-          (set (map Reg (take pass-args-regs count)))]
-        [(Jmp _) (set )]
-        [(JmpIf _ _) (set )]
       )
     )
     (define/public (pass-build-graph blocks)
@@ -901,7 +801,60 @@
   )
 )
 
-(define uncover-live (λ (p) (send (new pass-uncover-live) pass p)))
+(define uncover-live (λ (p) (send (new (pass-uncover-live-mixin (pass-read-write-mixin pass-abstract))) pass p)))
+
+(define (pass-build-interference-mixin super-class)
+  (class super-class
+    (super-new) 
+    (inherit get-read get-write)
+    (define/override (pass p)
+      (match p
+        [(X86Program info blocks)
+          (define blocks^ (for/list ([block blocks])
+            (define block^ (pass-block (cdr block)))
+            (cons (car block) block^)
+          ))
+          (X86Program info blocks^)
+        ]
+      )
+    )
+    (define/public (init-build-interference b graph)
+      (match b
+        [(cons instr instr*)
+          (for ([w (in-set (get-write instr))])
+            (add-vertex! graph w))
+          (init-build-interference instr* graph)
+        ]
+        ['() graph]
+      )
+    )
+    (define/public (pass-block block)
+      (match block
+        [(Block info instr*)
+          (define init-graph (init-build-interference instr* (undirected-graph '())))
+          (pass-instr* instr* (dict-ref info 'live) init-graph)
+          (define info^ (dict-set info 'interference init-graph))
+          (Block info^ instr*)
+        ])
+    )
+    (define/public (pass-instr* instr* live graph)
+      (match* (instr* live)
+        [((cons instr rest) (cons l live-rest))
+          (define writes (get-write instr))
+          (define reads l)
+          (for ([w (in-set writes)])
+            (for ([r (in-set reads)])
+              (unless (equal? w r) (add-edge! graph w r))
+              )
+            )
+          (pass-instr* rest live-rest graph)
+        ]
+        [('() (list _ )) (void)]
+      )
+    )
+  ))
+
+(define build-interference (λ (p) (send (new (pass-build-interference-mixin (pass-read-write-mixin pass-abstract))) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -923,7 +876,7 @@
 
      ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
 
-    ;  ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
+     ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
     ;  ("build color graph" ,color-graph ,interp-pseudo-x86-1)
     ;  ; ("assign homes" ,assign-homes ,interp-x86-1)
     ;  ("allocate registers" ,allocate-registers ,interp-x86-1)
