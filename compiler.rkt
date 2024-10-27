@@ -986,7 +986,6 @@
 (define pass-Lwhile-explicate-control
   (class pass-Lif-explicate-control
     (super-new)
-    (inherit explicate-pred)
     (define/public ((explicate-effect env) p cont) (match p
       [(SetBang var rhs) ((explicate-assign env) rhs var cont)]
       [(WhileLoop cnd body)
@@ -1006,6 +1005,17 @@
       [_ (values env cont)]
     ))
     (define/public (get-void-rst) (Return (Void)))
+    (define/override ((explicate-pred env) cnd thn els) (match cnd
+      [(Begin es body)
+        (define-values (env^ body^) ((explicate-pred env) body thn els))
+        (for/foldr ([env-c env^] [body-c body^]) ([e es])
+          ((explicate-effect env-c) e body-c))
+      ]
+      [(or (WhileLoop _ _) (SetBang _ _))
+        (error 'explicate-pred "unexpected type of cnd with actual Void")
+      ]
+      [_ ((super explicate-pred env) cnd thn els)]
+    ))
     (define/override ((explicate-tail env) p) (match p
       [(Begin es body)
         (define-values (env^ body^) ((explicate-tail env) body))
