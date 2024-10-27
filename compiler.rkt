@@ -355,9 +355,6 @@
         ]))
   ))
 
-; (define explicate-control (λ (p) (send (new pass-Lif-explicate-control) pass p)))
-(define explicate-control (λ (p) (send (new pass-Lif-explicate-control) pass p)))
-
 ;; select-instructions : Cvar -> x86var
 (define pass-select-instructions
   (class pass-abstract
@@ -985,6 +982,52 @@
   ))
 
 (define remove-complex-opera* (λ (p) (send (new pass-Lwhile-rco) pass p)))
+
+(define pass-Lwhile-explicate-control
+  (class pass-Lif-explicate-control
+    (super-new)
+    (inherit explicate-pred)
+    (define/public ((explicate-effect env) p cont) (match p
+      [(SetBang var rhs) ((explicate-assign env) rhs var cont)]
+      [(WhileLoop cnd body)
+        (define body-lbl (gensym 'label))
+        (define cnd-lbl (gensym 'label))
+        (define-values (env^ cnd^) ((explicate-pred env) cnd (Goto body-lbl) cont))
+        (define-values (env^^ body^) ((explicate-effect env^) body (Goto cnd-lbl)))
+        (define env^^^ (dict-set env^^ body-lbl body^))
+        (define env^^^^ (dict-set env^^^ cnd-lbl cnd^))
+        (values env^^^^ (Goto cnd-lbl))
+      ]
+      [(Begin es body)
+        (define-values (env^ body^) ((explicate-effect env) body cont))
+        (for/foldr ([env-c env^] [body-c body^]) ([e es])
+          ((explicate-effect env-c) e body-c))
+      ]
+      [_ (values env cont)]
+    ))
+    (define/public (get-void-rst) (Return (Void)))
+    (define/override ((explicate-tail env) p) (match p
+      [(Begin es body)
+        (define-values (env^ body^) ((explicate-tail env) body))
+        (for/foldr ([env-c env^] [body-c body^]) ([e es])
+          ((explicate-effect env-c) e body-c))
+      ]
+      [(or (WhileLoop _ _) (SetBang _ _))
+        ((explicate-effect env) p (get-void-rst))]
+      [_ ((super explicate-tail env) p)]
+    ))
+    (define/override ((explicate-assign env) p x cont) (match p
+      [(or (WhileLoop _ _) (SetBang _ _)) ((explicate-effect env) p cont)]
+      [(Begin es body)
+        (define-values (env^ body^) ((explicate-assign env) body x cont))
+        (for/foldr ([env-c env^] [body-c body^]) ([e es])
+          ((explicate-effect env-c) e x body-c))
+      ]
+      [_ ((super explicate-assign env) p x cont)]
+    ))
+  ))
+
+(define explicate-control (λ (p) (send (new pass-Lwhile-explicate-control) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
