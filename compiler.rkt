@@ -14,6 +14,8 @@
 (require "type-check-Lif.rkt")
 (require "interp-Cif.rkt")
 (require "type-check-Cif.rkt")
+(require "interp-Lwhile.rkt")
+(require "type-check-Lwhile.rkt")
 
 (require graph)
 (require "graph-printing.rkt")
@@ -947,6 +949,25 @@
 (define uncover-live (λ (p) (send (new 
   (pass-uncover-live-mixin
     (pass-read-write-mixin (pass-default-set-to-read-mixin pass-abstract)))) pass p)))
+  
+(define pass-collect-set! 
+  (class pass-abstract
+    (super-new)
+    (define/public (pass-body body) (match body
+      [(or (Var _) (Int _) (Bool _)) (set)]
+      [(Let x rhs body) (set-union (pass-body rhs) (pass-body body))]
+      [(SetBang var rhs) (set-union (pass-body rhs) (set var))]
+      [(If cnd thn els) (set-union (pass-body cnd) (set-union (pass-body thn) (pass-body els)))]
+      [(Prim _ args) (for/fold ([s (set)]) ([a args]) (set-union s (pass-body a)))]
+    ))
+    (define/override (pass p)
+      (match p [(Program info body)
+        (Program (dict-set info 'set! (pass-body body)) body)
+      ])
+    )
+  ))
+
+(define collect-set! (lambda (p) (send (new pass-collect-set!) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -955,12 +976,13 @@
 (define compiler-passes
   `(
 
-     ("shrink" ,shrink ,interp-Lif ,type-check-Lif)
+     ("shrink" ,shrink ,interp-Lwhile ,type-check-Lwhile)
 
-     ;; Uncomment the following passes as you finish them.
-     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
+     ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
 
-     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
+     ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lwhile)
+
+     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lwhile)
 
      ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
      
