@@ -848,6 +848,61 @@
 
 (define allocate-registers (λ (p) (send (new pass-allocate-registers) pass p)))
 
+(define pass-patch-instructions
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p)
+      (match p
+        [(X86Program info blocks)
+          (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-inner)
+            (cons tag (patch-instr-block block-inner))]))
+          )
+          (X86Program info blocks^)
+        ]
+      )
+    )
+    (define/public (patch-instr-block block)
+      (match block
+        [(Block info instr*)
+          (define instr*^ (patch-instr* instr*))
+          (Block info instr*^)
+        ]
+      )
+    )
+    (define/public (patch-instr* instr*)
+      (match instr*
+        [(cons instr rest)
+          (match instr
+            [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
+              (patch-instr*
+                (cons 
+                  (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))
+                  (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
+                    rest)))
+            ]
+            [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
+              (patch-instr*
+                (cons 
+                  (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
+                  (cons (Instr i (list (Deref r0 o0) (Reg 'rax)))
+                    (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
+                      rest)))
+              )
+            ]
+            [(Instr 'movq (list (Reg a) (Reg a))) 
+              (patch-instr* rest) ; optimize the useless movq op.
+            ]
+            [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
+              (patch-instr* rest) ; drop the non-sense addition and subtraction.
+            ]
+            [_ (cons instr (patch-instr* rest))]
+          )
+        ]
+        ['() '()]
+      )
+    )
+  ))
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -873,8 +928,9 @@
      ("build color graph" ,color-graph ,interp-pseudo-x86-1)
      ("allocate registers" ,allocate-registers ,interp-x86-1)
 
-    ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
-    ;  ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
+     ("patch instructions" ,patch-instructions ,interp-x86-1)
+
+     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
 
     ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
      ))
