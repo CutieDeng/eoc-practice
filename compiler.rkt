@@ -571,95 +571,13 @@
     )
   ))
 
-(define (pass-uncover-live-mixin super-class)
+(define (pass-default-set-to-read-mixin super-class)
   (class super-class
     (super-new)
-    (inherit get-read get-write)
-    (define/override (pass p)
-      (match p
-        [(X86Program info blocks)
-          (X86Program info (pass-blocks blocks))
-        ]
-      )
-    )
-    (define/public (pass-blocks blocks)
-      (define g (pass-build-graph blocks))
-      (define st (tsort (transpose g)))
-      (define-values (entries blocks^)
-        (for/fold ([entries '()] [blocks^ '()]) ([b st])
-          (define block (dict-ref blocks b))
-          (define block^ (pass-block block entries))
-          (values (dict-set entries b block^) (cons (cons b block^) blocks^))
-        )
-      )
-      blocks^
-    )
-    (define/public (pass-block block entries)
-      (match block
-        [(Block info instr*)
-          (define instr*-info (pass-instr* instr* entries))
-          (define info^ (dict-set info 'live instr*-info))
-          (Block info^ instr*)
-        ]
-      )
-    )
     (define/public (default-set-to-read)
       (set (Reg 'rax))
     )
-    (define/public (pass-instr* instr* entries)
-      (match instr*
-        ['() (list (default-set-to-read))]
-        [(cons (Jmp lbl) rest)
-          (define s (car (dict-ref (Block-info (dict-ref entries lbl)) 'live)))
-          (define rest-set (pass-instr* rest entries))
-          (cons s rest-set)
-        ]
-        [(cons (JmpIf _ lbl) rest)
-          (define s-partial (car (dict-ref (Block-info (dict-ref entries lbl)) 'live)))
-          (define rest-set (pass-instr* rest entries))
-          (define s (set-union s-partial (car rest-set)))
-          (cons s rest-set)
-        ]
-        [(cons instr rest)
-          (define instr-write (get-write instr))
-          (define instr-read (get-read instr))
-          (define rest-set (pass-instr* rest entries))
-          (define s-m (set-subtract (car rest-set) instr-write))
-          (define s (set-union s-m instr-read))
-          (cons s rest-set)
-        ]
-      )
-    )
-    (define/public (pass-build-graph blocks)
-      (define graph (make-multigraph '()))
-      (for ([block blocks])
-        (add-vertex! graph (car block))
-      )
-      (for ([block blocks])
-        (define inner-block (cdr block))
-        (define instr* (Block-instr* inner-block))
-        (define lbl (car block))
-        (define outs (get-outs instr*))
-        (for ([o outs])
-          (add-directed-edge! graph lbl o)
-        )
-      )
-      graph
-    )
-    (define/public (get-outs instr*)
-      (match instr*
-        [(cons bl rest)
-          (match bl
-            [(JmpIf _ t) (cons t (get-outs rest))]
-            [(Jmp t) (list t)]
-            [_ (get-outs rest)]
-          )
-        ]
-        ['() (list)]
-      )
-    )
-  )
-)
+  ))
 
 (define (pass-build-interference-mixin super-class)
   (class super-class
@@ -933,11 +851,11 @@
 
 (define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
 
-(define (pass-uncover-live-mixin-2 clz)
-  (class (pass-uncover-live-mixin clz)
+(define (pass-uncover-live-mixin clz)
+  (class clz
     (super-new)
     (inherit get-read get-write)
-    (inherit default-set-to-read pass-block)
+    (inherit default-set-to-read)
     (define/public (get-block-end instr*)
       (match instr*
         [(cons (or (JmpIf _ _) (Jmp _)) _) instr*]
@@ -953,7 +871,7 @@
       )))
       (map get-label jmps)
     )
-    (define/override (pass-instr* instr* end) (match instr*
+    (define/public (pass-instr* instr* end) (match instr*
       ['() (list end)]
       [(or (list (JmpIf _ _) (Jmp _)) (list (Jmp _)))
         (list end)
@@ -1027,8 +945,8 @@
 )
 
 (define uncover-live (λ (p) (send (new 
-  (pass-uncover-live-mixin-2
-    (pass-read-write-mixin pass-abstract))) pass p)))
+  (pass-uncover-live-mixin
+    (pass-read-write-mixin (pass-default-set-to-read-mixin pass-abstract)))) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
