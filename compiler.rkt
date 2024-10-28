@@ -103,29 +103,6 @@
     [(Block info ins)
       (Block info (append-map patch-instr ins))])) 
 
-;; prelude-and-conclusion : x86int -> x86int
-(define (prelude-and-conclusion p)
-  (match p
-    [(X86Program info b)
-      (define stack-size (aligned (dict-ref info 'stack-size) 16))
-      (define prelude (Block '() 
-        (list 
-          (Instr 'pushq (list (Reg 'rbp))) 
-          (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
-          (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
-          (Jmp 'start)
-        )))
-      (define conclusion (Block '() (list 
-        (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
-        (Instr 'popq (list (Reg 'rbp)))
-        (Retq )
-      )))
-      (define b-start (dict-ref b 'start))
-      (define b-start-block (Block-instr* b-start))
-      (define b-start-2 (Block (Block-info b-start) (append b-start-block (list (Jmp 'conclusion)))))
-      (set! b (dict-set b 'start b-start-2))
-      (X86Program info (cons (cons 'main prelude) (cons (cons 'conclusion conclusion) b)))]))
-
 (define caller-save-regs 
   (list 'rax 'rcx 'rdx 'rsi 'rdi 'r8 'r9 'r10 'r11)
 )
@@ -902,6 +879,54 @@
       )
     )
   ))
+
+(define pass-prelude-and-conclusion
+  (class pass-abstract
+    (super-new)
+    (define/public (get-prelude p)
+      (match p [(X86Program info _)
+        (define stack-size (aligned (dict-ref info 'stack-size) 16))
+        (Block '() 
+          (list 
+            (Instr 'pushq (list (Reg 'rbp))) 
+            (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
+            (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
+            (Jmp 'start)
+          ))
+      ])
+    )
+    (define/public (get-conclusion p)
+      (match p [(X86Program info _)
+        (define stack-size (dict-ref info 'stack-size))
+        (Block '()
+          (list 
+            (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
+            (Instr 'popq (list (Reg 'rbp)))
+            (Retq )
+          ))
+      ])
+    )
+    (define/override (pass p)
+      (match p [(X86Program info blocks)
+        (define prelude (get-prelude p))
+        (define conclusion (get-conclusion p))
+        (define blocks^
+          (for/list ([bl blocks]) (match bl
+            [(cons tag (Block info instr*))
+              (match (last instr*)
+                [(? Jmp?) bl]
+                [_ (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+              )
+            ])))
+        (X86Program info 
+          (dict-set 
+            (dict-set blocks^ 'main prelude)
+            'conclusion conclusion))
+      ])
+    )
+  ))
+
+(define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
