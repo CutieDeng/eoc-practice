@@ -979,6 +979,7 @@
 (define pass-Lwhile-explicate-control
   (class pass-Lif-explicate-control
     (super-new)
+    (inherit create-block)
     (define/public ((explicate-effect env) p cont) (match p
       [(SetBang var rhs) ((explicate-assign env) rhs var cont)]
       [(WhileLoop cnd body)
@@ -994,6 +995,22 @@
         (define-values (env^ body^) ((explicate-effect env) body cont))
         (for/foldr ([env-c env^] [body-c body^]) ([e es])
           ((explicate-effect env-c) e body-c))
+      ]
+      [(If cnd thn els)
+        (define-values (env^ cont^) ((create-block env) cont))
+        (define-values (env^^ thn^) ((explicate-effect env^) thn cont^))
+        (define-values (env^^^ els^) ((explicate-effect env^^) els cont^))
+        (define-values (env^^^^ cnd^) ((explicate-pred env^^^) cnd thn^ els^)) 
+        (values env^^^^ cnd^)
+      ]
+      [(Let var rhs body)
+        (define-values (env^ body^) ((explicate-effect env) body cont))
+        (define-values (env^^ rhs^) ((explicate-assign env^) rhs var body^))
+        (values env^^ rhs^)
+      ]
+      [(Prim _ args)
+        (for/foldr ([env env] [arg-c cont]) ([arg args])
+          ((explicate-effect env) arg arg-c))
       ]
       [_ (values env cont)]
     ))
