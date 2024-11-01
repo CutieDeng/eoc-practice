@@ -16,6 +16,8 @@
 (require "type-check-Cif.rkt")
 (require "interp-Lwhile.rkt")
 (require "type-check-Lwhile.rkt")
+(require "interp-Cwhile.rkt")
+(require "type-check-Cwhile.rkt")
 
 (require graph)
 (require "graph-printing.rkt")
@@ -157,36 +159,24 @@
           (define body-2 ((pass-exp '()) body))
           (Program info body-2)
         ]))
-    (define/public ((pass-exp env) exp)
-      (match exp
-        [(Var x) 
-          (define x-2 (dict-ref env x))
-          (Var x-2)]
+    (define/public ((pass-exp env) exp) (match exp
+        [(Var x) (Var (dict-ref env x))]
         [(Int _) exp]
         [(Let x exp body)
-          (define new-exp ((pass-exp env) exp))
-          (define new-x (gensym x))
-          (define new-env (dict-set env x new-x))
-          (define new-body ((pass-exp new-env) body))
-          (Let new-x new-exp new-body)]
+          (define exp^ ((pass-exp env) exp))
+          (define x^ (gensym x))
+          (define body^ ((pass-exp (dict-set env x x^)) body))
+          (Let x^ exp^ body^)]
         [(Prim op es)
-          (define new-es
-            (for/foldr ([nes '()]) ([e es])
-              (define nenv-2 ((pass-exp env) e))
-              (cons nenv-2 nes)))
-          (Prim op new-es)]
-      )
-    )
+          (Prim op (for/list ([e es]) ((pass-exp env) e)))]
+    ))
   )
 )
-
-(define uniquify (λ (p) (send (new pass-Lif-uniquify) pass p)))
 
 (define pass-Lif-uniquify
   (class pass-Lvar-uniquify
     (super-new)
-    (define/override ((pass-exp env) exp)
-      (match exp
+    (define/override ((pass-exp env) exp) (match exp
         [(Bool _) exp]
         [(If cnd thn els)
           (define cnd-2 ((pass-exp env) cnd))
@@ -195,8 +185,7 @@
           (If cnd-2 thn-2 els-2)
         ]
         [_ ((super pass-exp env) exp)]
-      )
-    )
+    ))
   ))
 
 (define pass-Lvar-rco
@@ -936,11 +925,13 @@
   (class pass-abstract
     (super-new)
     (define/public (pass-body body) (match body
-      [(or (Var _) (Int _) (Bool _)) (set)]
-      [(Let x rhs body) (set-union (pass-body rhs) (pass-body body))]
+      [(or (Var _) (Int _) (Bool _) (Void)) (set)]
+      [(Let _ rhs body) (set-union (pass-body rhs) (pass-body body))]
       [(SetBang var rhs) (set-union (pass-body rhs) (set var))]
       [(If cnd thn els) (set-union (pass-body cnd) (set-union (pass-body thn) (pass-body els)))]
       [(Prim _ args) (for/fold ([s (set)]) ([a args]) (set-union s (pass-body a)))]
+      [(Begin es e) (set-union (for/fold ([s (set)]) ([e es]) (set-union s (pass-body e))) (pass-body e))]
+      [(WhileLoop cnd body) (set-union (pass-body cnd) (pass-body body))]
     ))
     (define/override (pass p)
       (match p [(Program info body)
@@ -956,11 +947,13 @@
     (super-new)
     (define/public ((pass-body set!-vars) body) (match body
       [(Var x) #:when (set-member? set!-vars body) (GetBang x)]
-      [(or (Var _) (Int _) (Bool _)) body]
+      [(or (Var _) (Int _) (Bool _) (Void)) body]
       [(SetBang var rhs) (SetBang var ((pass-body set!-vars) rhs))]
       [(Let x rhs body) (Let x ((pass-body set!-vars) rhs) ((pass-body set!-vars) body))]
       [(If cnd thn els) (If ((pass-body set!-vars) cnd) ((pass-body set!-vars) thn) ((pass-body set!-vars) els))]
       [(Prim op args) (Prim op (for/list ([a args]) ((pass-body set!-vars) a)))]
+      [(WhileLoop cnd body) (WhileLoop ((pass-body set!-vars) cnd) ((pass-body set!-vars) body))]
+      [(Begin es e) (Begin (for/list ([e es]) ((pass-body set!-vars) e)) ((pass-body set!-vars) e))]
     ))
     (define/override (pass p) (match p [(Program info body)
       (Program info ((pass-body (dict-ref info 'set!)) body))
@@ -1039,6 +1032,24 @@
 
 (define explicate-control (λ (p) (send (new pass-Lwhile-explicate-control) pass p)))
 
+(define pass-Lwhile-uniquify
+  (class pass-Lif-uniquify
+    (super-new)
+    (define/override ((pass-exp env) exp) (match exp
+      [(SetBang var rhs) 
+        (SetBang (dict-ref env var) ((pass-exp env) rhs))]
+      [(Begin es body)
+        (Begin (for/list ([e es]) ((pass-exp env) e)) ((pass-exp env) body))] 
+      [(WhileLoop cnd body) 
+        (WhileLoop ((pass-exp env) cnd) ((pass-exp env) body))]
+      [_ ((super pass-exp env) exp)]
+    ))
+  )
+)
+
+(define uniquify (λ (p) (send (new pass-Lwhile-uniquify) pass p)))
+
+
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -1053,9 +1064,9 @@
     ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lwhile)
     ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lwhile ,type-check-Lwhile)
 
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lwhile)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lwhile)
 
-    ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
      
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
 
