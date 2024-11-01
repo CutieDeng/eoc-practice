@@ -977,8 +977,18 @@
       (define graph-t (transpose graph))
       (while (not (queue-empty? worklist))
         (define node (dequeue! worklist))
-        (define input (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)])
-          (join state (dict-ref mapping pred))))
+        (define preds (in-neighbors graph-t node))
+        (define input
+          (match preds
+            ['() (default-set-to-read)]
+            [(cons _ _)
+              (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)]) 
+                (join state (dict-ref mapping pred)))
+            ]
+          ))
+        #;(define input 
+          (for/fold ([state bottom]) ([pred preds])
+            (join state (dict-ref mapping pred))))
         (define output (transfer node input))
         (cond [(not (equal? output (dict-ref mapping node))) 
           (dict-set! mapping node output)
