@@ -67,7 +67,7 @@
 
     (define/public (interp-program p)
       (match p
-        [(Program '() e) ((interp-exp '()) e)]
+        [(Program _ e) ((interp-exp '()) e)]
         ))
     ))
 
