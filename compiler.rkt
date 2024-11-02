@@ -394,7 +394,7 @@
     (define/override (pass-instr* stmts)
       (match stmts
         [(IfStmt cnd thn els)
-         <(match cnd
+          (match cnd
             [(Prim 'eq? (list lhs rhs))
               (define comp-rst (λ ()
                 (if (equal? lhs rhs)
@@ -507,8 +507,6 @@
       )
     )
   ))
-
-(define select-instructions (λ (p) (send (new pass-select-instructions-If) pass p)))
 
 (require "multigraph.rkt")
 
@@ -1066,6 +1064,18 @@
 
 (define uniquify (λ (p) (send (new pass-Lwhile-uniquify) pass p)))
 
+(define pass-select-instructions-while
+  (class pass-select-instructions-If
+    (super-new)
+    (inherit cast)
+    (define/override (pass-instr stmt) (match stmt
+      [(Assign lhs (Prim '+ (or (list lhs e) (list e lhs))))
+        (list (Instr 'addq (list (cast e) lhs)))]
+      [_ (super pass-instr stmt)]
+    ))
+  ))
+
+(define select-instructions (λ (p) (send (new pass-select-instructions-while) pass p)))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
