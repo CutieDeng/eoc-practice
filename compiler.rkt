@@ -1,19 +1,10 @@
 #lang racket
-(require racket/set racket/stream)
+(require racket/set)
 (require racket/fixnum)
-(require "interp-Lint.rkt")
-(require "interp-Lvar.rkt")
-(require "interp-Cvar.rkt")
 (require "interp.rkt")
-(require "type-check-Lvar.rkt")
-(require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (provide (all-defined-out))
 
-(require "interp-Lif.rkt")
-(require "type-check-Lif.rkt")
-(require "interp-Cif.rkt")
-(require "type-check-Cif.rkt")
 (require "interp-Lwhile.rkt")
 (require "type-check-Lwhile.rkt")
 (require "interp-Cwhile.rkt")
@@ -44,70 +35,9 @@
     [(Program info e) (Program info (flip-exp e))]))
 
 
-;; Next we have the partial evaluation pass described in the book.
-(define (pe-neg r)
-  (match r
-    [(Int n) (Int (fx- 0 n))]
-    [else (Prim '- (list r))]))
-
-(define (pe-add r1 r2)
-  (match* (r1 r2)
-    [((Int n1) (Int n2)) (Int (fx+ n1 n2))]
-    [(_ _) (Prim '+ (list r1 r2))]))
-
-(define (pe-exp e)
-  (match e
-    [(Int n) (Int n)]
-    [(Prim 'read '()) (Prim 'read '())]
-    [(Prim '- (list e1)) (pe-neg (pe-exp e1))]
-    [(Prim '+ (list e1 e2)) (pe-add (pe-exp e1) (pe-exp e2))]))
-
-(define (pe-Lint p)
-  (match p
-    [(Program info e) (Program info (pe-exp e))]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; HW1 Passes
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (define (aligned x a) (cond
   [(zero? (modulo x a)) x]
   [else (+ x (- a (modulo x a)))]))
-
-(define (local-types-to-offset types)
-  (for/fold ([offset 0] [offsets '()]) ([ty types])
-    (match ty
-      [(cons x 'Integer)
-        (define offset-2 (aligned (+ offset 8) 8))
-        (values offset-2 (cons (cons x offset-2) offsets))])))
-  
-;; patch-instructions : x86var -> x86int
-(define (patch-instructions p)
-  (match p
-    [(X86Program info b)
-      (X86Program info (for/list ([x b])
-        (match x
-          [(cons l block) (cons l (patch-instr-block block))])))]))
-
-(define (patch-instr i)
-  (match i
-    [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
-      (list (Instr 'movq (list (Deref r0 o0) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))]
-    [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
-      (list (Instr 'movq (list (Deref r1 o1) (Reg 'rax))) (Instr i (list (Deref r0 o0) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))]
-    [(Instr 'movq (list (Reg a) (Reg b))) 
-      (cond
-        [(equal? a b) (list )] ; optimize the useless movq op.
-        [else (list i)])]
-    [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
-      (list ) ; drop the non-sense addition and subtraction.
-    ]
-    [e (list e)]))
-
-(define (patch-instr-block b)
-  (match b
-    [(Block info ins)
-      (Block info (append-map patch-instr ins))])) 
 
 (define caller-save-regs 
   (list 'rax 'rcx 'rdx 'rsi 'rdi 'r8 'r9 'r10 'r11)
@@ -120,8 +50,6 @@
 (define pass-args-regs
   (list 'rdi 'rsi 'rdx 'rcx 'r8 'r9)
 )
-
-(struct PendingError ())
 
 (define pass-abstract
   (class object%
@@ -1066,6 +994,8 @@
 
 (define uniquify (λ (p) (send (new pass-Lwhile-uniquify) pass p)))
 
+
+(define (patch-instructions p) (send (new pass-patch-instructions) pass p))
 
 ; (debug-level 2)
 ;; Define the compiler passes to be used by interp-tests and the grader
