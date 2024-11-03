@@ -6,7 +6,7 @@
 (provide (all-defined-out))
 
 (require "interp-Lwhile.rkt")
-(require "type-check-Lwhile.rkt")
+(require "type-check-Lvec.rkt")
 (require "interp-Cwhile.rkt")
 (require "type-check-Cwhile.rkt")
 
@@ -15,25 +15,6 @@
 (require "priority_queue.rkt")
 
 (require data/queue)
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Lint examples
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; The following compiler pass is just a silly one that doesn't change
-;; anything important, but is nevertheless an example of a pass. It
-;; flips the arguments of +. -Jeremy
-(define (flip-exp e)
-  (match e
-    [(Var x) e]
-    [(Prim 'read '()) (Prim 'read '())]
-    [(Prim '- (list e1)) (Prim '- (list (flip-exp e1)))]
-    [(Prim '+ (list e1 e2)) (Prim '+ (list (flip-exp e2) (flip-exp e1)))]))
-
-(define (flip-Lint e)
-  (match e
-    [(Program info e) (Program info (flip-exp e))]))
-
 
 (define (aligned x a) (cond
   [(zero? (modulo x a)) x]
@@ -951,17 +932,51 @@
 
 (define (patch-instructions p) (send (new pass-patch-instructions) pass p))
 
+(define pass-expose-allocation
+  (class pass-abstract
+    (super-new)
+    (define/override (pass p) (match p [(Program info body)
+      (Program info (pass-body body))
+    ]))
+    (define/public (expand-env-r body env) (match env
+      [(cons (cons x v) rest) (Let x v (expand-env-r body rest))]
+      ['() body]
+    ))
+    (define/public (pass-body body) (match body 
+      [(HasType (Prim 'vector es) types)
+        (define-values (es^ env^) (for/fold ([es^ '()] [env^ '()]) ([e es])
+          (define tmp (gensym 'tmp))
+          (values (cons tmp es^) (dict-set env^ tmp (pass-body e)))
+          ))
+        (define bytes (* (+ 1 (length es)) 8))
+        (define pre-collect (λ (b) (Let '_ (If (Prim '< (GlobalValue 'free_ptr) bytes) (Void) (Collect bytes)) b)))
+        (define v (gensym 'tmp))
+        (define inner (for/foldr ([b (Var v)]) ([e es^] [idx (in-range (length es))])
+          (Let '_ (Prim 'vector-set! (list (Var v) idx (Var e))))
+          ))
+        (set! inner (Let v (Allocate (length es) types)))
+        (set! inner (pre-collect inner))
+        (set! inner (expand-env-r inner env^))
+        inner
+      ]
+      [(Prim o es) (Prim o (for/list ([e es]) (pass-body e)))]
+      [(If cnd thn els) (If (pass-body cnd) (pass-body thn) (pass-body els))]
+      [(Begin es e) (Begin (for/list ([e es]) (pass-body e)) (pass-body e))]
+      [(Let x rhs body) (Let x (pass-body rhs) (pass-body body))]
+      [(SetBang var rhs) (SetBang var (pass-body rhs))]
+      [(WhileLoop cnd body) (WhileLoop (pass-body cnd) (pass-body body))]
+      [_ body]
+    ))
+  ))
+
 ; (debug-level 2)
-;; Define the compiler passes to be used by interp-tests and the grader
-;; Note that your compiler file (the file that defines the passes)
-;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-    ("shrink" ,shrink ,interp-Lwhile ,type-check-Lwhile)
-    ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
-    ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lwhile)
-    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lwhile ,type-check-Lwhile)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lwhile)
+    ("shrink" ,shrink ,interp-Lwhile ,type-check-Lvec)
+    ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lvec)
+    ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lvec)
+    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lwhile ,type-check-Lvec)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lvec)
     ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
