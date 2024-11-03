@@ -119,9 +119,8 @@
 (define pass-Lvar-rco
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(Program info body) (Program info (pass-exp body))]))
+    (define/override (pass p) (match p
+      [(Program info body) (Program info (pass-exp body))]))
     (define/public ((exp-cast-atom env) p) (match p
       [(or (Int _) (Var _)) (values env p)]
       [_ (let ([x (gensym 'tmp)])
@@ -158,40 +157,34 @@
 (define pass-Lif-rco
   (class pass-Lvar-rco
     (super-new)
-    (define/override ((exp-cast-atom env) p)
-      (match p
-        [(Bool _) p]
-        [_ ((super exp-cast-atom env) p)])
+    (define/override ((exp-cast-atom env) p) (match p
+      [(Bool _) p]
+      [_ ((super exp-cast-atom env) p)])
     )
-    (define/override (pass-exp p)
-      (match p
-        [(If cnd thn els)
-          (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
-        [_ (super pass-exp p)]
-      ))
+    (define/override (pass-exp p) (match p
+      [(If cnd thn els)
+        (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
+      [_ (super pass-exp p)]
+    ))
   ))
 
 ;; explicate-control : Lvar^mon -> Cvar
 (define pass-Lvar-explicate-control
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(Program info exp)
-          (CProgram info (dict-set '() 'start (explicate-tail exp)))
-        ])
+    (define/override (pass p) (match p
+      [(Program info exp)
+        (CProgram info (dict-set '() 'start (explicate-tail exp)))
+      ])
     )
-    (define/public (explicate-tail p)
-      (match p
-        [(Let x e body) (explicate-assign e x (explicate-tail body))]
-        [_ (Return p)]
-      )
-    )
-    (define/public (explicate-assign p x cont)
-      (match p
-        [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
-        [_ (Seq (Assign (Var x) p) cont)]
-      ))
+    (define/public (explicate-tail p) (match p
+      [(Let x e body) (explicate-assign e x (explicate-tail body))]
+      [_ (Return p)]
+    ))
+    (define/public (explicate-assign p x cont) (match p
+      [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
+      [_ (Seq (Assign (Var x) p) cont)]
+    ))
   ))
 
 (define pass-Lif-explicate-control
@@ -223,33 +216,31 @@
       ]
       [_ (values env (Seq (Assign (Var x) p) cont))]
     ))
-    (define/public ((explicate-pred env) cnd thn els)
-      (match cnd
-        [(If cnd-2 thn-2 els-2)
-          (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
-          (define-values (env^^ thn^^) ((explicate-pred env^) thn-2 thn^ els^))
-          (define-values (env^^^ els^^) ((explicate-pred env^^) els-2 thn^ els^))
-          ((explicate-pred env^^^) cnd-2 thn^^ els^^)
-        ]
-        [(Let y e body)
-          (define-values (env-2 body^) ((explicate-pred env) body thn els))
-          ((explicate-assign env-2) e y body^)
-        ]
-        [_
-          (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
-          (match cnd
-            [(Var _)
-              (values env^ (IfStmt (Prim 'eq (list cnd (Bool #t))) thn^ els^))]
-            [(Bool b)
-              (values env (if b thn els))]
-            [(Prim 'not (list _))
-              (values env^ (IfStmt (Prim 'eq (list cnd (Bool #f))) thn^ els^))]
-            [(Prim _ (list _ _))
-              (values env^ (IfStmt cnd thn^ els^))]
-          )
-        ]
-      )
-    )
+    (define/public ((explicate-pred env) cnd thn els) (match cnd
+      [(If cnd-2 thn-2 els-2)
+        (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
+        (define-values (env^^ thn^^) ((explicate-pred env^) thn-2 thn^ els^))
+        (define-values (env^^^ els^^) ((explicate-pred env^^) els-2 thn^ els^))
+        ((explicate-pred env^^^) cnd-2 thn^^ els^^)
+      ]
+      [(Let y e body)
+        (define-values (env-2 body^) ((explicate-pred env) body thn els))
+        ((explicate-assign env-2) e y body^)
+      ]
+      [_
+        (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
+        (match cnd
+          [(Var _)
+            (values env^ (IfStmt (Prim 'eq (list cnd (Bool #t))) thn^ els^))]
+          [(Bool b)
+            (values env (if b thn els))]
+          [(Prim 'not (list _))
+            (values env^ (IfStmt (Prim 'eq (list cnd (Bool #f))) thn^ els^))]
+          [(Prim _ (list _ _))
+            (values env^ (IfStmt cnd thn^ els^))]
+        )
+      ]
+    ))
     (define/public ((create-block env) stmt) (match stmt
       [(Goto _) (values env stmt)]
       [_ 
@@ -263,213 +254,198 @@
       (define-values (env^^ stmt1^) ((create-block env^) stmt1))
       (values env^^ stmt0^ stmt1^)
     )
-    (define/override (pass p)
-      (match p
-        [(Program info exp)
-          (define-values (env stmt) ((explicate-tail '()) exp))
-          (define env^ (dict-set env 'start stmt))
-          (CProgram info env^)
-        ]))
+    (define/override (pass p) (match p
+      [(Program info exp)
+        (define-values (env stmt) ((explicate-tail '()) exp))
+        (define env^ (dict-set env 'start stmt))
+        (CProgram info env^)
+      ]))
   ))
 
 ;; select-instructions : Cvar -> x86var
 (define pass-select-instructions
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(CProgram info blocks)
-          (define blocks^ 
-            (for/list ([b blocks]) 
-              (define b^ (pass-instr* (cdr b)))
-              (cons (car b) (Block '() b^))
-            ))
-          (X86Program info 
-            blocks^
-          )
-        ])
-    )
-    (define/public (pass-instr* stmts)
-      (match stmts
-        [(Seq a rest)
-          (append (pass-instr a) (pass-instr* rest))]
-        [(Return arg)
-          (pass-instr (Assign (Reg 'rax) arg))]
-        ))
-    (define/public (cast x)
-      (match x
-        [(Int n) (Imm n)]
-        [_ x]))
-    (define/public (pass-instr a)
-      (match a
-        [(Assign lhs rhs)
-          (define p-2 (match rhs
-            [(or (Int _) (Var _))
-              (list (Instr 'movq (list (cast rhs) lhs)))]
-            [(Prim '+ (list a b))
-              (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'addq (list (cast b) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
-            [(Prim '- (list a))
-              (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'negq (list (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
-            [(Prim 'read '()) 
-              (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) lhs)))]
-            ))
-          p-2]))
+    (define/override (pass p) (match p
+      [(CProgram info blocks)
+        (define blocks^ 
+          (for/list ([b blocks]) 
+            (define b^ (pass-instr* (cdr b)))
+            (cons (car b) (Block '() b^))
+          ))
+        (X86Program info 
+          blocks^
+        )
+      ]
+    ))
+    (define/public (pass-instr* stmts) (match stmts
+      [(Seq a rest)
+        (append (pass-instr a) (pass-instr* rest))]
+      [(Return arg)
+        (pass-instr (Assign (Reg 'rax) arg))]
+    ))
+    (define/public (cast x) (match x
+      [(Int n) (Imm n)]
+      [_ x]))
+    (define/public (pass-instr a) (match a
+      [(Assign lhs rhs)
+        (define p-2 (match rhs
+          [(or (Int _) (Var _))
+            (list (Instr 'movq (list (cast rhs) lhs)))]
+          [(Prim '+ (list a b))
+            (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'addq (list (cast b) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
+          [(Prim '- (list a))
+            (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'negq (list (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
+          [(Prim 'read '()) 
+            (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) lhs)))]
+          ))
+        p-2]))
   ))
 
 (define pass-select-instructions-If
   (class pass-select-instructions
     (super-new)
-    (define/override (pass-instr* stmts)
-      (match stmts
-        [(IfStmt cnd thn els)
-         <(match cnd
-            [(Prim 'eq? (list lhs rhs))
-              (define comp-rst (λ ()
-                (if (equal? lhs rhs)
-                  (list (Jmp (Goto-label thn)))
-                  (list (Jmp (Goto-label els)))
-                  )
-              ))
-              (match* (lhs rhs)
-                [((Var _) (Var _))
-                  (list
-                    (Instr 'cmpq (list (cast lhs) (cast rhs)))
-                    (JmpIf 'e (Goto-label thn))
-                    (Jmp (Goto-label els))
-                  )
-                ]
-                [((Var _) _)
-                  (list
-                    (Instr 'movq (list (cast rhs) (Reg 'rax)))
-                    (Instr 'cmpq (list (cast lhs) (Reg 'rax)))
-                    (JmpIf 'e (Goto-label thn))
-                    (Jmp (Goto-label els))
-                  )
-                ]
-                [(_ (Var _))
-                  (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs))) thn els)
-                ]
-                [((Int _) (Int _)) 
-                  (comp-rst)
-                ]
-                [((Bool _) (Bool _))
-                  (comp-rst)
-                ]
-              )
-            ]
-            [(Prim '< (list lhs rhs))
-              (define comp-rst (lazy
-                (if (< (Imm-value lhs) (Imm-value rhs))
-                  (list (Jmp (Goto-label thn)))
-                  (list (Jmp (Goto-label els)))
+    (define/override (pass-instr* stmts) (match stmts
+      [(IfStmt cnd thn els)
+        (match cnd
+          [(Prim 'eq? (list lhs rhs))
+            (define comp-rst (λ ()
+              (if (equal? lhs rhs)
+                (list (Jmp (Goto-label thn)))
+                (list (Jmp (Goto-label els)))
                 )
-              ))
-              (match* (lhs rhs)
-                [((Var _) (Var _))
-                  (list
-                    (Instr 'cmpq (list (cast rhs) (cast lhs)))
-                    (JmpIf 'l (Goto-label thn))
-                    (Jmp (Goto-label els))
-                  )
-                ]
-                [((Var _) _)
-                  (list
-                    (Instr 'movq (list (cast rhs) (Reg 'rax)))
-                    (Instr 'cmpq (list (Reg 'rax) (cast lhs)))
-                    (JmpIf 'l (Goto-label thn))
-                    (Jmp (Goto-label els))
-                  )
-                ]
-                [(_ (Var _))
-                  (list
-                    (Instr 'movq (list (cast lhs) (Reg 'rax)))
-                    (Instr 'cmpq (list (cast rhs) (Reg 'rax)))
-                    (JmpIf 'l (Goto-label thn))
-                    (Jmp (Goto-label els))
-                  )
-                ]
-                [((Int _) (Int _)) 
-                  (comp-rst)
-                ]
+            ))
+            (match* (lhs rhs)
+              [((Var _) (Var _))
+                (list
+                  (Instr 'cmpq (list (cast lhs) (cast rhs)))
+                  (JmpIf 'e (Goto-label thn))
+                  (Jmp (Goto-label els))
+                )
+              ]
+              [((Var _) _)
+                (list
+                  (Instr 'movq (list (cast rhs) (Reg 'rax)))
+                  (Instr 'cmpq (list (cast lhs) (Reg 'rax)))
+                  (JmpIf 'e (Goto-label thn))
+                  (Jmp (Goto-label els))
+                )
+              ]
+              [(_ (Var _))
+                (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs))) thn els)
+              ]
+              [((Int _) (Int _)) 
+                (comp-rst)
+              ]
+              [((Bool _) (Bool _))
+                (comp-rst)
+              ]
+            )
+          ]
+          [(Prim '< (list lhs rhs))
+            (define comp-rst (lazy
+              (if (< (Imm-value lhs) (Imm-value rhs))
+                (list (Jmp (Goto-label thn)))
+                (list (Jmp (Goto-label els)))
               )
-            ]
+            ))
+            (match* (lhs rhs)
+              [((Var _) (Var _))
+                (list
+                  (Instr 'cmpq (list (cast rhs) (cast lhs)))
+                  (JmpIf 'l (Goto-label thn))
+                  (Jmp (Goto-label els))
+                )
+              ]
+              [((Var _) _)
+                (list
+                  (Instr 'movq (list (cast rhs) (Reg 'rax)))
+                  (Instr 'cmpq (list (Reg 'rax) (cast lhs)))
+                  (JmpIf 'l (Goto-label thn))
+                  (Jmp (Goto-label els))
+                )
+              ]
+              [(_ (Var _))
+                (list
+                  (Instr 'movq (list (cast lhs) (Reg 'rax)))
+                  (Instr 'cmpq (list (cast rhs) (Reg 'rax)))
+                  (JmpIf 'l (Goto-label thn))
+                  (Jmp (Goto-label els))
+                )
+              ]
+              [((Int _) (Int _)) 
+                (comp-rst)
+              ]
+            )
+          ]
+        )
+      ]
+      [(Goto label)
+        (list (Jmp label))
+      ]
+      [_ (super pass-instr* stmts)]
+    ))
+    (define/override (cast x) (match x
+      [(Bool b) (Imm (if b 1 0))]
+      [_ (super cast x)]))
+    (define/override (pass-instr stmt) (match stmt
+      [(Assign lhs rhs) (match rhs
+        [(Bool _)
+          (list (Instr 'movq (list (cast rhs) lhs)))
+        ]
+        [(Prim 'not (list e))
+          (list
+            (Instr 'movq (list (cast e) lhs))
+            (Instr 'xorq (list (Imm 1) lhs))
           )
         ]
-        [(Goto label)
-          (list (Jmp label))
-        ]
-        [_ (super pass-instr* stmts)]))
-    (define/override (cast x)
-      (match x
-        [(Bool b) (Imm (if b 1 0))]
-        [_ (super cast x)]))
-    (define/override (pass-instr stmt)
-      (match stmt
-        [(Assign lhs rhs)
-          (match rhs
-            [(Bool _)
-              (list (Instr 'movq (list (cast rhs) lhs)))
-            ]
-            [(Prim 'not (list e))
-              (list
-                (Instr 'movq (list (cast e) lhs))
-                (Instr 'xorq (list (Imm 1) lhs))
-              )
-            ]
-            [(Prim 'eq? (list inner-lhs inner-rhs))
-              (list
-                (Instr 'cmpq (list (cast inner-lhs) (cast inner-rhs)))
-                (Instr 'sete (list (ByteReg 'al)))
-                (Instr 'movzbq (list (ByteReg 'al) lhs))
-              )
-            ]
-            [(Prim '- (list inner-lhs inner-rhs))
-              (list 
-                (Instr 'movq (list (cast inner-lhs) lhs))
-                (Instr 'subq (list (cast inner-rhs) lhs))
-              )
-            ]
-            [_ (super pass-instr stmt)]
+        [(Prim 'eq? (list inner-lhs inner-rhs))
+          (list
+            (Instr 'cmpq (list (cast inner-lhs) (cast inner-rhs)))
+            (Instr 'sete (list (ByteReg 'al)))
+            (Instr 'movzbq (list (ByteReg 'al) lhs))
           )
         ]
-      )
-    )
+        [(Prim '- (list inner-lhs inner-rhs))
+          (list 
+            (Instr 'movq (list (cast inner-lhs) lhs))
+            (Instr 'subq (list (cast inner-rhs) lhs))
+          )
+        ]
+        [_ (super pass-instr stmt)]
+      )]
+    ))
   ))
-
-(define select-instructions (λ (p) (send (new pass-select-instructions-If) pass p)))
 
 (require "multigraph.rkt")
 
 (define (pass-read-write-mixin super-class)
   (class super-class
     (super-new)
-    (define/public (get-write instr)
-      (match instr
-        [(Instr 'movq (list _ dst)) (set dst)]
-        [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
-        [(Callq _ _) (list->set (map Reg caller-save-regs))]
-        [(Instr 'negq dst) (set dst)]
-        [(Instr 'cmpq (list _ _)) (set )]
-        [(Jmp _) (set )]
-        [(JmpIf _ _) (set )]
-        ))
+    (define/public (get-write instr) (match instr
+      [(Instr 'movq (list _ dst)) (set dst)]
+      [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
+      [(Callq _ _) (list->set (map Reg caller-save-regs))]
+      [(Instr 'negq dst) (set dst)]
+      [(Instr 'cmpq (list _ _)) (set )]
+      [(Jmp _) (set )]
+      [(JmpIf _ _) (set )]
+    ))
     (define/public (get-read instr)
       (define raw-set (get-read-with-imm instr))
       (define l (filter (λ (i) (not (or (Imm? i) (Bool? i)))) (set->list raw-set)))
       (list->set l)
     )
-    (define/public (get-read-with-imm instr)
-      (match instr
-        [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
-        [(Instr 'movq (list src _)) (set src)]
-        [(Instr 'negq src) (set src)]
-        [(Callq _ count) 
-          (set (map Reg (take pass-args-regs count)))]
-        [(Jmp _) (set )]
-        [(JmpIf _ _) (set )]
-        [(Instr 'cmpq (list a b)) (set a b)]
-      )
-    )
+    (define/public (get-read-with-imm instr) (match instr
+      [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
+      [(Instr 'movq (list src _)) (set src)]
+      [(Instr 'negq src) (set src)]
+      [(Callq _ count) 
+        (set (map Reg (take pass-args-regs count)))]
+      [(Jmp _) (set )]
+      [(JmpIf _ _) (set )]
+      [(Instr 'cmpq (list a b)) (set a b)]
+    ))
   ))
 
 (define (pass-default-set-to-read-mixin super-class)
@@ -484,57 +460,50 @@
   (class super-class
     (super-new) 
     (inherit get-read get-write)
-    (define/override (pass p)
-      (match p
-        [(X86Program info blocks)
-          (define init-graph (init-build-interference-from-blocks blocks (undirected-graph '())))
-          (define pass-block^ (pass-block init-graph))
-          (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-value)
-            (define block^ (pass-block^ block-value))
-            (cons tag block^)
-          ])))
-          (X86Program (dict-set info 'interference init-graph) blocks^)
-        ]
-      )
-    )
+    (define/override (pass p) (match p
+      [(X86Program info blocks)
+        (define init-graph (init-build-interference-from-blocks blocks (undirected-graph '())))
+        (define pass-block^ (pass-block init-graph))
+        (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-value)
+          (define block^ (pass-block^ block-value))
+          (cons tag block^)
+        ])))
+        (X86Program (dict-set info 'interference init-graph) blocks^)
+      ]
+    ))
     (define/public (init-build-interference-from-blocks blocks graph)
       (for ([b blocks]) (match b [(cons _ block)
         (init-build-interference (Block-instr* block) graph)
       ]))
       graph
     )
-    (define/public (init-build-interference b graph)
-      (match b
-        [(cons instr instr*)
-          (for ([w (in-set (get-write instr))])
-            (add-vertex! graph w))
-          (init-build-interference instr* graph)
-        ]
-        ['() graph]
-      )
-    )
-    (define/public ((pass-block interference) block)
-      (match block
-        [(Block info instr*)
-          (pass-instr* instr* (cdr (dict-ref info 'live)) interference)
-          block
-        ])
-    )
-    (define/public (pass-instr* instr* live graph)
-      (match* (instr* live)
-        [((cons instr rest) (cons l live-rest))
-          (define writes (get-write instr))
-          (define reads l)
-          (for ([w (in-set writes)])
-            (for ([r (in-set reads)])
-              (unless (equal? w r) (add-edge! graph w r))
-              )
+    (define/public (init-build-interference b graph) (match b
+      [(cons instr instr*)
+        (for ([w (in-set (get-write instr))])
+          (add-vertex! graph w))
+        (init-build-interference instr* graph)
+      ]
+      ['() graph]
+    ))
+    (define/public ((pass-block interference) block) (match block
+      [(Block info instr*)
+        (pass-instr* instr* (cdr (dict-ref info 'live)) interference)
+        block
+      ]
+    ))
+    (define/public (pass-instr* instr* live graph) (match* (instr* live)
+      [((cons instr rest) (cons l live-rest))
+        (define writes (get-write instr))
+        (define reads l)
+        (for ([w (in-set writes)])
+          (for ([r (in-set reads)])
+            (unless (equal? w r) (add-edge! graph w r))
             )
-          (pass-instr* rest live-rest graph)
-        ]
-        [(_ '()) (void)]
-      )
-    )
+          )
+        (pass-instr* rest live-rest graph)
+      ]
+      [(_ '()) (void)]
+    ))
   ))
 
 (define build-interference (λ (p) (send (new (pass-build-interference-mixin (pass-read-write-mixin pass-abstract))) pass p)))
@@ -542,14 +511,12 @@
 (define pass-color-graph
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(X86Program info blocks)
-          (define color-graph (build-color-graph (dict-ref info 'interference)))
-          (X86Program (dict-set info 'color-graph color-graph) blocks)
-        ]
-      )
-    )
+    (define/override (pass p) (match p
+      [(X86Program info blocks)
+        (define color-graph (build-color-graph (dict-ref info 'interference)))
+        (X86Program (dict-set info 'color-graph color-graph) blocks)
+      ]
+    ))
     (define/public (build-color-graph interference-graph)
       (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
       (for ([n (in-vertices interference-graph)])
@@ -598,47 +565,40 @@
 (define pass-allocate-registers
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(X86Program info blocks)
-          (define table (dict-ref info 'color-graph))
-          (define allo (allocate-registers-block table))
-          (define slot-num (+ 1 (foldl max -1 (map cdr table))))
-          (define blocks^ 
-            (for/list ([block blocks]) (match block [(cons tag block-inner)
-              (cons tag (allo block-inner))]))
-          )
-          (define stack-size (max 0 (* (- slot-num (length caller-save-regs)) 8)))
-          (X86Program (dict-set info 'stack-size stack-size) blocks^)
-        ]
-      )
-    )
-    (define/public ((allocate-instr table) instr)
-      (match instr
-        [(Instr i list-value) (Instr i (map (allocate-register table) list-value))]
-        [(or (Jmp _) (JmpIf _ _)) instr]
-        [(Callq _ _) instr]
-      ))
-    (define/public ((allocate-register table) value)
-      (match value
-        [(or (Imm _) (Bool _)) value]
-        [_
-          (define order (dict-ref table value))
-          (match order
-            [_ #:when (< order (length caller-save-regs)) (Reg (list-ref caller-save-regs order))] 
-            [_ (Deref 'rbp (- (* 8 (- order (length caller-save-regs))) 8))]
-          )
-        ]
-      )
-    )
-    (define/public ((allocate-registers-block table) block)
-      (match block
-        [(Block info instr*)
-          (define instr*^ (map (allocate-instr table) instr*))
-          (Block info instr*^)
-        ]
-      )
-    )
+    (define/override (pass p) (match p
+      [(X86Program info blocks)
+        (define table (dict-ref info 'color-graph))
+        (define allo (allocate-registers-block table))
+        (define slot-num (+ 1 (foldl max -1 (map cdr table))))
+        (define blocks^ 
+          (for/list ([block blocks]) (match block [(cons tag block-inner)
+            (cons tag (allo block-inner))]))
+        )
+        (define stack-size (max 0 (* (- slot-num (length caller-save-regs)) 8)))
+        (X86Program (dict-set info 'stack-size stack-size) blocks^)
+      ]
+    ))
+    (define/public ((allocate-instr table) instr) (match instr
+      [(Instr i list-value) (Instr i (map (allocate-register table) list-value))]
+      [(or (Jmp _) (JmpIf _ _)) instr]
+      [(Callq _ _) instr]
+    ))
+    (define/public ((allocate-register table) value) (match value
+      [(or (Imm _) (Bool _)) value]
+      [_
+        (define order (dict-ref table value))
+        (match order
+          [_ #:when (< order (length caller-save-regs)) (Reg (list-ref caller-save-regs order))] 
+          [_ (Deref 'rbp (- (* 8 (- order (length caller-save-regs))) 8))]
+        )
+      ]
+    ))
+    (define/public ((allocate-registers-block table) block) (match block
+      [(Block info instr*)
+        (define instr*^ (map (allocate-instr table) instr*))
+        (Block info instr*^)
+      ]
+    ))
   )
 )
 
@@ -647,107 +607,94 @@
 (define pass-patch-instructions
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(X86Program info blocks)
-          (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-inner)
-            (cons tag (patch-instr-block block-inner))]))
-          )
-          (X86Program info blocks^)
-        ]
-      )
-    )
-    (define/public (patch-instr-block block)
-      (match block
-        [(Block info instr*)
-          (define instr*^ (patch-instr* instr*))
-          (Block info instr*^)
-        ]
-      )
-    )
-    (define/public (patch-instr* instr*)
-      (match instr*
-        [(cons instr rest)
-          (match instr
-            [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
-              (patch-instr*
-                (cons 
-                  (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))
+    (define/override (pass p) (match p
+      [(X86Program info blocks)
+        (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-inner)
+          (cons tag (patch-instr-block block-inner))]))
+        )
+        (X86Program info blocks^)
+      ]
+    ))
+    (define/public (patch-instr-block block) (match block
+      [(Block info instr*)
+        (define instr*^ (patch-instr* instr*))
+        (Block info instr*^)
+      ]
+    ))
+    (define/public (patch-instr* instr*) (match instr*
+      [(cons instr rest)
+        (match instr
+          [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
+            (patch-instr*
+              (cons 
+                (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))
+                (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
+                  rest)))
+          ]
+          [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
+            (patch-instr*
+              (cons 
+                (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
+                (cons (Instr i (list (Deref r0 o0) (Reg 'rax)))
                   (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
                     rest)))
-            ]
-            [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
-              (patch-instr*
-                (cons 
-                  (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
-                  (cons (Instr i (list (Deref r0 o0) (Reg 'rax)))
-                    (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
-                      rest)))
-              )
-            ]
-            [(Instr 'movq (list (Reg a) (Reg a))) 
-              (patch-instr* rest) ; optimize the useless movq op.
-            ]
-            [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
-              (patch-instr* rest) ; drop the non-sense addition and subtraction.
-            ]
-            [_ (cons instr (patch-instr* rest))]
-          )
-        ]
-        ['() '()]
-      )
-    )
+            )
+          ]
+          [(Instr 'movq (list (Reg a) (Reg a))) 
+            (patch-instr* rest) ; optimize the useless movq op.
+          ]
+          [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
+            (patch-instr* rest) ; drop the non-sense addition and subtraction.
+          ]
+          [_ (cons instr (patch-instr* rest))]
+        )
+      ]
+      ['() '()]
+    ))
   ))
 
 (define pass-prelude-and-conclusion
   (class pass-abstract
     (super-new)
-    (define/public (get-prelude p)
-      (match p [(X86Program info _)
-        (define stack-size (aligned (dict-ref info 'stack-size) 16))
-        (Block '() 
-          (list 
-            (Instr 'pushq (list (Reg 'rbp))) 
-            (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
-            (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
-            (Jmp 'start)
-          ))
-      ])
-    )
-    (define/public (get-conclusion p)
-      (match p [(X86Program info _)
-        (define stack-size (dict-ref info 'stack-size))
-        (Block '()
-          (list 
-            (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
-            (Instr 'popq (list (Reg 'rbp)))
-            (Retq )
-          ))
-      ])
-    )
-    (define/override (pass p)
-      (match p [(X86Program info blocks)
-        (define prelude (get-prelude p))
-        (define conclusion (get-conclusion p))
-        (define blocks^
-          (for/list ([bl blocks]) 
-            (match bl
-              [(cons tag (Block info instr*))
-                (match instr*
-                  [(list) (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-                  [_ (match (last instr*)
-                    [(? Jmp?) bl]
-                    [_ (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-                  )]
-                )
-              ])
-            ))
-        (X86Program info 
-          (dict-set 
-            (dict-set blocks^ 'main prelude)
-            'conclusion conclusion))
-      ])
-    )
+    (define/public (get-prelude p) (match p [(X86Program info _)
+      (define stack-size (aligned (dict-ref info 'stack-size) 16))
+      (Block '() 
+        (list 
+          (Instr 'pushq (list (Reg 'rbp))) 
+          (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
+          (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
+          (Jmp 'start)
+        ))
+    ]))
+    (define/public (get-conclusion p) (match p [(X86Program info _)
+      (define stack-size (dict-ref info 'stack-size))
+      (Block '()
+        (list 
+          (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
+          (Instr 'popq (list (Reg 'rbp)))
+          (Retq )
+        ))
+    ]))
+    (define/override (pass p) (match p [(X86Program info blocks)
+      (define prelude (get-prelude p))
+      (define conclusion (get-conclusion p))
+      (define blocks^
+        (for/list ([bl blocks]) (match bl
+          [(cons tag (Block info instr*))
+            (match instr*
+              [(list) (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+              [_ (match (last instr*)
+                [(? Jmp?) bl]
+                [_ (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+              )]
+            )
+          ])
+        ))
+      (X86Program info 
+        (dict-set 
+          (dict-set blocks^ 'main prelude)
+          'conclusion conclusion))
+    ]))
   ))
 
 (define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
@@ -757,13 +704,11 @@
     (super-new)
     (inherit get-read get-write)
     (inherit default-set-to-read)
-    (define/public (get-block-end instr*)
-      (match instr*
-        [(cons (or (JmpIf _ _) (Jmp _)) _) instr*]
-        [(cons _ rest) (get-block-end rest)]
-        ['() '()]
-      )
-    )
+    (define/public (get-block-end instr*) (match instr*
+      [(cons (or (JmpIf _ _) (Jmp _)) _) instr*]
+      [(cons _ rest) (get-block-end rest)]
+      ['() '()]
+    ))
     (define/public (get-block-next instr*)
       (define jmps (get-block-end instr*))
       (define get-label (lambda (instr) (match instr 
@@ -805,9 +750,6 @@
                 (join state (dict-ref mapping pred)))
             ]
           ))
-        #;(define input 
-          (for/fold ([state bottom]) ([pred preds])
-            (join state (dict-ref mapping pred))))
         (define output (transfer node input))
         (cond [(not (equal? output (dict-ref mapping node))) 
           (dict-set! mapping node output)
@@ -994,6 +936,18 @@
 
 (define uniquify (λ (p) (send (new pass-Lwhile-uniquify) pass p)))
 
+(define pass-select-instructions-while
+  (class pass-select-instructions-If
+    (super-new)
+    (inherit cast)
+    (define/override (pass-instr stmt) (match stmt
+      [(Assign lhs (Prim '+ (or (list lhs e) (list e lhs))))
+        (list (Instr 'addq (list (cast e) lhs)))]
+      [_ (super pass-instr stmt)]
+    ))
+  ))
+
+(define select-instructions (λ (p) (send (new pass-select-instructions-while) pass p)))
 
 (define (patch-instructions p) (send (new pass-patch-instructions) pass p))
 
@@ -1003,30 +957,18 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-
     ("shrink" ,shrink ,interp-Lwhile ,type-check-Lwhile)
-
     ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
-
     ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lwhile)
     ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lwhile ,type-check-Lwhile)
-
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lwhile)
-
     ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
-     
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
-
     ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
-
     ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
-     
     ("build color graph" ,color-graph ,interp-pseudo-x86-1)
     ("allocate registers" ,allocate-registers ,interp-x86-1)
-
     ("patch instructions" ,patch-instructions ,interp-x86-1)
-
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
-
     ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
     ))
