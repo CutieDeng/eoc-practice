@@ -5,10 +5,10 @@
 (require "utilities.rkt")
 (provide (all-defined-out))
 
-(require "interp-Lvec.rkt")
+(require "interp-Lvec-prime.rkt")
 (require "type-check-Lvec.rkt")
-(require "interp-Cwhile.rkt")
-(require "type-check-Cwhile.rkt")
+(require "interp-Cvec.rkt")
+(require "type-check-Cvec.rkt")
 
 (require graph)
 (require "graph-printing.rkt")
@@ -924,8 +924,6 @@
     ))
   ))
 
-(define select-instructions (λ (p) (send (new pass-select-instructions-while) pass p)))
-
 (define (patch-instructions p) (send (new pass-patch-instructions) pass p))
 
 (define pass-expose-allocation
@@ -945,12 +943,12 @@
           (values (cons tmp es^) (dict-set env^ tmp (pass-body e)))
           ))
         (define bytes (* (+ 1 (length es)) 8))
-        (define pre-collect (λ (b) (Let '_ (If (Prim '< (GlobalValue 'free_ptr) bytes) (Void) (Collect bytes)) b)))
+        (define pre-collect (λ (b) (Let '_ (If (Prim '< (list (GlobalValue 'free_ptr) (Int bytes))) (Void) (Collect bytes)) b)))
         (define v (gensym 'tmp))
         (define inner (for/foldr ([b (Var v)]) ([e es^] [idx (in-range (length es))])
-          (Let '_ (Prim 'vector-set! (list (Var v) idx (Var e))))
+          (Let '_ (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
           ))
-        (set! inner (Let v (Allocate (length es) types)))
+        (set! inner (Let v (Allocate (length es) types) inner))
         (set! inner (pre-collect inner))
         (set! inner (expand-env-r inner env^))
         inner
@@ -986,20 +984,20 @@
     (inherit create-block-2)
     (define/override ((explicate-effect env) p cont) (match p
       [(Collect _) (values env (Seq p cont))]
-      [(Allocate _ _) (values env (Seq (Assign (Var '_) p) cont))]
+      [(Allocate _ _) (values env cont)]
       [(GlobalValue _) (values env cont)]
-      [(Prim 'vector-ref (list _ (Int _))) cont]
-      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p cont)]
-      [(Prim 'vector-length (list _)) cont]
+      [(Prim 'vector-ref (list _ (Int _))) (values env cont)]
+      [(Prim 'vector-set! (list _ (Int _) _)) (values env (Seq p cont))]
+      [(Prim 'vector-length (list _)) (values env cont)]
       [_ ((super explicate-effect env) p cont)]
     ))
     (define/override ((explicate-tail env) p) (match p
       [(Collect _) (values env (Return (Void)))]
-      [(Allocate _ _) (values env (Return (Void)))]
+      [(Allocate _ _) (values env (Return p))]
       [(GlobalValue _) (values env (Return (Void)))]
-      [(Prim 'vector-ref (list _ (Int _))) (Return p)]
-      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p (Return (Void)))]
-      [(Prim 'vector-length (list _)) (Return p)]
+      [(Prim 'vector-ref (list _ (Int _))) (values env (Return p))]
+      [(Prim 'vector-set! (list _ (Int _) _)) (values env (Seq p (Return (Void))))]
+      [(Prim 'vector-length (list _)) (values env (Return p))]
       [_ ((super explicate-tail env) p)]
     ))
     (define/override ((explicate-pred env) cnd thn els) (match cnd
@@ -1013,7 +1011,7 @@
       [_ ((super explicate-pred env) cnd thn els)]
     ))
     (define/override ((explicate-assign env) p x cont) (match p
-      [(or (Prim 'vector-set! _) (Collect _)) (values env ((explicate-effect env) p cont))]
+      [(or (Prim 'vector-set! _) (Collect _)) ((explicate-effect env) p cont)]
       [(Allocate (Int _) _) (values env (Seq (Assign (Var x) p) cont))]
       [(Prim 'vector-ref (Int _)) (values env (Seq (Assign (Var x) p) cont))]
       [(Prim 'vector-length _) (values env (Seq (Assign (Var x) p) cont))]
@@ -1024,22 +1022,65 @@
 
 (define explicate-control (λ (p) (send (new pass-Lvec-explicate-control) pass p)))
 
+(define pass-select-instructions-vec
+  (class pass-select-instructions-while
+    (super-new)
+    (define/override (pass-instr instr) (match instr
+      [(Prim 'vector-set! (list v (Int idx) val))
+        (list 
+          (Instr 'movq (list (cast v) (Reg 'r11)))
+          (Instr 'movq (list (cast val) (Deref 'r11 (* 8 (+ idx 1)))))
+        )]
+      [(Assign lhs (Prim 'vector-ref (list v (Int idx))))
+        (list
+          (Instr 'movq (list (cast v) (Reg 'r11)))
+          (Instr 'movq (list (Deref 'r11 (* 8 (+ idx 1))) lhs))
+        )
+      ]
+      [(Assign lhs (Allocate len _))
+        (list
+          (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
+          (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr)))
+          (Instr 'movq (list (Imm 0) (Deref 'r11 0)))
+          (Instr 'movq (list (Reg 'r11) lhs))
+        )
+      ]
+      [(Collect bytes)
+        (list 
+          (Instr 'movq (list (Reg 'r15) (Reg 'rdi)))
+          (Instr 'movq (list (Imm bytes) (Reg 'rsi)))
+          (Callq 'collect 2)
+        )
+      ]
+      [(Assign _ (Void)) (list)]
+      [(Assign lhs (GlobalValue v)) (list (Instr 'movq (list (Global v) lhs)))]
+
+      [_ (super pass-instr instr)]
+    ))
+    (define/override (cast x) (match x
+      [(GlobalValue x) (Global x)]
+      [_ (super cast x)]
+    ))
+  ))
+
+(define select-instructions (λ (p) (send (new pass-select-instructions-vec) pass p)))
+
 ; (debug-level 2)
 (define compiler-passes
   `(
-    ("shrink" ,shrink ,interp-Lvec ,type-check-Lvec)
-    ("uniquify" ,uniquify ,interp-Lvec ,type-check-Lvec)
-    ("collect-set!" ,collect-set! ,interp-Lvec ,type-check-Lvec)
-    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lvec ,type-check-Lvec-has-type)
-    ("expose-allocation" ,expose-allocation ,interp-Lvec ,type-check-Lvec)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec ,type-check-Lvec)
-    ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
-    ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
-    ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
-    ("build interference graph" ,build-interference ,interp-pseudo-x86-1)
-    ("build color graph" ,color-graph ,interp-pseudo-x86-1)
-    ("allocate registers" ,allocate-registers ,interp-x86-1)
-    ("patch instructions" ,patch-instructions ,interp-x86-1)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
-    ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ("shrink" ,shrink ,interp-Lvec-prime ,type-check-Lvec)
+    ("uniquify" ,uniquify ,interp-Lvec-prime ,type-check-Lvec)
+    ("collect-set!" ,collect-set! ,interp-Lvec-prime ,type-check-Lvec)
+    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lvec-prime ,type-check-Lvec-has-type)
+    ("expose-allocation" ,expose-allocation ,interp-Lvec-prime ,type-check-Lvec)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec-prime ,type-check-Lvec)
+    ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
+    ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
+    ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
+    ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
+    ("build color graph" ,color-graph ,interp-pseudo-x86-2)
+    ("allocate registers" ,allocate-registers ,interp-x86-2)
+    ("patch instructions" ,patch-instructions ,interp-x86-2)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
+    ("patch instructions" ,patch-instructions ,interp-x86-2)
   ))
