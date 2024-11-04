@@ -5,7 +5,7 @@
 (require "utilities.rkt")
 (provide (all-defined-out))
 
-(require "interp-Lwhile.rkt")
+(require "interp-Lvec.rkt")
 (require "type-check-Lvec.rkt")
 (require "interp-Cwhile.rkt")
 (require "type-check-Cwhile.rkt")
@@ -825,8 +825,6 @@
     ))
   ))
 
-(define remove-complex-opera* (λ (p) (send (new pass-Lwhile-rco) pass p)))
-
 (define pass-Lwhile-explicate-control
   (class pass-Lif-explicate-control
     (super-new)
@@ -969,14 +967,30 @@
     ))
   ))
 
+(define expose-allocation (λ (p) (send (new pass-expose-allocation) pass p)))
+
+(define pass-Lvec-rco
+  (class pass-Lwhile-rco
+    (super-new)
+    (define/override (pass-exp p) (match p 
+      [(Collect _) p]
+      [(GlobalValue _) p]  
+      [(Allocate _ _) p]
+      [_ (super pass-exp p)]
+    ))
+  ))
+
+(define remove-complex-opera* (λ (p) (send (new pass-Lvec-rco) pass p)))
+
 ; (debug-level 2)
 (define compiler-passes
   `(
-    ("shrink" ,shrink ,interp-Lwhile ,type-check-Lvec)
-    ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lvec)
-    ("collect-set!" ,collect-set! ,interp-Lwhile ,type-check-Lvec)
-    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lwhile ,type-check-Lvec)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lvec)
+    ("shrink" ,shrink ,interp-Lvec ,type-check-Lvec)
+    ("uniquify" ,uniquify ,interp-Lvec ,type-check-Lvec)
+    ("collect-set!" ,collect-set! ,interp-Lvec ,type-check-Lvec)
+    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lvec ,type-check-Lvec-has-type)
+    ("expose-allocation" ,expose-allocation ,interp-Lvec ,type-check-Lvec)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec ,type-check-Lvec)
     ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-1)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-1)
@@ -985,5 +999,5 @@
     ("allocate registers" ,allocate-registers ,interp-x86-1)
     ("patch instructions" ,patch-instructions ,interp-x86-1)
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
-    ;  ("patch instructions" ,patch-instructions ,interp-x86-1)
-    ))
+    ("patch instructions" ,patch-instructions ,interp-x86-1)
+  ))
