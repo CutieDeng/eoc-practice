@@ -896,8 +896,6 @@
     ))
   ))
 
-(define explicate-control (λ (p) (send (new pass-Lwhile-explicate-control) pass p)))
-
 (define pass-Lwhile-uniquify
   (class pass-Lif-uniquify
     (super-new)
@@ -973,14 +971,58 @@
   (class pass-Lwhile-rco
     (super-new)
     (define/override (pass-exp p) (match p 
-      [(Collect _) p]
+      [(Collect (Int _)) p]
       [(GlobalValue _) p]  
-      [(Allocate _ _) p]
+      [(Allocate (Int _) _) p]
       [_ (super pass-exp p)]
     ))
   ))
 
 (define remove-complex-opera* (λ (p) (send (new pass-Lvec-rco) pass p)))
+
+(define pass-Lvec-explicate-control
+  (class pass-Lwhile-explicate-control
+    (super-new)
+    (inherit create-block-2)
+    (define/override ((explicate-effect env) p cont) (match p
+      [(Collect _) (values env (Seq p cont))]
+      [(Allocate _ _) (values env (Seq (Assign (Var '_) p) cont))]
+      [(GlobalValue _) (values env cont)]
+      [(Prim 'vector-ref (list _ (Int _))) cont]
+      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p cont)]
+      [(Prim 'vector-length (list _)) cont]
+      [_ ((super explicate-effect env) p cont)]
+    ))
+    (define/override ((explicate-tail env) p) (match p
+      [(Collect _) (values env (Return (Void)))]
+      [(Allocate _ _) (values env (Return (Void)))]
+      [(GlobalValue _) (values env (Return (Void)))]
+      [(Prim 'vector-ref (list _ (Int _))) (Return p)]
+      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p (Return (Void)))]
+      [(Prim 'vector-length (list _)) (Return p)]
+      [_ ((super explicate-tail env) p)]
+    ))
+    (define/override ((explicate-pred env) cnd thn els) (match cnd
+      [(Prim 'vector-ref (list _ (Int _))) 
+        (define tmp (gensym 'tmp))
+        (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
+        (values env^ 
+          (Seq (Assign (Var tmp) cnd) (IfStmt (Prim 'eq (Var tmp) (Bool #t)) thn^ els^))
+        )
+      ]
+      [_ ((super explicate-pred env) cnd thn els)]
+    ))
+    (define/override ((explicate-assign env) p x cont) (match p
+      [(or (Prim 'vector-set! _) (Collect _)) (values env ((explicate-effect env) p cont))]
+      [(Allocate (Int _) _) (values env (Seq (Assign (Var x) p) cont))]
+      [(Prim 'vector-ref (Int _)) (values env (Seq (Assign (Var x) p) cont))]
+      [(Prim 'vector-length _) (values env (Seq (Assign (Var x) p) cont))]
+      [(GlobalValue _) (values env (Seq (Assign (Var x) p) cont))]
+      [_ ((super explicate-assign env) p x cont)]
+    ))
+  ))
+
+(define explicate-control (λ (p) (send (new pass-Lvec-explicate-control) pass p)))
 
 ; (debug-level 2)
 (define compiler-passes
