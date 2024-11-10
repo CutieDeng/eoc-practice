@@ -19,9 +19,10 @@
 
 (require racket/pretty)
 
-(define (aligned x a) (cond
-  [(zero? (modulo x a)) x]
-  [else (+ x (- a (modulo x a)))]))
+(define (aligned x a) (match (modulo x a)
+  [0 x]
+  [y (+ x a (- y))]
+))
 
 (define caller-save-regs 
   (list 'rax 'rcx 'rdx 'rsi 'rdi 'r8 'r9 'r10 'r11)
@@ -43,15 +44,21 @@
   (class object%
     (super-new)
     (abstract pass)
-    ))
+  ))
 
-(define pass-shrink
+(define pass-program-abstract
   (class pass-abstract
     (super-new)
-    (define/override (pass p) (match p [(Program info exp)
-      (Program info (pass-exp exp))
-    ]))
-    (define/public (pass-exp p) (match p
+    (abstract pass-exp)
+    (define/override pass (match-lambda 
+      [(Program info exp) (Program info (pass-exp exp))]
+    ))
+  ))
+
+(define pass-shrink
+  (class pass-program-abstract
+    (super-new)
+    (define/override pass-exp (match-lambda
       [(Prim 'and (list a b)) (If (pass-exp a) (pass-exp b) (Bool #f))]
       [(Prim 'or (list a b)) (If (pass-exp a) (Bool #t) (pass-exp b))]
       [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
@@ -59,48 +66,53 @@
       [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
       [(Begin es e) (Begin (map (λ (v) (pass-exp v)) es) (pass-exp e))]
       [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
-      [_ p]
+      [exp exp]
     ))
   ))
 
 (define shrink (λ (p) (send (new pass-shrink) pass p)))
 
-(define pass-Lvar-uniquify
+(define pass-program-ext-abstract
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(Program info body)
-          (define body-2 ((pass-exp '()) body))
-          (Program info body-2)
-        ]))
-    (define/public ((pass-exp env) exp) (match exp
-        [(Var x) (Var (dict-ref env x))]
-        [(Int _) exp]
-        [(Let x exp body)
-          (define exp^ ((pass-exp env) exp))
-          (define x^ (gensym x))
-          (define body^ ((pass-exp (dict-set env x x^)) body))
-          (Let x^ exp^ body^)]
-        [(Prim op es)
-          (Prim op (for/list ([e es]) ((pass-exp env) e)))]
+    (abstract pass-exp)
+    (define/public (init-env) '())
+    (define/override pass (match-lambda
+      [(Program info exp) (Program info ((pass-exp (init-env)) exp))]
     ))
-  )
-)
+  ))
+
+(define pass-Lvar-uniquify
+  (class pass-program-ext-abstract
+    (super-new)
+    (define/override (pass-exp env) (match-lambda 
+      [(Var x) 
+        (Var (dict-ref env x))]
+      [(and (Int _) exp) exp]
+      [(Let x exp body)
+        (define exp^ ((pass-exp env) exp))
+        (define x^ (gensym x))
+        (define env^ (dict-set env x x^))
+        (define body^ ((pass-exp env^) body))
+        (Let x^ exp^ body^)]
+      [(Prim op es)
+        (Prim op (for/list ([e es]) ((pass-exp env) e)))]
+    ))
+  ))
 
 (define pass-Lif-uniquify
   (class pass-Lvar-uniquify
     (super-new)
-    (define/override ((pass-exp env) exp) (match exp
-        [(Bool _) exp]
+    (define/override (pass-exp env) 
+      (define (pass-exp^) (pass-exp env))
+      (match-lambda 
+        [(and (Bool _) exp) exp]
         [(If cnd thn els)
-          (define cnd-2 ((pass-exp env) cnd))
-          (define thn-2 ((pass-exp env) thn))
-          (define els-2 ((pass-exp env) els))
-          (If cnd-2 thn-2 els-2)
+          (match-define (list cnd^ thn^ els^) (map (pass-exp^) (list cnd thn els)))
+          (If cnd^ thn^ els^)
         ]
-        [_ ((super pass-exp env) exp)]
-    ))
+        [exp ((super pass-exp env) exp)]
+      ))
   ))
 
 (define pass-Lvar-rco
@@ -121,24 +133,22 @@
     (define/public ((pass-atom env) p)
       ((exp-cast-atom env) (pass-exp p))
     )
-    (define/public (pass-exp p)
-      (match p
-        [(Prim op es)
-          (define-values (env-2 es-2)
-            (for/foldr ([env-c '()] [es-c '()]) ([e es])
-              (define-values (env-nxt e-nxt) ((pass-atom env-c) e))
-              (values env-nxt (cons e-nxt es-c))
-              ))
-          ((expand-lets env-2) (Prim op es-2))
-        ]
-        [(Let x e body)
-          (define new-e (pass-exp e))
-          (define new-body (pass-exp body))
-          (Let x new-e new-body)
-        ]
-        [_ p]
-      )
-    )
+    (define/public pass-exp (match-lambda
+      [(Prim op es)
+        (define-values (env^ es^)
+          (for/foldr ([env-a '()] [es-a '()]) ([e es])
+            (define-values (env-nxt e-nxt) ((pass-atom env-a) e))
+            (values env-nxt (cons e-nxt es-a))
+            ))
+        ((expand-lets env^) (Prim op es^))
+      ]
+      [(Let x e body)
+        (define new-e (pass-exp e))
+        (define new-body (pass-exp body))
+        (Let x new-e new-body)
+      ]
+      [p p]
+    ))
   ))
 
 (define pass-Lif-rco
@@ -854,8 +864,8 @@
       ]
       [(Begin es body)
         (define-values (env^ body^) ((explicate-effect env) body cont))
-        (for/foldr ([env-c env^] [body-c body^]) ([e es])
-          ((explicate-effect env-c) e body-c))
+        (for/foldr ([env-a env^] [body-a body^]) ([e es])
+          ((explicate-effect env-a) e body-a))
       ]
       [(If cnd thn els)
         (define-values (env^ cont^) ((create-block env) cont))
@@ -879,8 +889,8 @@
     (define/override ((explicate-pred env) cnd thn els) (match cnd
       [(Begin es body)
         (define-values (env^ body^) ((explicate-pred env) body thn els))
-        (for/foldr ([env-c env^] [body-c body^]) ([e es])
-          ((explicate-effect env-c) e body-c))
+        (for/foldr ([env-a env^] [body-a body^]) ([e es])
+          ((explicate-effect env-a) e body-a))
       ]
       [(or (WhileLoop _ _) (SetBang _ _))
         (error 'explicate-pred "unexpected type of cnd with actual Void")
@@ -890,8 +900,8 @@
     (define/override ((explicate-tail env) p) (match p
       [(Begin es body)
         (define-values (env^ body^) ((explicate-tail env) body))
-        (for/foldr ([env-c env^] [body-c body^]) ([e es])
-          ((explicate-effect env-c) e body-c))
+        (for/foldr ([env-a env^] [body-a body^]) ([e es])
+          ((explicate-effect env-a) e body-a))
       ]
       [(or (WhileLoop _ _) (SetBang _ _))
         ((explicate-effect env) p (get-void-rst))]
@@ -901,8 +911,8 @@
       [(or (WhileLoop _ _) (SetBang _ _)) ((explicate-effect env) p cont)]
       [(Begin es body)
         (define-values (env^ body^) ((explicate-assign env) body x cont))
-        (for/foldr ([env-c env^] [body-c body^]) ([e es])
-          ((explicate-effect env-c) e x body-c))
+        (for/foldr ([env-a env^] [body-a body^]) ([e es])
+          ((explicate-effect env-a) e x body-a))
       ]
       [_ ((super explicate-assign env) p x cont)]
     ))
@@ -911,17 +921,20 @@
 (define pass-Lwhile-uniquify
   (class pass-Lif-uniquify
     (super-new)
-    (define/override ((pass-exp env) exp) (match exp
-      [(SetBang var rhs) 
-        (SetBang (dict-ref env var) ((pass-exp env) rhs))]
-      [(Begin es body)
-        (Begin (for/list ([e es]) ((pass-exp env) e)) ((pass-exp env) body))] 
-      [(WhileLoop cnd body) 
-        (WhileLoop ((pass-exp env) cnd) ((pass-exp env) body))]
-      [_ ((super pass-exp env) exp)]
-    ))
-  )
-)
+    (define/override (pass-exp env) 
+      (define (pass-exp^) (pass-exp env))
+      (match-lambda
+        [(SetBang var rhs) 
+          (SetBang (dict-ref env var) ((pass-exp^) rhs))]
+        [(Begin es body)
+          (define p (pass-exp^))
+          (Begin (for/list ([e es]) (p e)) (p body))] 
+        [(WhileLoop cnd body) 
+          (define p (pass-exp^))
+          (WhileLoop (p cnd) (p body))]
+        [exp ((super pass-exp env) exp)]
+      ))
+  ))
 
 (define uniquify (λ (p) (send (new pass-Lwhile-uniquify) pass p)))
 
@@ -929,30 +942,27 @@
   (class pass-select-instructions-If
     (super-new)
     (inherit cast)
-    (define/override (pass-instr stmt) (match stmt
+    (define/override pass-instr (match-lambda
       [(Assign lhs (Prim '+ (or (list lhs e) (list e lhs))))
         (list (Instr 'addq (list (cast e) lhs)))]
-      [_ (super pass-instr stmt)]
+      [stmt (super pass-instr stmt)]
     ))
   ))
 
 (define (patch-instructions p) (send (new pass-patch-instructions) pass p))
 
 (define pass-expose-allocation
-  (class pass-abstract
+  (class pass-program-abstract
     (super-new)
-    (define/override (pass p) (match p [(Program info body)
-      (Program info (pass-body body))
-    ]))
     (define/public (expand-env-r body env) (match env
       [(cons (cons x v) rest) (Let x v (expand-env-r body rest))]
       ['() body]
     ))
-    (define/public (pass-body body) (match body 
+    (define/override pass-exp (match-lambda
       [(HasType (Prim 'vector es) types)
         (define-values (es^ env^) (for/fold ([es^ '()] [env^ '()]) ([e es])
           (define tmp (gensym 'tmp))
-          (values (cons tmp es^) (dict-set env^ tmp (pass-body e)))
+          (values (cons tmp es^) (dict-set env^ tmp (pass-exp e)))
           ))
         (define bytes (* (+ 1 (length es)) 8))
         (define pre-collect (λ (b) (Let '_ (If (Prim '< (list (GlobalValue 'free_ptr) (Int bytes))) (Void) (Collect bytes)) b)))
@@ -965,13 +975,13 @@
         (set! inner (pre-collect inner))
         inner
       ]
-      [(Prim o es) (Prim o (for/list ([e es]) (pass-body e)))]
-      [(If cnd thn els) (If (pass-body cnd) (pass-body thn) (pass-body els))]
-      [(Begin es e) (Begin (for/list ([e es]) (pass-body e)) (pass-body e))]
-      [(Let x rhs body) (Let x (pass-body rhs) (pass-body body))]
-      [(SetBang var rhs) (SetBang var (pass-body rhs))]
-      [(WhileLoop cnd body) (WhileLoop (pass-body cnd) (pass-body body))]
-      [_ body]
+      [(Prim o es) (Prim o (for/list ([e es]) (pass-exp e)))]
+      [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
+      [(Begin es e) (Begin (for/list ([e es]) (pass-exp e)) (pass-exp e))]
+      [(Let x rhs body) (Let x (pass-exp rhs) (pass-exp body))]
+      [(SetBang var rhs) (SetBang var (pass-exp rhs))]
+      [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
+      [body body]
     ))
   ))
 
