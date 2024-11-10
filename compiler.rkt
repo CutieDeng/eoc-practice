@@ -36,7 +36,7 @@
 )
 
 (define caller-and-callee-regs
-  (append caller-save-regs (cddr callee-save-regs))
+  (append caller-save-regs callee-save-regs)
 )
 
 (define pass-abstract
@@ -245,8 +245,8 @@
       [(Program info exp)
         (define-values (env stmt) ((explicate-tail '()) exp))
         (define env^ (dict-set env 'start stmt))
-        (printf "---explicate---\n")
-        (pretty-print env^)
+        ; (printf "---explicate---\n")
+        ; (pretty-print env^)
         (CProgram info env^)
       ]))
   ))
@@ -520,12 +520,11 @@
               (dict-set nei-set^ n inner-2)
             ))
         )
-        #;(for/fold ([nei-set '()]) ([n (in-neighbors interference-graph (Reg 'rax))])
-          (define inner (dict-ref nei-set n '()))
-          (define inner-2 (set-add inner 0))
-          (pqueue-push! q (cons n (length inner-2)))
-          (dict-set nei-set n inner-2)
-        )
+      )
+      (for ([r (in-vertices interference-graph)])
+        (add-edge! interference-graph r (Reg 'r15))
+        (add-edge! interference-graph r (Reg 'rsp))
+        (add-edge! interference-graph r (Reg 'rbp))
       )
       (define selections (for/fold ([select '()]) ([i (range (length caller-and-callee-regs))] [r caller-and-callee-regs])
         (dict-set select (Reg r) i)
@@ -584,6 +583,7 @@
     ))
     (define/public ((allocate-register table) value) (match value
       [(or (Imm _) (Bool _)) value]
+      [(Reg _) value]
       [_
         (define order (dict-ref table value))
         (match order
@@ -960,9 +960,9 @@
         (define inner (for/foldr ([b (Var v)]) ([e es^] [idx (in-range (length es))])
           (Let '_ (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
           ))
+        (set! inner (expand-env-r inner env^))
         (set! inner (Let v (Allocate (length es) types) inner))
         (set! inner (pre-collect inner))
-        (set! inner (expand-env-r inner env^))
         inner
       ]
       [(Prim o es) (Prim o (for/list ([e es]) (pass-body e)))]
@@ -1040,9 +1040,13 @@
     (define/override (pass-instr instr) (match instr
       [(Prim 'vector-set! (list v (Int idx) val))
         (list 
+          (Instr 'movq (list (cast val) (Reg 'rax)))
           (Instr 'movq (list (cast v) (Reg 'r11)))
-          (Instr 'movq (list (cast val) (Deref 'r11 (* 8 (+ idx 1)))))
+          (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))
         )]
+      [(Assign _ (Prim 'vector-set! _)) 
+        (pass-instr (Assign-rhs instr)) 
+      ]
       [(Assign lhs (Prim 'vector-ref (list v (Int idx))))
         (list
           (Instr 'movq (list (cast v) (Reg 'r11)))
@@ -1116,7 +1120,7 @@
       [_ ((super allocate-register table) value)]
     ))
     (define/override (pass p) (match (super pass p) [(X86Program info blocks)
-      (pretty-print (map (λ (b) (cons (car b) (Block-instr* (cdr b)))) blocks))
+      ; (pretty-print (map (λ (b) (cons (car b) (Block-instr* (cdr b)))) blocks))
       (X86Program (dict-set info 'num-root-spills 0) blocks)
     ]))
   )
