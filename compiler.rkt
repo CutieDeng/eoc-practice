@@ -1044,9 +1044,8 @@
           (Instr 'movq (list (cast v) (Reg 'r11)))
           (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))
         )]
-      [(Assign _ (Prim 'vector-set! _)) 
-        (pass-instr (Assign-rhs instr)) 
-      ]
+      [(Assign _ (and (Prim 'vector-set! _) rhs)) 
+        (pass-instr rhs)]
       [(Assign lhs (Prim 'vector-ref (list v (Int idx))))
         (list
           (Instr 'movq (list (cast v) (Reg 'r11)))
