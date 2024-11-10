@@ -1,4 +1,5 @@
 #lang racket
+
 (require racket/set)
 (require racket/fixnum)
 (require "interp.rkt")
@@ -16,6 +17,8 @@
 
 (require data/queue)
 
+(require racket/pretty)
+
 (define (aligned x a) (cond
   [(zero? (modulo x a)) x]
   [else (+ x (- a (modulo x a)))]))
@@ -32,6 +35,10 @@
   (list 'rdi 'rsi 'rdx 'rcx 'r8 'r9)
 )
 
+(define caller-and-callee-regs
+  (append caller-save-regs (cddr callee-save-regs))
+)
+
 (define pass-abstract
   (class object%
     (super-new)
@@ -41,20 +48,19 @@
 (define pass-shrink
   (class pass-abstract
     (super-new)
-    (define/override (pass p)
-      (match p
-        [(Program info exp)
-          (define exp-2 (pass-exp exp))
-          (Program info exp-2)]))
-    (define/public (pass-exp p)
-      (match p
-        [(Prim 'and (list a b)) (If (pass-exp a) (pass-exp b) (Bool #f))]
-        [(Prim 'or (list a b)) (If (pass-exp a) (Bool #t) (pass-exp b))]
-        [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
-        [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
-        [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
-        [_ p]
-      ))
+    (define/override (pass p) (match p [(Program info exp)
+      (Program info (pass-exp exp))
+    ]))
+    (define/public (pass-exp p) (match p
+      [(Prim 'and (list a b)) (If (pass-exp a) (pass-exp b) (Bool #f))]
+      [(Prim 'or (list a b)) (If (pass-exp a) (Bool #t) (pass-exp b))]
+      [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
+      [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
+      [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
+      [(Begin es e) (Begin (map (λ (v) (pass-exp v)) es) (pass-exp e))]
+      [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
+      [_ p]
+    ))
   ))
 
 (define shrink (λ (p) (send (new pass-shrink) pass p)))
@@ -239,6 +245,8 @@
       [(Program info exp)
         (define-values (env stmt) ((explicate-tail '()) exp))
         (define env^ (dict-set env 'start stmt))
+        (printf "---explicate---\n")
+        (pretty-print env^)
         (CProgram info env^)
       ]))
   ))
@@ -487,7 +495,6 @@
     ))
   ))
 
-(define build-interference (λ (p) (send (new (pass-build-interference-mixin (pass-read-write-mixin pass-abstract))) pass p)))
 
 (define pass-color-graph
   (class pass-abstract
@@ -504,15 +511,26 @@
         (pqueue-push! q (cons n 0))
       )
       (define neighbors-set 
-        (with-handlers ([exn:fail? (λ (_e) '())])
-          (for/fold ([nei-set '()]) ([n (in-neighbors interference-graph (Reg 'rax))])
-            (define inner (dict-ref nei-set n '()))
-            (define inner-2 (set-add inner 0))
-            (pqueue-push! q (cons n (length inner-2)))
-            (dict-set nei-set n inner-2)
-          ))
+        (for/fold ([nei-set '()]) ([i (range (length caller-and-callee-regs))] [r caller-and-callee-regs])
+          (with-handlers ([exn:fail? (λ (_e) nei-set)])
+            (for/fold ([nei-set^ nei-set]) ([n (in-neighbors interference-graph (Reg r))])
+              (define inner (dict-ref nei-set^ n '()))
+              (define inner-2 (set-add inner i))
+              (pqueue-push! q (cons n (length inner-2)))
+              (dict-set nei-set^ n inner-2)
+            ))
+        )
+        #;(for/fold ([nei-set '()]) ([n (in-neighbors interference-graph (Reg 'rax))])
+          (define inner (dict-ref nei-set n '()))
+          (define inner-2 (set-add inner 0))
+          (pqueue-push! q (cons n (length inner-2)))
+          (dict-set nei-set n inner-2)
+        )
       )
-      (define color-graph-value (let color-find ([neighbors-set neighbors-set] [selections (dict-set '() (Reg 'rax) 0)])
+      (define selections (for/fold ([select '()]) ([i (range (length caller-and-callee-regs))] [r caller-and-callee-regs])
+        (dict-set select (Reg r) i)
+      ))
+      (define color-graph-value (let color-find ([neighbors-set neighbors-set] [selections selections])
         (cond
           [(= (pqueue-count q) 0) selections]
           [else
@@ -555,7 +573,7 @@
           (for/list ([block blocks]) (match block [(cons tag block-inner)
             (cons tag (allo block-inner))]))
         )
-        (define stack-size (max 0 (* (- slot-num (length caller-save-regs)) 8)))
+        (define stack-size (max 0 (* (- slot-num (length caller-and-callee-regs)) 8)))
         (X86Program (dict-set info 'stack-size stack-size) blocks^)
       ]
     ))
@@ -569,8 +587,8 @@
       [_
         (define order (dict-ref table value))
         (match order
-          [_ #:when (< order (length caller-save-regs)) (Reg (list-ref caller-save-regs order))] 
-          [_ (Deref 'rbp (- (* 8 (- order (length caller-save-regs))) 8))]
+          [_ #:when (< order (length caller-and-callee-regs)) (Reg (list-ref caller-and-callee-regs order))] 
+          [_ (Deref 'rbp (- (* 8 (- order (length caller-and-callee-regs))) 8))]
         )
       ]
     ))
@@ -582,8 +600,6 @@
     ))
   )
 )
-
-(define allocate-registers (λ (p) (send (new pass-allocate-registers) pass p)))
 
 (define pass-patch-instructions
   (class pass-abstract
@@ -768,10 +784,6 @@
   )
 )
 
-(define uncover-live (λ (p) (send (new 
-  (pass-uncover-live-mixin
-    (pass-read-write-mixin (pass-default-set-to-read-mixin pass-abstract)))) pass p)))
-  
 (define pass-collect-set! 
   (class pass-abstract
     (super-new)
@@ -996,7 +1008,7 @@
       [(Allocate _ _) (values env (Return p))]
       [(GlobalValue _) (values env (Return (Void)))]
       [(Prim 'vector-ref (list _ (Int _))) (values env (Return p))]
-      [(Prim 'vector-set! (list _ (Int _) _)) (values env (Seq p (Return (Void))))]
+      [(Prim 'vector-set! (list _ (Int _) _)) (values env (Return p))]
       [(Prim 'vector-length (list _)) (values env (Return p))]
       [_ ((super explicate-tail env) p)]
     ))
@@ -1054,7 +1066,6 @@
       ]
       [(Assign _ (Void)) (list)]
       [(Assign lhs (GlobalValue v)) (list (Instr 'movq (list (Global v) lhs)))]
-
       [_ (super pass-instr instr)]
     ))
     (define/override (cast x) (match x
@@ -1065,6 +1076,54 @@
 
 (define select-instructions (λ (p) (send (new pass-select-instructions-vec) pass p)))
 
+(define (pass-build-interference-mixin2 super-class)
+  (class super-class
+    (super-new) 
+    (inherit get-read get-write)
+    (define/override (pass p) (super pass p))
+  ))
+
+(define build-interference (λ (p) (send (new 
+  (pass-build-interference-mixin2 
+  (pass-build-interference-mixin 
+  (pass-read-write-Cwhile-mixin pass-abstract)))) pass p)))
+
+(define (pass-read-write-Cwhile-mixin super-class)
+  (class (pass-read-write-mixin super-class)
+    (super-new)
+    (inherit get-read-with-imm)
+    (define/override (get-write instr) 
+      (define set^ (super get-write instr))
+      (list->set (filter (λ (i) (not (or (Global? i) (Deref? i)))) (set->list set^)))
+    )
+    (define/override (get-read instr)
+      (define raw-set (get-read-with-imm instr))
+      (define l (filter (λ (i) (not (or (Imm? i) (Bool? i) (Global? i) (Deref? i)))) (set->list raw-set)))
+      (list->set l)
+    )
+  ))
+
+(define uncover-live (λ (p) (send (new 
+  (pass-uncover-live-mixin
+    (pass-read-write-Cwhile-mixin
+      (pass-default-set-to-read-mixin pass-abstract)))) pass p)))
+
+(define pass-allocate-registers-Lvec
+  (class pass-allocate-registers
+    (super-new)
+    (define/override ((allocate-register table) value) (match value
+      [(or (Global _) (Deref _ _)) value]
+      [_ ((super allocate-register table) value)]
+    ))
+    (define/override (pass p) (match (super pass p) [(X86Program info blocks)
+      (pretty-print (map (λ (b) (cons (car b) (Block-instr* (cdr b)))) blocks))
+      (X86Program (dict-set info 'num-root-spills 0) blocks)
+    ]))
+  )
+)
+
+(define allocate-registers (λ (p) (send (new pass-allocate-registers-Lvec) pass p)))
+  
 ; (debug-level 2)
 (define compiler-passes
   `(
@@ -1082,5 +1141,5 @@
     ("allocate registers" ,allocate-registers ,interp-x86-2)
     ("patch instructions" ,patch-instructions ,interp-x86-2)
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
-    ("patch instructions" ,patch-instructions ,interp-x86-2)
+    ; ("patch instructions" ,patch-instructions ,interp-x86-2)
   ))
