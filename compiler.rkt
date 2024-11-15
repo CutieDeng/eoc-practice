@@ -1075,11 +1075,11 @@
           (Instr 'movq (list (Deref 'r11 (* 8 (+ idx 1))) lhs))
         )
       ]
-      [(Assign lhs (Allocate len _))
+      [(Assign lhs (Allocate len types))
         (list
           (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
           (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr)))
-          (Instr 'movq (list (Imm 0) (Deref 'r11 0)))
+          (Instr 'movq (list (Imm (cast-types-to-tag types)) (Deref 'r11 0)))
           (Instr 'movq (list (Reg 'r11) lhs))
         )
       ]
@@ -1149,6 +1149,26 @@
 )
 
 (define allocate-registers (λ (p) (send (new pass-allocate-registers-Lvec) pass p)))
+
+(define cast-types-to-tag (match-lambda
+  [`(Vector ,types ...)
+    (define types-mask 
+      (let get-bit-fields ([idx 0] [rest-types types] [mask 1] [rst 0])
+        (match rest-types
+          [`(Integer ,rest ...) 
+            (get-bit-fields (+ idx 1) rest (* mask 2) rst)]
+          [`((Vector ,_ ...) ,rest ...) 
+            (get-bit-fields (+ idx 1) rest (arithmetic-shift mask 1) (bitwise-ior rst mask))]
+          ['() rst]
+      ))
+    )
+    (bitwise-ior 
+      (arithmetic-shift types-mask 7)
+      (arithmetic-shift (length types) 1)
+      1
+    )
+  ]
+))
   
 ; (debug-level 2)
 (define compiler-passes
