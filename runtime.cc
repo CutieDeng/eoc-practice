@@ -33,7 +33,7 @@ constexpr uint64_t
 TAG_IS_NOT_FORWARD_MASK = 1;
 
 constexpr uint64_t 
-TAG_VEC_LENGTH_MASK = 126; // 1111110
+TAG_VEC_LENGTH_MASK = 0b1111110;
 constexpr uint64_t 
 TAG_VEC_LENGTH_RSHIFT = 1;
 constexpr uint64_t 
