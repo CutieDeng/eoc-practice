@@ -2,19 +2,23 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <stdint.h>
 #include "runtime.h"
 
 // To do: we need to account for the "any" type. -Jeremy
 
-// Often misunderstood: static global variables in C are not
-// accessible to code outside of the module.
-// No one besides the collector ever needs to know tospace exists.
-static int64_t* tospace_begin;
-static int64_t* tospace_end;
+namespace {
 
-// initialized it set during initialization of the heap, and can be
-// checked in order to ensure that initialization has occurred.
-static int initialized = 0;
+int64_t* tospace_begin;
+int64_t* tospace_end;
+
+}
+
+namespace {
+
+bool initialized = false;
+
+}
 
 /*
   Tuple Tag (64 bits)
@@ -25,56 +29,66 @@ static int initialized = 0;
     The next 50 bits say where there are pointers.
     A '1' is a pointer, a '0' is not a pointer.
 */
-static const int TAG_IS_NOT_FORWARD_MASK = 1;
+constexpr uint64_t
+TAG_IS_NOT_FORWARD_MASK = 1;
 
-static const int TAG_VEC_LENGTH_MASK = 126; // 1111110
-static const int TAG_VEC_LENGTH_RSHIFT = 1;
-static const int TAG_VEC_PTR_BITFIELD_RSHIFT = 7;
+constexpr uint64_t 
+TAG_VEC_LENGTH_MASK = 126; // 1111110
+constexpr uint64_t 
+TAG_VEC_LENGTH_RSHIFT = 1;
+constexpr uint64_t 
+TAG_VEC_PTR_BITFIELD_RSHIFT = 7;
 
-static const int TAG_VECOF_LENGTH_RSHIFT = 2;
-static const int TAG_VECOF_PTR_BITFIELD_RSHIFT = 1;
-static const int TAG_VECOF_RSHIFT = 63;
+constexpr uint64_t 
+TAG_VECOF_LENGTH_RSHIFT = 2;
+constexpr uint64_t 
+TAG_VECOF_PTR_BITFIELD_RSHIFT = 1;
+constexpr uint64_t 
+TAG_VECOF_RSHIFT = 63;
+
+namespace {
 
 // cheney implements cheney's copying collection algorithm
 // There is a stub and explaination below.
-static void cheney(int64_t** rootstack_ptr);
-
+void cheney(int64_t** rootstack_ptr);
 
 // Check to see if a tag is actually a forwarding pointer.
-static inline int is_forwarding(int64_t tag) {
+int is_forwarding(int64_t tag) {
   return !(tag & TAG_IS_NOT_FORWARD_MASK);
 }
 
-static inline int is_vecof(int64_t tag) {
+int is_vecof(int64_t tag) {
   return (tag >> TAG_VECOF_RSHIFT);
 }
 
 // Get the length field out of a vector's tag.
 // It is contained in bits [1,6].
-static inline int get_vector_length(int64_t tag){
+int get_vector_length(int64_t tag){
   return (tag & TAG_VEC_LENGTH_MASK) >> TAG_VEC_LENGTH_RSHIFT;
 }
 
 // Get the "is pointer bitfield" out of a vector's tag.
-static inline int64_t get_vec_ptr_bitfield(int64_t tag){
+int64_t get_vec_ptr_bitfield(int64_t tag){
   return tag >> TAG_VEC_PTR_BITFIELD_RSHIFT;
 }
 
 // Get the length field out of a vectorof's tag.
-static inline int get_vecof_length(int64_t tag){
+int get_vecof_length(int64_t tag){
   return ((tag << 1) >> 1) >> TAG_VECOF_LENGTH_RSHIFT;
 }
 
 // Get the "is pointer bitfield" out of a vectorof's tag.
-static inline int64_t get_vecof_ptr_bitfield(int64_t tag){
+int64_t get_vecof_ptr_bitfield(int64_t tag){
   return (tag >> TAG_VECOF_PTR_BITFIELD_RSHIFT) & 1;
 }
 
-static inline int get_vec_length(int64_t tag){
+int get_vec_length(int64_t tag){
   if (is_vecof(tag))
     return get_vecof_length(tag);
   else
     return get_vector_length(tag);
+}
+
 }
 
 // The following needs to stay in sync with the any-tag function
@@ -122,17 +136,17 @@ void initialize(uint64_t rootstack_size, uint64_t heap_size)
   assert((rootstack_size % sizeof(int64_t)) == 0);
 
   // 2. Allocate memory (You should always check if malloc gave you memory)
-  if (!(fromspace_begin = malloc(heap_size))) {
+  if (!(fromspace_begin = (int64_t*)malloc(heap_size))) {
     printf("Failed to malloc %" PRIu64 " byte fromspace\n", heap_size);
     exit(EXIT_FAILURE);
   }
 
-  if (!(tospace_begin = malloc(heap_size))) {
+  if (!(tospace_begin = (int64_t*)malloc(heap_size))) {
     printf("Failed to malloc %" PRIu64 " byte tospace\n", heap_size);
     exit(EXIT_FAILURE);
   }
 
-  if (!(rootstack_begin = malloc(rootstack_size))) {
+  if (!(rootstack_begin = (int64_t**)malloc(rootstack_size))) {
     printf("Failed to malloc %" PRIu64 " byte rootstack", rootstack_size);
     exit(EXIT_FAILURE);
   }
@@ -147,7 +161,7 @@ void initialize(uint64_t rootstack_size, uint64_t heap_size)
   free_ptr = fromspace_begin;
 
   // Useful for debugging
-  initialized = 1;
+  initialized = true;
 
 }
 
@@ -176,8 +190,8 @@ void validate_vector(int64_t** scan_addr) {
 
 void collect(int64_t** rootstack_ptr, uint64_t bytes_requested)
 {
-#if 0
-  printf("collecting, need %ld\n", bytes_requested);
+#if 1
+  printf("collecting, need %llu\n", bytes_requested);
   print_heap(rootstack_ptr);
 #endif
 
@@ -242,7 +256,7 @@ void collect(int64_t** rootstack_ptr, uint64_t bytes_requested)
     // Free and allocate a new tospace of size new_bytes
     free(tospace_begin);
 
-    if (!(tospace_begin = malloc(new_bytes))) {
+    if (!(tospace_begin = (int64_t*)malloc(new_bytes))) {
       printf("failed to malloc %ld byte fromspace", new_bytes);
       exit(EXIT_FAILURE);
     }
@@ -260,7 +274,7 @@ void collect(int64_t** rootstack_ptr, uint64_t bytes_requested)
     // tospace not fromspace as we might expect.
     free(tospace_begin);
 
-    if (!(tospace_begin = malloc(new_bytes))) {
+    if (!(tospace_begin = (int64_t*)malloc(new_bytes))) {
       printf("failed to malloc %ld byte tospace", new_bytes);
       exit(EXIT_FAILURE);
     }
@@ -396,6 +410,8 @@ void process_vector(int64_t** scan_addr) {
   }
 }
 
+namespace {
+
 void cheney(int64_t** rootstack_ptr)
 {
   // printf("cheney: starting copy, rootstack=%p\n", rootstack_ptr);
@@ -471,6 +487,8 @@ void cheney(int64_t** rootstack_ptr)
   fromspace_begin = tmp_begin;
   fromspace_end = tmp_end;
   //printf("cheney: finished copy\n");
+}
+
 }
 
 
