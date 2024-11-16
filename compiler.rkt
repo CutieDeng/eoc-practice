@@ -497,7 +497,6 @@
         (define reads l)
         (for ([w (in-set writes)])
           (for ([r (in-set reads)])
-            ; (unless (equal? w r) (add-edge! graph w r))
             (add-edge! graph w r)
             )
           )
@@ -507,30 +506,39 @@
     ))
   ))
 
-
 (define pass-color-graph
   (class pass-abstract
     (super-new)
     (define/override (pass p) (match p
       [(X86Program info blocks)
-        (define color-graph (build-color-graph (dict-ref info 'interference)))
-        (X86Program (dict-set info 'color-graph color-graph) blocks)
+        (define interference (dict-ref info 'interference))
+        (pre-interference-handle interference)
+        ; (define color-graph (build-color-graph interference))
+        (define int-graph (build-int-color-graph interference (match-lambda 
+          [_ #t]
+        )))
+        (define vec-graph (build-vec-color-graph interference (match-lambda
+          [_ #f]
+        )))
+        (X86Program (dict-set (dict-set info 'color-graph int-graph) 'vec-color-graph vec-graph) blocks)
       ]
     ))
-    (define/public (build-color-graph interference-graph)
-      (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
-      (for ([n (in-vertices interference-graph)])
-        (pqueue-push! q (cons n 0))
-      )
+    (define/public (pre-interference-handle interference-graph)
       (for ([r (in-vertices interference-graph)])
         (add-edge! interference-graph r (Reg 'r15))
         (add-edge! interference-graph r (Reg 'rsp))
         (add-edge! interference-graph r (Reg 'rbp))
       )
+    )
+    (define/public (build-int-color-graph interference-graph int-filter)
+      (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
+      (for ([n (sequence-filter int-filter (in-vertices interference-graph))])
+        (pqueue-push! q (cons n 0))
+      )
       (define neighbors-set 
         (for/fold ([nei-set '()]) ([i (range (length caller-and-callee-regs))] [r caller-and-callee-regs])
           (with-handlers ([exn:fail? (λ (_e) nei-set)])
-            (for/fold ([nei-set^ nei-set]) ([n (in-neighbors interference-graph (Reg r))])
+            (for/fold ([nei-set^ nei-set]) ([n (sequence-filter int-filter (in-neighbors interference-graph (Reg r)))])
               (define inner (dict-ref nei-set^ n '()))
               (define inner-2 (set-add inner i))
               (pqueue-push! q (cons n (length inner-2)))
@@ -554,7 +562,7 @@
                     (color-find-2 (+ color 1))
                     color
                     )))
-                (define neighbors-set-2 (for/fold ([n neighbors-set]) ([v (in-neighbors interference-graph (car pop))])
+                (define neighbors-set-2 (for/fold ([n neighbors-set]) ([v (sequence-filter int-filter (in-neighbors interference-graph (car pop)))])
                   (define inner (dict-ref n v '()))
                   (define inner-2 (set-add inner color))
                   (pqueue-push! q (cons v (length inner-2)))
@@ -567,6 +575,35 @@
         )
       ))
       color-graph-value
+    )
+    (define/public (build-vec-color-graph interference-graph vertice-filter)
+      (define pq (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
+      (for ([v (sequence-filter vertice-filter (in-vertices interference-graph))])
+        (pqueue-push! pq (cons v 0))
+      )
+      (define neighbors-set '())
+      (let color-find ([neighbors-set neighbors-set] [selections '()]) (cond
+        [(= (pqueue-count pq) 0) selections]
+        [else
+          (define p (pqueue-pop! pq))
+          (cond
+            [(dict-has-key? selections (car p)) (color-find neighbors-set selections)]
+            [else 
+              (define select-color (let select-color ([n 0]) 
+                (cond
+                  [(set-member? (dict-ref neighbors-set (car p) '()) n) (select-color (+ n 1))]
+                  [else n]
+                )))
+              (define neighbors-set^ (for/fold ([neighbors-set neighbors-set]) ([v (sequence-filter vertice-filter (in-vertices interference-graph))])
+                (define set^ (set-add (dict-ref neighbors-set v '()) select-color))
+                (pqueue-push! pq (cons v (length set^)))
+                (dict-set neighbors-set v set^)
+              ))
+              (color-find neighbors-set^ (dict-set selections (car p) select-color))
+            ]
+          )
+        ]
+      ))
     )
   ))
 
@@ -1169,7 +1206,7 @@
     )
   ]
 ))
-  
+
 ; (debug-level 2)
 (define compiler-passes
   `(
