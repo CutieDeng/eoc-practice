@@ -272,6 +272,7 @@
             (define b^ (pass-instr* (cdr b)))
             (cons (car b) (Block '() b^))
           ))
+        ; (pretty-print blocks^)
         (X86Program info 
           blocks^
         )
@@ -496,7 +497,8 @@
         (define reads l)
         (for ([w (in-set writes)])
           (for ([r (in-set reads)])
-            (unless (equal? w r) (add-edge! graph w r))
+            ; (unless (equal? w r) (add-edge! graph w r))
+            (add-edge! graph w r)
             )
           )
         (pass-instr* rest live-rest graph)
@@ -520,6 +522,11 @@
       (for ([n (in-vertices interference-graph)])
         (pqueue-push! q (cons n 0))
       )
+      (for ([r (in-vertices interference-graph)])
+        (add-edge! interference-graph r (Reg 'r15))
+        (add-edge! interference-graph r (Reg 'rsp))
+        (add-edge! interference-graph r (Reg 'rbp))
+      )
       (define neighbors-set 
         (for/fold ([nei-set '()]) ([i (range (length caller-and-callee-regs))] [r caller-and-callee-regs])
           (with-handlers ([exn:fail? (λ (_e) nei-set)])
@@ -530,11 +537,6 @@
               (dict-set nei-set^ n inner-2)
             ))
         )
-      )
-      (for ([r (in-vertices interference-graph)])
-        (add-edge! interference-graph r (Reg 'r15))
-        (add-edge! interference-graph r (Reg 'rsp))
-        (add-edge! interference-graph r (Reg 'rbp))
       )
       (define selections (for/fold ([select '()]) ([i (range (length caller-and-callee-regs))] [r caller-and-callee-regs])
         (dict-set select (Reg r) i)
@@ -597,7 +599,8 @@
       [_
         (define order (dict-ref table value))
         (match order
-          [_ #:when (< order (length caller-and-callee-regs)) (Reg (list-ref caller-and-callee-regs order))] 
+          [_ #:when (< order (length caller-and-callee-regs)) 
+            (Reg (list-ref caller-and-callee-regs order))] 
           [_ (Deref 'rbp (- (* 8 (- order (length caller-and-callee-regs))) 8))]
         )
       ]
@@ -1120,8 +1123,8 @@
       (list->set (filter (λ (i) (not (or (Global? i) (Deref? i)))) (set->list set^)))
     )
     (define/override (get-read instr)
-      (define raw-set (get-read-with-imm instr))
-      (define l (filter (λ (i) (not (or (Imm? i) (Bool? i) (Global? i) (Deref? i)))) (set->list raw-set)))
+      (define set^ (get-read-with-imm instr))
+      (define l (filter (λ (i) (not (or (Imm? i) (Bool? i) (Global? i) (Deref? i)))) (set->list set^)))
       (list->set l)
     )
   ))
