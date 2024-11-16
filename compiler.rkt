@@ -670,6 +670,12 @@
           (Instr 'pushq (list (Reg 'rbp))) 
           (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
           (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
+          (Instr 'movq (list (Imm 65536) (Reg 'rdi)))
+          (Instr 'movq (list (Imm 65536) (Reg 'rsi)))
+          (Callq 'initialize 2)
+          (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15)))
+          (Instr 'movq (list (Imm 0) (Deref 'r15 0)))
+          (Instr 'addq (list (Imm 8) (Deref 'r15 0)))
           (Jmp 'start)
         ))
     ]))
@@ -677,6 +683,7 @@
       (define stack-size (dict-ref info 'stack-size))
       (Block '()
         (list 
+          (Instr 'subq (list (Imm 8) (Reg 'r15)))
           (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
           (Instr 'popq (list (Reg 'rbp)))
           (Retq )
@@ -965,7 +972,10 @@
           (values (cons tmp es^) (dict-set env^ tmp (pass-exp e)))
           ))
         (define bytes (* (+ 1 (length es)) 8))
-        (define pre-collect (λ (b) (Let '_ (If (Prim '< (list (GlobalValue 'free_ptr) (Int bytes))) (Void) (Collect bytes)) b)))
+        (define pre-collect (λ (b) (Let '_ (If 
+          (Prim '< (list 
+            (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes)))
+            (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) b)))
         (define v (gensym 'tmp))
         (define inner (for/foldr ([b (Var v)]) ([e es^] [idx (in-range (length es))])
           (Let '_ (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
