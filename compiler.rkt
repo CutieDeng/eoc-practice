@@ -24,27 +24,28 @@
   [y (+ x a (- y))]
 ))
 
-(define caller-save-regs 
-  (list 'rax 'rcx 'rdx 'rsi 'rdi 'r8 'r9 'r10 'r11)
-)
+(define caller-save-regs '(rax rcx rdx rsi rdi r8 r9 r10 r11))
 
-(define callee-save-regs
-  (list 'rsp 'rbp 'rbx 'r12 'r13 'r14 'r15)
-)
+(define callee-save-regs '(rsp rbp rbx r12 r13 r14 r15))
 
-(define pass-args-regs
-  (list 'rdi 'rsi 'rdx 'rcx 'r8 'r9)
-)
+(define pass-args-regs '(rdi rsi rdx rcx r8 r9))
 
-(define caller-and-callee-regs
-  (append caller-save-regs callee-save-regs)
-)
+(define caller-and-callee-regs (append caller-save-regs callee-save-regs))
 
 (define pass-abstract
   (class object%
     (super-new)
     (abstract pass)
   ))
+
+(define (pass-program-mixin clazz)
+  (class clazz
+    (super-new)
+    (inherit pass-exp)
+    (define/public pass (match-lambda 
+      [(Program info body) (Program info (pass-exp body))]))
+  )
+)
 
 (define pass-program-abstract
   (class pass-abstract
@@ -56,9 +57,9 @@
   ))
 
 (define pass-shrink
-  (class pass-program-abstract
+  (class object%
     (super-new)
-    (define/override pass-exp (match-lambda
+    (define/public pass-exp (match-lambda
       [(Prim 'and (list a b)) (If (pass-exp a) (pass-exp b) (Bool #f))]
       [(Prim 'or (list a b)) (If (pass-exp a) (Bool #t) (pass-exp b))]
       [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
@@ -66,11 +67,11 @@
       [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
       [(Begin es e) (Begin (map (λ (v) (pass-exp v)) es) (pass-exp e))]
       [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
-      [exp exp]
+      [(and value (or (Int _) (Bool _) (Var _) (SetBang _ _) (GetBang _))) value]
     ))
   ))
 
-(define shrink (λ (p) (send (new pass-shrink) pass p)))
+(define shrink (λ (p) (send (new (pass-program-mixin pass-shrink)) pass p)))
 
 (define pass-program-ext-abstract
   (class pass-abstract
