@@ -4,7 +4,7 @@
 (require racket/fixnum)
 (require "interp.rkt")
 (require "utilities.rkt")
-(provide (all-defined-out))
+; (provide (all-defined-out))
 
 (require "interp-Lvec-prime.rkt")
 (require "type-check-Lvec.rkt")
@@ -876,7 +876,7 @@
       [(Begin es e) (Begin (for/list ([e es]) ((pass-body set!-vars) e)) ((pass-body set!-vars) e))]
     ))
     (define/override (pass p) (match p [(Program info body)
-      (Program info ((pass-body (dict-ref info 'set!)) body))
+      (Program (dict-remove info 'set!) ((pass-body (dict-ref info 'set!)) body))
     ]))
   ))
 
@@ -1035,7 +1035,7 @@
     ))
   ))
 
-(define expose-allocation (λ (p) (send (new pass-expose-allocation) pass p)))
+(define expose-allocation (λ (p) (pretty-print p) (send (new pass-expose-allocation) pass p)))
 
 (define pass-Lvec-rco
   (class pass-Lwhile-rco
@@ -1207,13 +1207,98 @@
   ]
 ))
 
+(define collect-vector-variables 
+  (class pass-abstract
+    (super-new)
+    (define/override pass (match-lambda 
+      [(CProgram info blocks)
+        (error 'pass "unimpl")
+      ]))
+    (define/public ((pass-block env) block)
+      (error 'pass-block "unimpl")
+    )
+    (define/public (merge-type-info lhs rhs)
+      (for/fold ([r lhs]) ([(k v) (in-dict-pairs rhs)])
+        (define r-sub (dict-ref r k '()))
+        (define r-sub^ (set-union r-sub v))
+        (dict-set r k r-sub^)
+      )
+    )
+    (define/public (get-all-uninit-types block)
+      (void)
+    )
+  ))
+
+(define collect-type-info
+  (class pass-abstract
+    (super-new)
+    (define/override pass (match-lambda 
+      [(Program info exp)
+        (error 'pass) 
+      ]
+    ))
+    (field [prim-table (make-hash)])
+    (define/public (pass-exp table) (match-lambda
+      [(Let var rhs body)
+        (define rhs-t ((pass-exp table) rhs))
+        (hash-set! table var rhs-t) 
+        ((pass-exp table) body)
+      ]
+      [(Prim op operands) 
+        prim-table
+        (error 'prim)
+      ]
+      [(If cnd thn els)
+        (define cnd-t ((pass-exp table) cnd))
+        (match cnd-t
+          ['Void (void)]
+          [_ (collect (Void) cnd-t cnd)])
+        (define thn-t ((pass-exp table) thn))
+        (define els-t ((pass-exp table) els))
+        (cond
+          [(not (equal? thn-t els-t)) (collect thn-t els-t els)])
+        thn-t
+      ]
+      [(WhileLoop cnd body)
+        (define cnd-t ((pass-exp table) cnd))
+        (match cnd-t 
+          ['Boolean (void)]
+          [_ (collect 'Boolean cnd-t cnd)])
+        ((pass-exp table) body)
+        'Void
+      ]
+      [(SetBang var rhs)
+        (define rhs-t ((pass-exp table) rhs))
+        (match (hash-ref table var (λ () #f))
+          [#f (hash-set! table var rhs-t)]
+          [var-t 
+            (unless (equal? var-t rhs-t) (collect var-t rhs-t rhs))
+          ])
+        'Void
+      ]
+      [(Begin es body)
+        (for ([e es]) ((pass-exp table) e))
+        ((pass-exp table) body)
+      ]
+      [(GetBang var)
+        (hash-ref table var (λ () #f))
+      ]
+      [(Int _) 'Integer]
+      [(Bool _) 'Boolean]
+      [(GlobalValue _) 'Integer]
+      [(HasType _ t) t]
+      [(Collect _) 'Void]
+    ))
+    (abstract collect)
+  ))
+
 ; (debug-level 2)
 (define compiler-passes
   `(
     ("shrink" ,shrink ,interp-Lvec-prime ,type-check-Lvec)
     ("uniquify" ,uniquify ,interp-Lvec-prime ,type-check-Lvec)
     ("collect-set!" ,collect-set! ,interp-Lvec-prime ,type-check-Lvec)
-    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lvec-prime ,type-check-Lvec-has-type)
+    ("uncover-get!-exp" ,uncover-get!-exp ,interp-Lvec-prime ,type-check-Lvec-has-type #;,type-check-Lvec)
     ("expose-allocation" ,expose-allocation ,interp-Lvec-prime ,type-check-Lvec)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec-prime ,type-check-Lvec)
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
@@ -1226,3 +1311,5 @@
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
     ; ("patch instructions" ,patch-instructions ,interp-x86-2)
   ))
+
+(provide compiler-passes)
