@@ -73,6 +73,8 @@
 
 (define shrink (λ (p) (send (new (pass-program-mixin pass-shrink)) pass p)))
 
+(define env (make-parameter '()))
+
 (define pass-program-ext-abstract
   (class pass-abstract
     (super-new)
@@ -83,38 +85,41 @@
     ))
   ))
 
-(define pass-Lvar-uniquify
-  (class pass-program-ext-abstract
+(define pass-Lwhile-uniquify
+  (class object%
     (super-new)
-    (define/override (pass-exp env) (match-lambda 
-      [(Var x) 
-        (Var (dict-ref env x))]
-      [(and (Int _) exp) exp]
-      [(Let x exp body)
-        (define exp^ ((pass-exp env) exp))
-        (define x^ (gensym x))
-        (define env^ (dict-set env x x^))
-        (define body^ ((pass-exp env^) body))
-        (Let x^ exp^ body^)]
-      [(Prim op es)
-        (Prim op (for/list ([e es]) ((pass-exp env) e)))]
-    ))
-  ))
-
-(define pass-Lif-uniquify
-  (class pass-Lvar-uniquify
-    (super-new)
-    (define/override (pass-exp env) 
-      (define (pass-exp^) (pass-exp env))
-      (match-lambda 
-        [(and (Bool _) exp) exp]
+    (define/public (pass-exp exp)
+      (define e (env))
+      (match exp
+        [(Var x) (Var (dict-ref e x))]
+        [(or (Int _) (Bool _)) exp]
+        [(Let x exp body)
+          (define exp^ (pass-exp exp))
+          (define x^ (gensym x))
+          (parameterize ([env (dict-set e x x^)])
+            (define body^ (pass-exp body))
+            (Let x^ exp^ body^)
+          )
+        ]
+        [(Prim op es)
+          (Prim op (for/list ([e^ es]) (pass-exp e^)))]
         [(If cnd thn els)
-          (match-define (list cnd^ thn^ els^) (map (pass-exp^) (list cnd thn els)))
+          (define cnd^ (pass-exp cnd))
+          (define thn^ (pass-exp thn))
+          (define els^ (pass-exp els))
           (If cnd^ thn^ els^)
         ]
-        [exp ((super pass-exp env) exp)]
-      ))
+        [(SetBang var rhs)
+          (SetBang (dict-ref e var) (pass-exp rhs))]
+        [(Begin es body)
+          (Begin (for/list ([e^ es]) (pass-exp e^)) (pass-exp body))]
+        [(WhileLoop cnd body)
+          (WhileLoop (pass-exp cnd) (pass-exp body))]
+      )
+    )
   ))
+
+(define uniquify (λ (p) (send (new (pass-program-mixin pass-Lwhile-uniquify)) pass p)))
 
 (define pass-Lvar-rco
   (class pass-abstract
@@ -966,25 +971,6 @@
     ))
   ))
 
-(define pass-Lwhile-uniquify
-  (class pass-Lif-uniquify
-    (super-new)
-    (define/override (pass-exp env) 
-      (define (pass-exp^) (pass-exp env))
-      (match-lambda
-        [(SetBang var rhs) 
-          (SetBang (dict-ref env var) ((pass-exp^) rhs))]
-        [(Begin es body)
-          (define p (pass-exp^))
-          (Begin (for/list ([e es]) (p e)) (p body))] 
-        [(WhileLoop cnd body) 
-          (define p (pass-exp^))
-          (WhileLoop (p cnd) (p body))]
-        [exp ((super pass-exp env) exp)]
-      ))
-  ))
-
-(define uniquify (λ (p) (send (new pass-Lwhile-uniquify) pass p)))
 
 (define pass-select-instructions-while
   (class pass-select-instructions-If
