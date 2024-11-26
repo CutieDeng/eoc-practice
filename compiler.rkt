@@ -168,110 +168,144 @@
 
 (define remove-complex-opera* (λ (p) (send (new pass-rco) pass p)))
 
-;; explicate-control : Lvar^mon -> Cvar
-(define pass-Lvar-explicate-control
-  (class pass-abstract
+(define explicate-control-env (make-parameter #f))
+
+(define pass-Lvec-explicate-control
+  (class object%
     (super-new)
-    (define/override (pass p) (match p
-      [(Program info exp)
-        (CProgram info (dict-set '() 'start (explicate-tail exp)))
-      ])
-    )
+    (define/public pass (match-lambda 
+      [(Program info body)
+        (parameterize ([explicate-control-env (make-hash)]) 
+          (define b (explicate-tail body))
+          (hash-set! (explicate-control-env) 'start b)
+          (CProgram info (explicate-control-env))
+        ) 
+      ]
+    ))
     (define/public (explicate-tail p) (match p
+      [(Collect _) (Return p)]
+      [(Allocate (? integer?) _) (Return p)]
+      [(GlobalValue _) (Return p)]
+      [(Prim 'vector-ref (list _ (Int _))) (Return p)]
+      [(Prim 'vector-set! (list _ (Int _) _)) (Return p)]
+      [(Prim 'vector-length (list _)) (Return p)]
+      [(Begin es body) 
+        (for/foldr ([init-cont (explicate-tail body)]) ([e es])
+          (explicate-effect e init-cont)
+        )]
+      [(or (WhileLoop _ _) (SetBang _ _)) 
+        (explicate-effect p (Return (Void )))]
+      [(If cnd thn els) (explicate-pred cnd (explicate-tail thn) (explicate-tail els))]
       [(Let x e body) (explicate-assign e x (explicate-tail body))]
-      [_ (Return p)]
+      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (Return p)]
     ))
     (define/public (explicate-assign p x cont) (match p
-      [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
-      [_ (Seq (Assign (Var x) p) cont)]
-    ))
-  ))
-
-(define pass-Lif-explicate-control
-  (class pass-Lvar-explicate-control
-    (super-new)
-    (define/override ((explicate-tail env) p) (match p
+      [(or (Collect _) (Prim 'vector-set! _)) 
+        (Seq p cont)]
+      [(or (Allocate (? integer?) _) 
+          (Prim 'vector-ref (list (Int _) _)) (Prim 'vector-length _)
+          (GlobalValue _))
+        (Seq (Assign (Var x) p) cont)
+      ]
+      [(Begin es body) 
+        (for/foldr ([init-cont (explicate-assign body x cont)]) ([e es])
+          (explicate-effect e init-cont)
+        )]
+      [(or (WhileLoop _ _) (SetBang _ _)) 
+        (explicate-effect p cont)]
       [(If cnd thn els) 
-        (define-values (env-2 thn^) ((explicate-tail env) thn))
-        (define-values (env-3 els^) ((explicate-tail env-2) els))
-        ((explicate-pred env-3) cnd thn^ els^)
+        (define cont-blk (create-block cont)) 
+        (define thn-ass (explicate-assign thn x cont-blk))
+        (define els-ass (explicate-assign els x cont-blk))
+        (explicate-pred cnd thn-ass els-ass)
       ]
-      [(Let x e body) 
-        (define-values (env-2 body-2) ((explicate-tail env) body))
-        ((explicate-assign env-2) e x body-2)
-      ]
-      [_ (values env (Return p))]
+      [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
+      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (Seq (Assign (Var x) p) cont)]
     ))
-    (define/override ((explicate-assign env) p x cont) (match p
+    (define/public (explicate-pred cnd thn els) 
+      (define thn-blk (create-block thn))
+      (define els-blk (create-block els))
+      (match cnd
+        [(Prim 'vector-ref (list _ (Int _))) 
+          (define tmp (gensym 'tmp))
+          (Seq (Assign (Var tmp) cnd) (IfStmt (Prim 'eq? (Var tmp) (Bool #t)) thn-blk els-blk))
+        ]
+        [(Begin es body)
+          (define cont (explicate-pred body thn els))
+          (for/foldr ([cont cont]) ([e es])
+            (explicate-effect e cont)
+          )
+        ]
+        [(If cnd2 thn2 els2)
+          (define thn2-blk (explicate-pred thn2 thn-blk els-blk))
+          (define els2-blk (explicate-pred els2 thn-blk els-blk))
+          (explicate-pred cnd2 thn2-blk els2-blk)
+        ]
+        [(Let y e body)
+          (explicate-assign e y (explicate-pred body thn-blk els-blk))
+        ]
+        [(or (Var _) (Bool _))
+          (IfStmt (Prim 'eq? (list cnd (Bool #t))) thn-blk els-blk)
+        ]
+        [(Prim 'not (list _))
+          (IfStmt (Prim 'eq? (list cnd (Bool #f))) thn-blk els-blk)
+        ]
+        [(Prim (or 'eq? '< '>) (list _ _))
+          (IfStmt cnd thn-blk els-blk)
+        ]
+      ))
+    (define/public (explicate-effect p cont) (match p
+      [(Collect _) (Seq p cont)]
+      [(or (Allocate (? integer?) _) (GlobalValue _)) cont]
+      [(Prim 'vector-ref (list _ (Int _))) cont]
+      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p cont)]
+      [(Prim 'vector-length (list _)) cont]
+      [(SetBang var rhs) (explicate-assign rhs var cont)]
+      [(WhileLoop cnd body)
+        (define body-lbl (gensym 'label))
+        (define cnd-lbl (gensym 'label))
+        (define cnd^ (explicate-pred cnd (Goto body-lbl) cont))
+        (define body^ (explicate-effect body (Goto cnd-lbl))) 
+        (define env (explicate-control-env))
+        (hash-set! env body-lbl body^)
+        (hash-set! env cnd-lbl cnd^)
+        (Goto cnd-lbl)
+      ]
+      [(Begin es body)
+        (for/foldr ([init-body (explicate-effect body cont)]) ([e es])
+          (explicate-effect e init-body))
+      ]
       [(If cnd thn els)
-        (define-values (env-2 cont^) ((create-block env) cont))
-        (define-values (env-3 thn^) ((explicate-assign env-2) thn x cont^))
-        (define-values (env-4 els^) ((explicate-assign env-3) els x cont^))
-        ((explicate-pred env-4) cnd thn^ els^)
+        (define cont-blk (create-block cont))
+        (define thn^ (explicate-effect thn cont-blk))
+        (define els^ (explicate-effect els cont-blk))
+        (explicate-pred cnd thn^ els^)
       ]
-      [(Let y e body)
-        (define-values (env-2 cont^) ((explicate-assign env) body x cont))
-        (define-values (env-3 body^) ((explicate-assign env-2) e y cont^))
-        (values env-3 body^)
+      [(Let var rhs body)
+        (explicate-assign rhs var (explicate-effect body cont))
       ]
-      [_ (values env (Seq (Assign (Var x) p) cont))]
+      [(Prim _ args)
+        (for/foldr ([init-body cont]) ([arg args])
+          (explicate-effect arg init-body) 
+        )]
+      [(or (Var _) (Int _) (Bool _) (Void )) cont]
     ))
-    (define/public ((explicate-pred env) cnd thn els) (match cnd
-      [(If cnd-2 thn-2 els-2)
-        (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
-        (define-values (env^^ thn^^) ((explicate-pred env^) thn-2 thn^ els^))
-        (define-values (env^^^ els^^) ((explicate-pred env^^) els-2 thn^ els^))
-        ((explicate-pred env^^^) cnd-2 thn^^ els^^)
-      ]
-      [(Let y e body)
-        (define-values (env-2 body^) ((explicate-pred env) body thn els))
-        ((explicate-assign env-2) e y body^)
-      ]
-      [_
-        (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
-        (match cnd
-          [(Var _)
-            (values env^ (IfStmt (Prim 'eq (list cnd (Bool #t))) thn^ els^))]
-          [(Bool b)
-            (values env (if b thn els))]
-          [(Prim 'not (list _))
-            (values env^ (IfStmt (Prim 'eq (list cnd (Bool #f))) thn^ els^))]
-          [(Prim _ (list _ _))
-            (values env^ (IfStmt cnd thn^ els^))]
-        )
-      ]
+    (define/public create-block (match-lambda 
+      [(and raw-jmp (Goto _)) raw-jmp]
+      [other (define lbl (gensym 'label)) (hash-set! (explicate-control-env) lbl other) (Goto lbl)]
     ))
-    (define/public ((create-block env) stmt) (match stmt
-      [(Goto _) (values env stmt)]
-      [_ 
-        (define lbl (gensym 'label))
-        (define env-2 (dict-set env lbl stmt))
-        (values env-2 (Goto lbl))
-      ]
-    ))
-    (define/public ((create-block-2 env) stmt0 stmt1)
-      (define-values (env^ stmt0^) ((create-block env) stmt0))
-      (define-values (env^^ stmt1^) ((create-block env^) stmt1))
-      (values env^^ stmt0^ stmt1^)
-    )
-    (define/override (pass p) (match p
-      [(Program info exp)
-        (define-values (env stmt) ((explicate-tail '()) exp))
-        (define env^ (dict-set env 'start stmt))
-        ; (printf "---explicate---\n")
-        ; (pretty-print env^)
-        (CProgram info env^)
-      ]))
-  ))
+  )
+)
 
-;; select-instructions : Cvar -> x86var
+(define explicate-control (λ (p) (send (new pass-Lvec-explicate-control) pass p)))
+
 (define pass-select-instructions
   (class pass-abstract
     (super-new)
     (define/override (pass p) (match p
       [(CProgram info blocks)
         (define blocks^ 
-          (for/list ([b blocks]) 
+          (for/list ([b (hash->list blocks)]) 
             (define b^ (pass-instr* (cdr b)))
             (cons (car b) (Block '() b^))
           ))
@@ -885,78 +919,6 @@
 
 (define uncover-get!-exp (λ (p) (send (new pass-uncover-get!-exp) pass p)))
 
-(define pass-Lwhile-explicate-control
-  (class pass-Lif-explicate-control
-    (super-new)
-    (inherit create-block)
-    (define/public ((explicate-effect env) p cont) (match p
-      [(SetBang var rhs) ((explicate-assign env) rhs var cont)]
-      [(WhileLoop cnd body)
-        (define body-lbl (gensym 'label))
-        (define cnd-lbl (gensym 'label))
-        (define-values (env^ cnd^) ((explicate-pred env) cnd (Goto body-lbl) cont))
-        (define-values (env^^ body^) ((explicate-effect env^) body (Goto cnd-lbl)))
-        (define env^^^ (dict-set env^^ body-lbl body^))
-        (define env^^^^ (dict-set env^^^ cnd-lbl cnd^))
-        (values env^^^^ (Goto cnd-lbl))
-      ]
-      [(Begin es body)
-        (define-values (env^ body^) ((explicate-effect env) body cont))
-        (for/foldr ([env-a env^] [body-a body^]) ([e es])
-          ((explicate-effect env-a) e body-a))
-      ]
-      [(If cnd thn els)
-        (define-values (env^ cont^) ((create-block env) cont))
-        (define-values (env^^ thn^) ((explicate-effect env^) thn cont^))
-        (define-values (env^^^ els^) ((explicate-effect env^^) els cont^))
-        (define-values (env^^^^ cnd^) ((explicate-pred env^^^) cnd thn^ els^)) 
-        (values env^^^^ cnd^)
-      ]
-      [(Let var rhs body)
-        (define-values (env^ body^) ((explicate-effect env) body cont))
-        (define-values (env^^ rhs^) ((explicate-assign env^) rhs var body^))
-        (values env^^ rhs^)
-      ]
-      [(Prim _ args)
-        (for/foldr ([env env] [arg-c cont]) ([arg args])
-          ((explicate-effect env) arg arg-c))
-      ]
-      [_ (values env cont)]
-    ))
-    (define/public (get-void-rst) (Return (Void)))
-    (define/override ((explicate-pred env) cnd thn els) (match cnd
-      [(Begin es body)
-        (define-values (env^ body^) ((explicate-pred env) body thn els))
-        (for/foldr ([env-a env^] [body-a body^]) ([e es])
-          ((explicate-effect env-a) e body-a))
-      ]
-      [(or (WhileLoop _ _) (SetBang _ _))
-        (error 'explicate-pred "unexpected type of cnd with actual Void")
-      ]
-      [_ ((super explicate-pred env) cnd thn els)]
-    ))
-    (define/override ((explicate-tail env) p) (match p
-      [(Begin es body)
-        (define-values (env^ body^) ((explicate-tail env) body))
-        (for/foldr ([env-a env^] [body-a body^]) ([e es])
-          ((explicate-effect env-a) e body-a))
-      ]
-      [(or (WhileLoop _ _) (SetBang _ _))
-        ((explicate-effect env) p (get-void-rst))]
-      [_ ((super explicate-tail env) p)]
-    ))
-    (define/override ((explicate-assign env) p x cont) (match p
-      [(or (WhileLoop _ _) (SetBang _ _)) ((explicate-effect env) p cont)]
-      [(Begin es body)
-        (define-values (env^ body^) ((explicate-assign env) body x cont))
-        (for/foldr ([env-a env^] [body-a body^]) ([e es])
-          ((explicate-effect env-a) e x body-a))
-      ]
-      [_ ((super explicate-assign env) p x cont)]
-    ))
-  ))
-
-
 (define pass-select-instructions-while
   (class pass-select-instructions-If
     (super-new)
@@ -1007,51 +969,8 @@
     ))
   ))
 
-(define expose-allocation (λ (p) (pretty-print p) (send (new pass-expose-allocation) pass p)))
+(define expose-allocation (λ (p) (send (new pass-expose-allocation) pass p)))
 
-(define pass-Lvec-explicate-control
-  (class pass-Lwhile-explicate-control
-    (super-new)
-    (inherit create-block-2)
-    (define/override ((explicate-effect env) p cont) (match p
-      [(Collect _) (values env (Seq p cont))]
-      [(Allocate _ _) (values env cont)]
-      [(GlobalValue _) (values env cont)]
-      [(Prim 'vector-ref (list _ (Int _))) (values env cont)]
-      [(Prim 'vector-set! (list _ (Int _) _)) (values env (Seq p cont))]
-      [(Prim 'vector-length (list _)) (values env cont)]
-      [_ ((super explicate-effect env) p cont)]
-    ))
-    (define/override ((explicate-tail env) p) (match p
-      [(Collect _) (values env (Return (Void)))]
-      [(Allocate _ _) (values env (Return p))]
-      [(GlobalValue _) (values env (Return (Void)))]
-      [(Prim 'vector-ref (list _ (Int _))) (values env (Return p))]
-      [(Prim 'vector-set! (list _ (Int _) _)) (values env (Return p))]
-      [(Prim 'vector-length (list _)) (values env (Return p))]
-      [_ ((super explicate-tail env) p)]
-    ))
-    (define/override ((explicate-pred env) cnd thn els) (match cnd
-      [(Prim 'vector-ref (list _ (Int _))) 
-        (define tmp (gensym 'tmp))
-        (define-values (env^ thn^ els^) ((create-block-2 env) thn els))
-        (values env^ 
-          (Seq (Assign (Var tmp) cnd) (IfStmt (Prim 'eq (Var tmp) (Bool #t)) thn^ els^))
-        )
-      ]
-      [_ ((super explicate-pred env) cnd thn els)]
-    ))
-    (define/override ((explicate-assign env) p x cont) (match p
-      [(or (Prim 'vector-set! _) (Collect _)) ((explicate-effect env) p cont)]
-      [(Allocate (Int _) _) (values env (Seq (Assign (Var x) p) cont))]
-      [(Prim 'vector-ref (Int _)) (values env (Seq (Assign (Var x) p) cont))]
-      [(Prim 'vector-length _) (values env (Seq (Assign (Var x) p) cont))]
-      [(GlobalValue _) (values env (Seq (Assign (Var x) p) cont))]
-      [_ ((super explicate-assign env) p x cont)]
-    ))
-  ))
-
-(define explicate-control (λ (p) (displayln "explicate") (send (new pass-Lvec-explicate-control) pass p)))
 
 (define pass-select-instructions-vec
   (class pass-select-instructions-while
