@@ -299,160 +299,196 @@
 
 (define explicate-control (λ (p) (send (new pass-Lvec-explicate-control) pass p)))
 
-(define pass-select-instructions
-  (class pass-abstract
+(define pass-select-instructions-vec
+  (class object%
     (super-new)
-    (define/override (pass p) (match p
-      [(CProgram info blocks)
-        (define blocks^ 
-          (for/list ([b (hash->list blocks)]) 
-            (define b^ (pass-instr* (cdr b)))
-            (cons (car b) (Block '() b^))
-          ))
-        ; (pretty-print blocks^)
-        (X86Program info 
-          blocks^
+    (define/public pass (match-lambda [(CProgram info blocks)
+      (define blocks^
+        (for/hash ([(block-tag block) (in-hash blocks)])
+          (values block-tag (Block '() (pass-instr* block)))
+        ))
+      (X86Program info blocks^)
+    ]))
+    (define/public pass-instr* (match-lambda
+      [(Seq a res) (pass-instr a (pass-instr* res))]      
+      [(Return arg) (pass-instr (Assign (Reg 'rax) arg) '())]
+      [(Goto label) (list (Jmp label))]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
+        (pass-instr* (if (equal? lhs rhs) thn els))
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (and rhs (or (Var _))))) thn els)
+        (list
+          (Instr 'cmpq (list lhs rhs))
+          (JmpIf 'e (Goto-label thn))
+          (Jmp (Goto-label els))
+        )
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Bool rhs))) thn els)
+        (list
+          (Instr 'movq (list (Imm (if rhs 1 0)) (Reg 'rax)))
+          (Instr 'cmpq (list (Reg 'rax) lhs))
+          (JmpIf 'e (Goto-label thn))
+          (Jmp (Goto-label els))
+        )
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Int rhs))) thn els)
+        (list
+          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
+          (Instr 'cmpq (list (Reg 'rax) lhs))
+          (JmpIf 'e (Goto-label thn))
+          (Jmp (Goto-label els))
+        )
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _))) rhs)) thn els)
+        (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs)) thn els))
+      ]
+      [(IfStmt (Prim '< (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
+        (pass-instr* (if (< lhs rhs) thn els))
+      ]
+      [(IfStmt (Prim '< (list (and lhs (Var _)) (and rhs (Var _)))) thn els)
+        (list 
+          (Instr 'cmpq (list rhs lhs))
+          (JmpIf 'l (Goto-label thn))
+          (Jmp (Goto-label els))
+        )
+      ]
+      [(IfStmt (Prim '< (list (and lhs (Var _)) (Int rhs))) thn els)
+        (list
+          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
+          (Instr 'cmpq (list (Reg 'rax) lhs))
+          (JmpIf 'l (Goto-label thn))
+          (Jmp (Goto-label els))
+        )
+      ]
+      [(IfStmt (Prim '< (list (Int lhs) (and rhs (Var _)))) thn els)
+        (list
+          (Instr 'movq (list (Imm lhs) (Reg 'rax)))
+          (Instr 'cmpq (list rhs (Reg 'rax)))
+          (JmpIf 'l (Goto-label thn))
+          (Jmp (Goto-label els))
         )
       ]
     ))
-    (define/public (pass-instr* stmts) (match stmts
-      [(Seq a rest)
-        (append (pass-instr a) (pass-instr* rest))]
-      [(Return arg)
-        (pass-instr (Assign (Reg 'rax) arg))]
+    (define/public (pass-instr instr cont) (match instr
+      [(Assign lhs (Int imm))
+        (cons (Instr 'movq (list (Imm imm) lhs)) cont)]
+      [(Assign lhs (and v (Var _)))
+        (cons (Instr 'movq (list v lhs)) cont)]
+      [(Assign lhs (Prim '+ (list lhs (Int r))))
+        (cons (Instr 'addq (list (Imm r) lhs)) cont)]
+      [(Assign lhs (Prim '+ (list lhs (and r (Var _)))))
+        (cons (Instr 'addq (list r lhs)) cont)]
+      [(Assign lhs (Prim '+ (list other lhs)))
+        (pass-instr (Assign lhs (Prim '+ (list lhs other)) cont))]
+      [(Assign lhs (Prim '+ (list (Int l) (Int r))))
+        (cons (Instr 'movq (list (Imm (+ l r)) lhs)) cont)]
+      [(Assign lhs (Prim '+ (list (Int l) (and r (Var _)))))
+        #;(cons (Instr 'movq (list (Imm l) lhs))
+          (cons (Instr 'addq (list r lhs))
+            cont))
+        (cons (Instr 'movq (list r lhs))
+          (cons (Instr 'addq (list (Imm l) lhs))
+            cont))]
+      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Var _)))))
+        (cons (Instr 'movq (list l lhs))
+          (cons (Instr 'addq (list r lhs))
+            cont))]
+      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Int _)))))
+        (pass-instr (Assign lhs (Prim '+ (list r l))) cont)]
+      [(Assign lhs (Prim '- (list (Int a))))
+        (cons (Instr 'movq (list (Imm (- a)) lhs)) cont)]
+      [(Assign lhs (Prim '- (list (and a (Var _)))))
+        (cons (Instr 'movq (list a lhs))
+          (cons (Instr 'negq (list lhs)) cont))]
+      [(Assign lhs (Prim 'read '()))
+        (cons (Callq 'read_int 0)
+          (cons (Instr 'movq (list (Reg 'rax) lhs))
+            cont))]
+      [(Assign lhs (Bool rhs))
+        (cons (Instr 'movq (list (if rhs (Imm 1) (Imm 0)) lhs)) cont)]
+      [(Assign lhs (Prim 'not (list (and operand (Var _)))))
+        (cons (Instr 'movq (list operand lhs)) 
+          (cons (Instr 'xorq (list (Imm 1) lhs))
+            cont))]
+      [(Assign lhs (Prim 'not (list (Bool operand))))
+        (cons (Instr 'movq (list (if operand (Imm 0) (Imm 1)) lhs)) 
+          cont)]
+      [(Assign lhs (Prim '- (list lhs lhs)))
+        (cons (Instr 'movq (list (Imm 0) lhs)) cont)]
+      [(Assign lhs (Prim '- (list lhs (and op1 (Var _)))))
+        (cons (Instr 'subq (list op1 lhs)) cont)]
+      [(Assign lhs (Prim '- (list lhs (Int op1))))
+        (cons (Instr 'subq (list (Imm op1) lhs)) cont)]
+      [(Assign lhs (Prim '- (list (and op0 (Var _)) (and op1 (Var _)))))
+        (cons (Instr 'movq (list op0 lhs))
+          (cons (Instr 'subq (list op1 lhs))
+            cont))]
+      [(Assign lhs (Prim '- (list (and op0 (Var _)) (Int op1))))
+        (cons (Instr 'movq (list op0 lhs))
+          (cons (Instr 'subq (list (Imm op1) lhs))
+            cont))]
+      [(Assign lhs (Prim '- (list (Int op0) (and op1 (Var _)))))
+        (cons (Instr 'movq (list (Imm op0) lhs))
+          (cons (Instr 'subq (list op1 lhs))
+            cont))]
+      [(Assign lhs (Prim '- (list (Int op0) (Int op1))))
+        (cons (Instr 'movq (list (Imm (- op0 op1)) lhs))
+          cont)]
+      [(Assign _ (Void)) cont]
+      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (and rhs1 (Var _)))))
+        (cons (Instr 'cmpq (list rhs0 rhs1))
+          (cons (Instr 'sete (list (ByteReg 'al))) 
+            (cons (Instr 'movzbq (list (ByteReg 'al) lhs))
+              cont)))]
+      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (Int rhs1))))
+        (cons (Instr 'cmpq (list rhs0 (Imm rhs1)))
+          (cons (Instr 'sete (list (ByteReg 'al))) 
+            (cons (Instr 'movzbq (list (ByteReg 'al) lhs))
+              cont)))]
+      [(Assign lhs (Prim 'eq? (list (Int rhs0) (and rhs1 (Var _)))))
+        (cons (Instr 'cmpq (list (Imm rhs0) rhs1))
+          (cons (Instr 'sete (list (ByteReg 'al))) 
+            (cons (Instr 'movzbq (list (ByteReg 'al) lhs))
+              cont)))]
+      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (and val (Var _))))
+        (cons (Instr 'movq (list val (Reg 'rax)))
+          (cons (Instr 'movq (list v (Reg 'r11)))
+            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))) cont)))]
+      #;[(Prim 'vector-set! (list (Int v) (Int idx) (and val (Var _))))
+        (cons (Instr 'movq (list val (Reg 'rax)))
+          (cons (Instr 'movq (list (Imm v) (Reg 'r11)))
+            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))) cont)))]
+      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (Int val)))
+        (cons (Instr 'movq (list (Imm val) (Reg 'rax)))
+          (cons (Instr 'movq (list v (Reg 'r11)))
+            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))) cont)))]
+      #;[(Prim 'vector-set! (list (Int v) (Int idx) (Int val)))
+        (cons (Instr 'movq (list (Imm val) (Reg 'rax)))
+          (cons (Instr 'movq (list (Imm v) (Reg 'r11)))
+            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))
+              cont)))]
+      [(Assign _ (and rhs (Prim 'vector-set! _)))
+        (pass-instr rhs cont)]
+      [(Assign lhs (Allocate len types))
+        (cons (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
+          (cons (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr)))
+            (cons (Instr 'movq (list (Imm (cast-types-to-tag types)) (Deref 'r11 0)))
+              (cons (Instr 'movq (list (Reg 'r11) lhs)) 
+                cont))))]
+      [(Collect bytes)
+        (cons (Instr 'movq (list (Reg 'r15) (Reg 'rdi)))
+          (cons (Instr 'movq (list (Imm bytes) (Reg 'rsi)))
+            (cons (Callq 'collect 2)
+              cont)))]
+      [(Assign lhs (GlobalValue v)) 
+        (cons (Instr 'movq (list (Global v) lhs)) cont)]
+      [(Assign lhs (Prim 'vector-ref (list (and rhs0 (Var _)) (Int rhs1))))
+        (cons (Instr 'movq (list rhs0 (Reg 'r11)))
+          (cons (Instr 'movq (list (Deref 'r11 (* 8 (+ rhs1 1))) lhs)) cont))]
     ))
-    (define/public (cast x) (match x
-      [(Int n) (Imm n)]
-      [_ x]))
-    (define/public (pass-instr a) (match a
-      [(Assign lhs rhs)
-        (define p-2 (match rhs
-          [(or (Int _) (Var _))
-            (list (Instr 'movq (list (cast rhs) lhs)))]
-          [(Prim '+ (list a b))
-            (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'addq (list (cast b) (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
-          [(Prim '- (list a))
-            (list (Instr 'movq (list (cast a) (Reg 'rax))) (Instr 'negq (list (Reg 'rax))) (Instr 'movq (list (Reg 'rax) lhs)))]
-          [(Prim 'read '()) 
-            (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) lhs)))]
-          ))
-        p-2]))
   ))
 
-(define pass-select-instructions-If
-  (class pass-select-instructions
-    (super-new)
-    (define/override (pass-instr* stmts) (match stmts
-      [(IfStmt cnd thn els)
-        (match cnd
-          [(Prim 'eq? (list lhs rhs))
-            (define comp-rst (λ ()
-              (if (equal? lhs rhs)
-                (list (Jmp (Goto-label thn)))
-                (list (Jmp (Goto-label els)))
-                )
-            ))
-            (match* (lhs rhs)
-              [((Var _) (Var _))
-                (list
-                  (Instr 'cmpq (list (cast lhs) (cast rhs)))
-                  (JmpIf 'e (Goto-label thn))
-                  (Jmp (Goto-label els))
-                )
-              ]
-              [((Var _) _)
-                (list
-                  (Instr 'movq (list (cast rhs) (Reg 'rax)))
-                  (Instr 'cmpq (list (cast lhs) (Reg 'rax)))
-                  (JmpIf 'e (Goto-label thn))
-                  (Jmp (Goto-label els))
-                )
-              ]
-              [(_ (Var _))
-                (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs))) thn els)
-              ]
-              [((Int _) (Int _)) 
-                (comp-rst)
-              ]
-              [((Bool _) (Bool _))
-                (comp-rst)
-              ]
-            )
-          ]
-          [(Prim '< (list lhs rhs))
-            (define comp-rst (lazy
-              (if (< (Imm-value lhs) (Imm-value rhs))
-                (list (Jmp (Goto-label thn)))
-                (list (Jmp (Goto-label els)))
-              )
-            ))
-            (match* (lhs rhs)
-              [((Var _) (Var _))
-                (list
-                  (Instr 'cmpq (list (cast rhs) (cast lhs)))
-                  (JmpIf 'l (Goto-label thn))
-                  (Jmp (Goto-label els))
-                )
-              ]
-              [((Var _) _)
-                (list
-                  (Instr 'movq (list (cast rhs) (Reg 'rax)))
-                  (Instr 'cmpq (list (Reg 'rax) (cast lhs)))
-                  (JmpIf 'l (Goto-label thn))
-                  (Jmp (Goto-label els))
-                )
-              ]
-              [(_ (Var _))
-                (list
-                  (Instr 'movq (list (cast lhs) (Reg 'rax)))
-                  (Instr 'cmpq (list (cast rhs) (Reg 'rax)))
-                  (JmpIf 'l (Goto-label thn))
-                  (Jmp (Goto-label els))
-                )
-              ]
-              [((Int _) (Int _)) 
-                (comp-rst)
-              ]
-            )
-          ]
-        )
-      ]
-      [(Goto label)
-        (list (Jmp label))
-      ]
-      [_ (super pass-instr* stmts)]
-    ))
-    (define/override (cast x) (match x
-      [(Bool b) (Imm (if b 1 0))]
-      [_ (super cast x)]))
-    (define/override (pass-instr stmt) (match stmt
-      [(Assign lhs rhs) (match rhs
-        [(Bool _)
-          (list (Instr 'movq (list (cast rhs) lhs)))
-        ]
-        [(Prim 'not (list e))
-          (list
-            (Instr 'movq (list (cast e) lhs))
-            (Instr 'xorq (list (Imm 1) lhs))
-          )
-        ]
-        [(Prim 'eq? (list inner-lhs inner-rhs))
-          (list
-            (Instr 'cmpq (list (cast inner-lhs) (cast inner-rhs)))
-            (Instr 'sete (list (ByteReg 'al)))
-            (Instr 'movzbq (list (ByteReg 'al) lhs))
-          )
-        ]
-        [(Prim '- (list inner-lhs inner-rhs))
-          (list 
-            (Instr 'movq (list (cast inner-lhs) lhs))
-            (Instr 'subq (list (cast inner-rhs) lhs))
-          )
-        ]
-        [_ (super pass-instr stmt)]
-      )]
-    ))
-  ))
+(define select-instructions (λ (p) (send (new pass-select-instructions-vec) pass p)))
 
 (require "multigraph.rkt")
 
@@ -850,14 +886,16 @@
     )
     (define/override (pass p) (match p [(X86Program info blocks)
       (define graph (make-multigraph '()))
-      (for ([bl blocks]) (match bl [(cons b-tag _)
-        (add-vertex! graph b-tag)
-      ]))
-      (for ([bl blocks]) (match bl [(cons b-tag b)
+      (for ([(btag _) (in-hash blocks)])
+        (add-vertex! graph btag))
+      ; (for ([bl blocks]) (match bl [(cons b-tag _)
+      ;   (add-vertex! graph b-tag)
+      ; ]))
+      (for ([(b-tag b) (in-hash blocks)]) 
         (define tos (get-block-next (Block-instr* b)))
         (for ([to tos])
           (add-directed-edge! graph b-tag to))
-      ]))
+      )
       (define live-map (analyze-dataflow graph 
         (lambda (node input)
           (define block (dict-ref blocks node))
@@ -867,12 +905,13 @@
         (set)
         set-union
       ))
-      (define blocks^ (for/list ([bl blocks]) (match bl [(cons b-tag (Block info instr*))
+      (define blocks^ (for/list ([(b-tag b) (in-hash blocks)])
+        (match-define (Block info instr*) b)
         (define tos (get-block-next instr*))
         (define end (for/fold ([end-set (set)]) ([to tos])
           (set-union (dict-ref live-map to) end-set)))
         (cons b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*))
-      ])))
+      ))
       (X86Program info blocks^)
     ]))
   )
@@ -919,17 +958,6 @@
 
 (define uncover-get!-exp (λ (p) (send (new pass-uncover-get!-exp) pass p)))
 
-(define pass-select-instructions-while
-  (class pass-select-instructions-If
-    (super-new)
-    (inherit cast)
-    (define/override pass-instr (match-lambda
-      [(Assign lhs (Prim '+ (or (list lhs e) (list e lhs))))
-        (list (Instr 'addq (list (cast e) lhs)))]
-      [stmt (super pass-instr stmt)]
-    ))
-  ))
-
 (define (patch-instructions p) (send (new pass-patch-instructions) pass p))
 
 (define pass-expose-allocation
@@ -971,51 +999,6 @@
 
 (define expose-allocation (λ (p) (send (new pass-expose-allocation) pass p)))
 
-
-(define pass-select-instructions-vec
-  (class pass-select-instructions-while
-    (super-new)
-    (define/override (pass-instr instr) (match instr
-      [(Prim 'vector-set! (list v (Int idx) val))
-        (list 
-          (Instr 'movq (list (cast val) (Reg 'rax)))
-          (Instr 'movq (list (cast v) (Reg 'r11)))
-          (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))
-        )]
-      [(Assign _ (and (Prim 'vector-set! _) rhs)) 
-        (pass-instr rhs)]
-      [(Assign lhs (Prim 'vector-ref (list v (Int idx))))
-        (list
-          (Instr 'movq (list (cast v) (Reg 'r11)))
-          (Instr 'movq (list (Deref 'r11 (* 8 (+ idx 1))) lhs))
-        )
-      ]
-      [(Assign lhs (Allocate len types))
-        (list
-          (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
-          (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr)))
-          (Instr 'movq (list (Imm (cast-types-to-tag types)) (Deref 'r11 0)))
-          (Instr 'movq (list (Reg 'r11) lhs))
-        )
-      ]
-      [(Collect bytes)
-        (list 
-          (Instr 'movq (list (Reg 'r15) (Reg 'rdi)))
-          (Instr 'movq (list (Imm bytes) (Reg 'rsi)))
-          (Callq 'collect 2)
-        )
-      ]
-      [(Assign _ (Void)) (list)]
-      [(Assign lhs (GlobalValue v)) (list (Instr 'movq (list (Global v) lhs)))]
-      [_ (super pass-instr instr)]
-    ))
-    (define/override (cast x) (match x
-      [(GlobalValue x) (Global x)]
-      [_ (super cast x)]
-    ))
-  ))
-
-(define select-instructions (λ (p) (send (new pass-select-instructions-vec) pass p)))
 
 (define (pass-build-interference-mixin2 super-class)
   (class super-class
