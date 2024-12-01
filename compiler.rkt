@@ -537,17 +537,17 @@
       [(X86Program info blocks)
         (define init-graph (init-build-interference-from-blocks blocks (undirected-graph '())))
         (define pass-block^ (pass-block init-graph))
-        (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-value)
+        (define blocks^ (for/hash ([(tag block-value) (in-hash blocks)]) 
           (define block^ (pass-block^ block-value))
-          (cons tag block^)
-        ])))
+          (values tag block^)
+        ))
         (X86Program (dict-set info 'interference init-graph) blocks^)
       ]
     ))
     (define/public (init-build-interference-from-blocks blocks graph)
-      (for ([b blocks]) (match b [(cons _ block)
+      (for ([(_ block) (in-hash blocks)])
         (init-build-interference (Block-instr* block) graph)
-      ]))
+      )
       graph
     )
     (define/public (init-build-interference b graph) (match b
@@ -691,8 +691,8 @@
         (define allo (allocate-registers-block table))
         (define slot-num (+ 1 (foldl max -1 (map cdr table))))
         (define blocks^ 
-          (for/list ([block blocks]) (match block [(cons tag block-inner)
-            (cons tag (allo block-inner))]))
+          (for/hash ([(tag block-inner) (in-hash blocks)]) 
+            (values tag (allo block-inner)))
         )
         (define stack-size (max 0 (* (- slot-num (length caller-and-callee-regs)) 8)))
         (X86Program (dict-set info 'stack-size stack-size) blocks^)
@@ -729,9 +729,8 @@
     (super-new)
     (define/override (pass p) (match p
       [(X86Program info blocks)
-        (define blocks^ (for/list ([block blocks]) (match block [(cons tag block-inner)
-          (cons tag (patch-instr-block block-inner))]))
-        )
+        (define blocks^ (for/hash ([(tag block-inner) (in-hash blocks)]) 
+          (values tag (patch-instr-block block-inner))))
         (X86Program info blocks^)
       ]
     ))
@@ -806,16 +805,15 @@
       (define prelude (get-prelude p))
       (define conclusion (get-conclusion p))
       (define blocks^
-        (for/list ([bl blocks]) (match bl
-          [(cons tag (Block info instr*))
-            (match instr*
-              [(list) (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-              [_ (match (last instr*)
-                [(? Jmp?) bl]
-                [_ (cons tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-              )]
-            )
-          ])
+        (for/hash ([(tag block) (in-hash blocks)]) 
+          (match-define (Block info instr*) block)
+          (match instr*
+            [(list) (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+            [_ (match (last instr*)
+              [(? Jmp?) (values tag block)]
+              [_ (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+            )]
+          )
         ))
       (X86Program info 
         (dict-set 
@@ -888,9 +886,6 @@
       (define graph (make-multigraph '()))
       (for ([(btag _) (in-hash blocks)])
         (add-vertex! graph btag))
-      ; (for ([bl blocks]) (match bl [(cons b-tag _)
-      ;   (add-vertex! graph b-tag)
-      ; ]))
       (for ([(b-tag b) (in-hash blocks)]) 
         (define tos (get-block-next (Block-instr* b)))
         (for ([to tos])
@@ -905,12 +900,12 @@
         (set)
         set-union
       ))
-      (define blocks^ (for/list ([(b-tag b) (in-hash blocks)])
+      (define blocks^ (for/hash ([(b-tag b) (in-hash blocks)])
         (match-define (Block info instr*) b)
         (define tos (get-block-next instr*))
         (define end (for/fold ([end-set (set)]) ([to tos])
           (set-union (dict-ref live-map to) end-set)))
-        (cons b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*))
+        (values b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*))
       ))
       (X86Program info blocks^)
     ]))
