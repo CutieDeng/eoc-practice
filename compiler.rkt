@@ -571,8 +571,8 @@
         (for ([w (in-set writes)])
           (for ([r (in-set reads)])
             (add-edge! graph w r)
-            )
           )
+        )
         (pass-instr* rest live-rest graph)
       ]
       [(_ '()) (void)]
@@ -823,6 +823,101 @@
   ))
 
 (define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
+
+(define cnt (make-parameter #f))
+(define block-visited (make-parameter #f))
+(define id-map (make-parameter #f))
+(define bottom (make-parameter #f))
+(define graph (make-parameter #f))
+
+(define simple-graph (make-parameter #f))
+
+(define (pass-uncover-live-mixin2 clz)
+  (class clz
+    (super-new)
+    ; (inherit get-read get-write)
+    (define/public pass (match-lambda [(and p (X86Program info blocks))
+      (search-blocks p (get-blocks-graph p))
+      p
+    ]))
+    (define/public get-block-tail (match-lambda
+      [(cons (JmpIf _ tag) rest) (cons tag (get-block-tail rest))]
+      [(cons (Jmp tag) _) (list tag)]
+      [(cons _ rest) (get-block-tail rest)]
+      ['() '()]
+    ))
+    (define/public get-blocks-tail (match-lambda [(X86Program info blocks)
+      (for/hash ([(tag block) (in-hash blocks)]) (values tag (get-block-tail (Block-instr* block))))
+    ]))
+    (define/public get-blocks-graph (match-lambda [(X86Program info blocks)
+      (define g (make-multigraph '()))
+      (for ([(tag block) (in-hash blocks)])
+        (match-define (Block _ binstr*) block)
+        (define tos (get-block-tail binstr*))
+        (add-vertex! g tag)
+        (for ([t tos]) (add-directed-edge! g tag t))
+      )
+      g
+    ]))
+    (define/public (search-blocks program g)
+      (match-define (X86Program info blocks) program)
+      (parameterize ([graph g] [cnt 0] [block-visited (make-hash)] [id-map (make-hash)])
+        (for ([(tag _) (in-hash blocks)]) 
+          (parameterize ([bottom (cnt)])
+            (search-block-impl tag)))
+        (parameterize ([simple-graph (make-multigraph '())])
+          (build-simple-graph)
+          ; (pretty-display (simple-graph))
+          ; (print-graph (simple-graph))
+          (simple-graph)
+        )
+      )
+    )
+    (define/public (search-block-impl block-tag)
+      (define g (graph))
+      (define visited (block-visited))
+      (match (dict-ref visited block-tag (λ () #f))
+        [#f 
+          (define id (cnt))
+          (cnt (+ id 1))
+          (dict-set! (id-map) block-tag id)
+          (dict-set! visited block-tag id)
+          (define tos
+            (for/list ([next-tag (in-neighbors g block-tag)])
+              (search-block-impl next-tag)
+            ))
+          (define bot (bottom))
+          (set! tos (filter (λ (v) (>= v bot)) tos))
+          (match tos
+            ['() id]
+            [_ (=> fail)
+              (define m (apply min tos))
+              (when (> m id) (fail))
+              (dict-set! visited block-tag m)
+              m
+            ]
+            [_ id]
+          )
+        ]
+        [a a]
+      )
+    )
+    (define/public (build-simple-graph)
+      (define g (graph))
+      (define bv (block-visited))
+      (define sg (simple-graph))
+      (for ([f (in-vertices g)])
+        (for ([t (in-neighbors g f)])
+          (define f^ (dict-ref bv f))
+          (define t^ (dict-ref bv t))
+          (add-directed-edge! sg f^ t^)
+        )
+      )
+    )
+  )
+)
+
+(define uncover-live^ (λ (p) (send (new (pass-uncover-live-mixin2 object%)) pass p)))
 
 (define (pass-uncover-live-mixin clz)
   (class clz
@@ -1159,6 +1254,7 @@
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec-prime ,type-check-Lvec)
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
+    ("uncover live back" ,uncover-live^ ,interp-pseudo-x86-2)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
     ("build color graph" ,color-graph ,interp-pseudo-x86-2)
