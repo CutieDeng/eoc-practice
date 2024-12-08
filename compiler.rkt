@@ -968,6 +968,73 @@
 
 (define connect-component (λ (p) (send (new (pass-uncover-live-mixin2 object%)) pass p)))
 
+(define (pass-read-write-mixin2 super-class)
+  (class super-class
+    (super-new)
+    (define/public (get-write-raw instr) (match instr
+      [(Instr 'movq (list _ dst)) (set dst)]
+      [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
+      [(Callq _ _) (list->set (map Reg caller-save-regs))]
+      [(Instr 'negq dst) (set dst)]
+      [(Instr 'cmpq (list _ _)) (set )]
+      [(Jmp _) (set )]
+      [(JmpIf _ _) (set )]
+    ))
+    (define/public (get-write instr)
+      (define s (get-write-raw instr))
+      (list->set (filter (λ (i) (not (or (Global? i) (Deref? i)))) (set->list s)))
+    )
+    (define/public (get-read instr)
+      (define raw-set (get-read-with-imm instr))
+      (define l (filter (λ (i) (not (or (Imm? i) (Bool? i) (Global? i) (Deref? i)))) (set->list raw-set)))
+      (list->set l)
+    )
+    (define/public (get-read-with-imm instr) (match instr
+      [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
+      [(Instr 'movq (list src _)) (set src)]
+      [(Instr 'negq src) (set src)]
+      [(Callq _ count) 
+        (set (map Reg (take pass-args-regs count)))]
+      [(Jmp _) (set )]
+      [(JmpIf _ _) (set )]
+      [(Instr 'cmpq (list a b)) (set a b)]
+    ))
+  ))
+
+(define pass-block-uncover-live-enhanced
+  (class (pass-read-write-mixin2 object%)
+    (super-new)
+    (inherit get-read get-write)
+    (define/public pass-block (match-lambda [(Block info instr*)
+      (define a (mutable-set))
+      (define d (mutable-set))
+      (pass-instr* instr* a d) 
+      (set! info (dict-set info 'live-change (cons a d)))
+      (Block info instr*)
+    ]))
+    (define/public (pass-instr* instr* add-set drop-set) (match instr*
+      [(cons instr rest) 
+        (pass-instr* rest add-set drop-set)
+        (define r (get-read instr))
+        (define w (get-write instr))
+        (set-union! drop-set w)
+        (set-subtract! add-set w)
+        (set-union! add-set r)
+        (set-subtract! drop-set r)
+      ]
+      ['() (void)]
+    ))
+    (define/public pass (match-lambda [(X86Program info blocks)
+      (define blocks^ (for/hash ([(tag block) (in-hash blocks)])
+        (values tag (pass-block block))
+      ))
+      (X86Program info blocks^)
+    ]))
+  )
+)
+
+(define block-uncover-live-enhanced (λ (p) (send (new pass-block-uncover-live-enhanced) pass p)))
+
 (define (pass-uncover-live-mixin clz)
   (class clz
     (super-new)
@@ -1305,6 +1372,7 @@
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
     ("connect component preparation" ,connect-component ,interp-pseudo-x86-2)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
+    ("block uncover live enhanced" ,block-uncover-live-enhanced ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
     ("build color graph" ,color-graph ,interp-pseudo-x86-2)
     ("allocate registers" ,allocate-registers ,interp-x86-2)
