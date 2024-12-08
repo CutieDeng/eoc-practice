@@ -835,10 +835,8 @@
 (define (pass-uncover-live-mixin2 clz)
   (class clz
     (super-new)
-    ; (inherit get-read get-write)
     (define/public pass (match-lambda [(and p (X86Program info blocks))
       (search-blocks p (get-blocks-graph p))
-      p
     ]))
     (define/public get-block-tail (match-lambda
       [(cons (JmpIf _ tag) rest) (cons tag (get-block-tail rest))]
@@ -901,22 +899,8 @@
               (dict-set! collects id (cons tag get))
             )
           )
-          (for ([t torder])
-            (define queue (dict-ref collects t))
-            (displayln queue)
-          )
-          (print-graph (graph))
-          (newline)
-          ; (cond
-          ;   [(not (empty? torder)) (newline)]
-          ;   [else 
-          ;     (displayln "EMPTY TORDER, Graph:")
-          ;     (print-graph (graph))
-          ;     (print-graph (simple-graph))
-          ;     (displayln blocks)
-          ;     (displayln "END")
-          ;   ])
-          inv-graph
+          (define torder^ (for/list ([ti torder]) (dict-ref collects ti)))
+          (X86Program (dict-set info 'connect-component torder^) blocks)
         )
       )
     )
@@ -982,7 +966,7 @@
   )
 )
 
-(define uncover-live^ (λ (p) (send (new (pass-uncover-live-mixin2 object%)) pass p)))
+(define connect-component (λ (p) (send (new (pass-uncover-live-mixin2 object%)) pass p)))
 
 (define (pass-uncover-live-mixin clz)
   (class clz
@@ -1319,7 +1303,7 @@
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec-prime ,type-check-Lvec)
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
-    ("uncover live back" ,uncover-live^ ,interp-pseudo-x86-2)
+    ("connect component preparation" ,connect-component ,interp-pseudo-x86-2)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
     ("build color graph" ,color-graph ,interp-pseudo-x86-2)
