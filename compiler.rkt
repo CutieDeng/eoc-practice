@@ -827,10 +827,10 @@
 (define cnt (make-parameter #f))
 (define block-visited (make-parameter #f))
 (define id-map (make-parameter #f))
-(define bottom (make-parameter #f))
 (define graph (make-parameter #f))
-
+(define id-inv-map (make-parameter #f))
 (define simple-graph (make-parameter #f))
+(define visit-temporary-set (make-parameter #f))
 
 (define (pass-uncover-live-mixin2 clz)
   (class clz
@@ -847,7 +847,10 @@
       ['() '()]
     ))
     (define/public get-blocks-tail (match-lambda [(X86Program info blocks)
-      (for/hash ([(tag block) (in-hash blocks)]) (values tag (get-block-tail (Block-instr* block))))
+      (for/hash ([(tag block) (in-hash blocks)]) 
+        (match-define (Block _ instr*) block)
+        (values tag (get-block-tail instr*))
+      )
     ]))
     (define/public get-blocks-graph (match-lambda [(X86Program info blocks)
       (define g (make-multigraph '()))
@@ -859,19 +862,73 @@
       )
       g
     ]))
+    (define (topology-order graph)
+      (define visited (mutable-set))
+      (define (find nodetag cont)
+        (set-add! visited nodetag)
+        (for ([to (in-neighbors graph nodetag)])
+          (unless (set-member? visited to)
+            (set! cont (find to cont)))
+        )
+        (cons nodetag cont)
+      )
+      (define ret '())
+      (for ([n (in-vertices graph)])
+        (cond
+          [(set-member? visited n) (void)]
+          [else 
+            (set! ret (find n ret))
+          ])
+      )
+      ret
+    )
     (define/public (search-blocks program g)
       (match-define (X86Program info blocks) program)
-      (parameterize ([graph g] [cnt 0] [block-visited (make-hash)] [id-map (make-hash)])
-        (for ([(tag _) (in-hash blocks)]) 
-          (parameterize ([bottom (cnt)])
-            (search-block-impl tag)))
+      (parameterize ([graph g] [cnt 0] [block-visited (make-hash)] [id-map (make-hash)] [id-inv-map (make-hash)] [visit-temporary-set (mutable-set)])
+        (for ([tag (in-hash-keys blocks)]) 
+          (search-block-impl tag))
+        (for ([tag (in-hash-keys blocks)])
+          (update-id tag))
         (parameterize ([simple-graph (make-multigraph '())])
           (build-simple-graph)
-          ; (pretty-display (simple-graph))
-          ; (print-graph (simple-graph))
-          (simple-graph)
+          (define inv-graph (transpose (simple-graph)))
+          (define torder (topology-order inv-graph))
+          (define collects (make-hash))
+          (let ([bv (block-visited)])
+            (for ([tag (in-hash-keys blocks)]) 
+              (define id (dict-ref bv tag))
+              (define get (dict-ref collects id (λ () '())))
+              (dict-set! collects id (cons tag get))
+            )
+          )
+          (for ([t torder])
+            (define queue (dict-ref collects t))
+            (displayln queue)
+          )
+          (print-graph (graph))
+          (newline)
+          ; (cond
+          ;   [(not (empty? torder)) (newline)]
+          ;   [else 
+          ;     (displayln "EMPTY TORDER, Graph:")
+          ;     (print-graph (graph))
+          ;     (print-graph (simple-graph))
+          ;     (displayln blocks)
+          ;     (displayln "END")
+          ;   ])
+          inv-graph
         )
       )
+    )
+    (define/public (update-id tag)
+      (define id (dict-ref (block-visited) tag))
+      (cond
+        [(equal? id (dict-ref (id-map) tag)) id]
+        [else
+          (define nxt (update-id (dict-ref (id-inv-map) id)))
+          (dict-set! (block-visited) tag nxt)
+          nxt
+        ])
     )
     (define/public (search-block-impl block-tag)
       (define g (graph))
@@ -881,13 +938,17 @@
           (define id (cnt))
           (cnt (+ id 1))
           (dict-set! (id-map) block-tag id)
+          (dict-set! (id-inv-map) id block-tag)
           (dict-set! visited block-tag id)
+          (when (set-member? (visit-temporary-set) block-tag) (error 'search-block-impl "Invalid state, revisit a node. "))
+          (set-add! (visit-temporary-set) block-tag)
+          (define (drop) (set-remove! (visit-temporary-set) block-tag))
           (define tos
             (for/list ([next-tag (in-neighbors g block-tag)])
               (search-block-impl next-tag)
             ))
-          (define bot (bottom))
-          (set! tos (filter (λ (v) (>= v bot)) tos))
+          (drop)
+          (set! tos (filter (compose not false?) tos))
           (match tos
             ['() id]
             [_ (=> fail)
@@ -899,7 +960,8 @@
             [_ id]
           )
         ]
-        [a a]
+        [a
+          (if (set-member? (visit-temporary-set) block-tag) a #f)]
       )
     )
     (define/public (build-simple-graph)
@@ -907,10 +969,13 @@
       (define bv (block-visited))
       (define sg (simple-graph))
       (for ([f (in-vertices g)])
+        (define f^ (dict-ref bv f))
+        (add-vertex! sg f^)
         (for ([t (in-neighbors g f)])
-          (define f^ (dict-ref bv f))
           (define t^ (dict-ref bv t))
-          (add-directed-edge! sg f^ t^)
+          (unless (equal? f^ t^)
+            (add-directed-edge! sg f^ t^)
+          )
         )
       )
     )
