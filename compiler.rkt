@@ -604,7 +604,8 @@
       )
     )
     (define/public (build-int-color-graph interference-graph int-filter)
-      (define q (make-pqueue (λ (a b) (> (cdr a) (cdr b)))))
+      (define q (make-pqueue (λ (a b) (>= (cdr a) (cdr b)))))
+      (define (make-pqueue-raw) (make-pqueue >=))
       (for ([n (sequence-filter int-filter (in-vertices interference-graph))])
         (pqueue-push! q (cons n 0))
       )
@@ -900,7 +901,9 @@
             )
           )
           (define torder^ (for/list ([ti torder]) (dict-ref collects ti)))
-          (X86Program (dict-set info 'connect-component torder^) blocks)
+          (set! info (dict-set info 'connect-component torder^))
+          (set! info (dict-set info 'graph (graph)))
+          (X86Program info blocks)
         )
       )
     )
@@ -1035,23 +1038,43 @@
 
 (define block-uncover-live-enhanced (λ (p) (send (new pass-block-uncover-live-enhanced) pass p)))
 
+(define subqueue (make-parameter #f))
+
 (define (pass-uncover-live-mixin clz)
   (class clz
     (super-new)
     (inherit get-read get-write)
-    (inherit default-set-to-read)
-    (define/public (get-block-end instr*) (match instr*
-      [(cons (or (JmpIf _ _) (Jmp _)) _) instr*]
-      [(cons _ rest) (get-block-end rest)]
-      ['() '()]
-    ))
-    (define/public (get-block-next instr*)
-      (define jmps (get-block-end instr*))
-      (define get-label (lambda (instr) (match instr 
-        [(Jmp lbl) lbl]
-        [(JmpIf _ lbl) lbl]
-      )))
-      (map get-label jmps)
+    (define/public (analyze-dataflow graph transfer bottom join)
+      (define s (subqueue))
+      (define mapping (make-hash))
+      (define change-able (mutable-set))
+      (define worklist (make-queue))
+      (define graph-t (transpose graph))
+      (for ([sij (in-vertices graph-t)]) (dict-set! mapping sij bottom))
+      (for ([si s])
+        (set-clear! change-able)
+        (for ([sij si]) (set-add! change-able sij))
+        (for ([sij si]) (enqueue! worklist sij))
+        (while (not (queue-empty? worklist))
+          (define node (dequeue! worklist))
+          (define preds (in-neighbors graph-t node))
+          (define input
+            (match preds
+              ['() (set (Reg 'rax))]
+              [(cons _ _)
+                (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)]) 
+                  (join state (dict-ref mapping pred)))
+              ]
+            ))
+          (define output (transfer node input))
+          (cond [(not (equal? output (dict-ref mapping node))) 
+            (dict-set! mapping node output)
+            (for ([s (in-neighbors graph node)])
+              (when (set-member? change-able s)
+                (enqueue! worklist s))
+            )]))
+      )
+      mapping
     )
     (define/public (pass-instr* instr* end) (match instr*
       ['() (list end)]
@@ -1067,53 +1090,28 @@
         (cons s rest-set)
       ]
     ))
-    (define/public (analyze-dataflow graph transfer bottom join)
-      (define mapping (make-hash))
-      (for ([v (in-vertices graph)])
-        (dict-set! mapping v bottom))
-      (define worklist (make-queue))
-      (for ([v (in-vertices graph)])
-        (enqueue! worklist v))
-      (define graph-t (transpose graph))
-      (while (not (queue-empty? worklist))
-        (define node (dequeue! worklist))
-        (define preds (in-neighbors graph-t node))
-        (define input
-          (match preds
-            ['() (default-set-to-read)]
-            [(cons _ _)
-              (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)]) 
-                (join state (dict-ref mapping pred)))
-            ]
-          ))
-        (define output (transfer node input))
-        (cond [(not (equal? output (dict-ref mapping node))) 
-          (dict-set! mapping node output)
-          (for ([s (in-neighbors graph node)])
-            (enqueue! worklist s))]))
-      mapping
-    )
     (define/override (pass p) (match p [(X86Program info blocks)
-      (define graph (make-multigraph '()))
-      (for ([(btag _) (in-hash blocks)])
-        (add-vertex! graph btag))
-      (for ([(b-tag b) (in-hash blocks)]) 
-        (define tos (get-block-next (Block-instr* b)))
-        (for ([to tos])
-          (add-directed-edge! graph b-tag to))
-      )
-      (define live-map (analyze-dataflow graph 
-        (lambda (node input)
-          (define block (dict-ref blocks node))
-          (define pass-instr*-rst (pass-instr* (Block-instr* block) input))
-          (car pass-instr*-rst)
+      (define graph (dict-ref info 'graph))
+      (define components (dict-ref info 'connect-component))
+      (define live-map
+        (parameterize ([subqueue components])
+          (analyze-dataflow graph 
+            (lambda (node input)
+              (define block (dict-ref blocks node))
+              (match-define (Block info _) block)
+              (match-define (cons add drop) (dict-ref info 'live-change))
+              (define input^ (set-subtract input drop))
+              (define input^^ (set-union input^ add))
+              input^^
+            )
+            (set)
+            set-union
+          )
         )
-        (set)
-        set-union
-      ))
+      )
       (define blocks^ (for/hash ([(b-tag b) (in-hash blocks)])
         (match-define (Block info instr*) b)
-        (define tos (get-block-next instr*))
+        (define tos (in-neighbors graph b-tag))
         (define end (for/fold ([end-set (set)]) ([to tos])
           (set-union (dict-ref live-map to) end-set)))
         (values b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*))
@@ -1371,8 +1369,8 @@
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
     ("connect component preparation" ,connect-component ,interp-pseudo-x86-2)
-    ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("block uncover live enhanced" ,block-uncover-live-enhanced ,interp-pseudo-x86-2)
+    ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
     ("build color graph" ,color-graph ,interp-pseudo-x86-2)
     ("allocate registers" ,allocate-registers ,interp-x86-2)
