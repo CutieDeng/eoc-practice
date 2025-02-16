@@ -139,6 +139,7 @@ Changelog:
          (contract-out [struct Jmp ((target symbol?))])
          (contract-out [struct TailJmp ((target arg?) (arity fixnum?))])
          (contract-out [struct Block ((info any?) (instr* instr-list?))])
+         (contract-out [struct SSABlock ((info any?) (ssa-defs dict?) (instr* instr-list?))])
          (struct-out StackArg)
          (struct-out Global)
 
@@ -2553,3 +2554,21 @@ Changelog:
     [else (error "in any-tag, unrecognized type" ty)]
     ))
 
+(struct SSABlock (info ssa-defs instr*) #:transparent #:property prop:custom-print-quotable 'never
+  #:methods gen:custom-write
+  [(define write-proc
+     (let ([csp (make-constructor-style-printer
+                 (lambda (obj) 'SSABlock)
+                 (lambda (obj) (list (SSABlock-info obj) (SSABlock-ssa-defs obj) (SSABlock-instr* obj))))])
+       (lambda (ast port mode)
+         (cond [(eq? (AST-output-syntax) 'concrete-syntax)
+                (let ([recur (make-recur port mode)])
+                  (match ast
+                    [(SSABlock info ssa-defs instr*)
+                     (print-info info port mode)
+                     (for ([instr instr*])
+                       (recur instr port))
+                     ]))]
+               [(eq? (AST-output-syntax) 'abstract-syntax)
+                (csp ast port mode)]
+               ))))])
