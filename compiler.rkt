@@ -19,15 +19,8 @@
 
 (require racket/pretty)
 
-(define (aligned x a) (match (modulo x a)
-  [0 x]
-  [y (+ x a (- y))]
-))
-
 (define caller-save-regs '(rax rcx rdx rsi rdi r8 r9 r10 r11))
-
 (define callee-save-regs '(rsp rbp rbx r12 r13 r14 r15))
-
 (define pass-args-regs '(rdi rsi rdx rcx r8 r9))
 
 (define caller-and-callee-regs (append caller-save-regs callee-save-regs))
@@ -67,7 +60,8 @@
       [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
       [(Begin es e) (Begin (map (λ (v) (pass-exp v)) es) (pass-exp e))]
       [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
-      [(and value (or (Int _) (Bool _) (Var _) (SetBang _ _) (GetBang _) (Void ))) value]
+      [(SetBang var exp) (SetBang var (pass-exp exp))]
+      [(and value (or (Int _) (Bool _) (Var _) (GetBang _) (Void ))) value]
     ))
   ))
 
@@ -777,7 +771,7 @@
   (class pass-abstract
     (super-new)
     (define/public (get-prelude p) (match p [(X86Program info _)
-      (define stack-size (aligned (dict-ref info 'stack-size) 16))
+      (define stack-size (align (dict-ref info 'stack-size) 16))
       (Block '() 
         (list 
           (Instr 'pushq (list (Reg 'rbp))) 
@@ -1357,6 +1351,62 @@
     (abstract collect)
   ))
 
+(define dominance-map (make-parameter #f))
+
+(define dominance
+  (class pass-abstract
+    (super-new)
+    (define/override pass (match-lambda [(and x (X86Program info blocks))
+      (parameterize ([dominance-map (make-hash)])
+        (define full-set (list->set (dict-keys blocks)))
+        (for ([block full-set])
+          (dict-set! (dominance-map) block full-set)
+        )
+        (define connect-component (reverse (dict-ref info 'connect-component)))
+        (dict-set! (dominance-map) 'start (set 'start))
+        (define graph (dict-ref info 'graph))
+        (define graph-rev (transpose graph))
+        (for ([component connect-component]) 
+          (define (loop hint)
+            (for ([block component])
+              (define dominance^
+                (for/fold ([collect (dict-ref (dominance-map) block)]) ([src (in-neighbors graph-rev block)])
+                  (set-intersect collect (dict-ref (dominance-map) src))
+                ))
+              (set! dominance^ (set-union dominance^ (set block)))
+              (define dominance-old (dict-ref (dominance-map) block))
+              (unless (equal? dominance^ dominance-old)
+                (set! hint #t)
+                (dict-set! (dominance-map) block dominance^)
+              )
+            )
+            (when hint (loop #f))
+          )
+          (loop #f)
+        )
+        (print-graph graph)
+        (displayln (dominance-map))
+        (displayln x)
+        x
+      )
+    ]))
+  ))
+
+(define pass-dominace (λ (x) (send (new dominance) pass x)))
+
+(define ssa-constructor
+  (class pass-abstract
+    (super-new)
+    (define/override pass (match-lambda [(CProgram info instr*)
+      (error 'pass "unimpl")
+    ])) 
+    (define var-defs #hash())
+    (define var-uses #hash())
+    (define/public extract-block (match-lambda [(Block info instr*)
+      (error 'extract-block "unimpl")
+    ]))
+  ))
+
 ; (debug-level 2)
 (define compiler-passes
   `(
@@ -1369,6 +1419,7 @@
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
     ("connect component preparation" ,connect-component ,interp-pseudo-x86-2)
+    ("ssa-calc" ,pass-dominace ,interp-pseudo-x86-2)
     ("block uncover live enhanced" ,block-uncover-live-enhanced ,interp-pseudo-x86-2)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
@@ -1380,3 +1431,4 @@
   ))
 
 (provide compiler-passes)
+
