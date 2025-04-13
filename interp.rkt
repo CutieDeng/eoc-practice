@@ -12,6 +12,8 @@
          interp-pseudo-x86-python interp-x86-python
          )
 
+(require cutie-ftree)
+
 ;; The interpreters in this file are for the intermediate languages
 ;; produced by the various passes of the compiler.
 ;; 
@@ -241,10 +243,10 @@
 
     (define/public (get-name ast)
       (match ast
-	[(or (Var x) (Reg x)) x]
-	[(Deref 'rbp n) n]
-	[else
-	 (error 'interp-R1-class/get-name "doesn't have a name: ~a" ast)]))
+        [(or (Var x) (Reg x)) x]
+        [(Deref 'rbp n) n]
+        [else
+          (error 'interp-R1-class/get-name "doesn't have a name: ~a" ast)]))
 
     (field [x86-ops (make-immutable-hash
 		     `((addq 2 ,+)
@@ -254,21 +256,22 @@
 
     (define/public (interp-x86-op op)
       (define (err)
-	(error 'interp-R1-class/interp-x86-op "unmatched ~a" op))
+        (error 'interp-R1-class/interp-x86-op "unmatched ~a" op))
       (cadr (hash-ref x86-ops op err)))
 
     (define/public (interp-x86-exp env)
       (lambda (ast)
-	(copious "interp-x86-exp" ast)
+        (copious "interp-x86-exp" ast)
         (define result
-	(match ast
-	   [(or (Var x) (Reg x))
-	    (lookup (get-name ast) env)]
-	   [(Deref r n)
-	    (lookup (get-name ast) env)]
-	   [(Imm n) n]
-	   [else
-	    (error 'interp-R1-class/interp-x86-exp "unhandled ~a" ast)]))
+          (match ast
+            [(or (Var x) (Reg x))
+              (lookup (get-name ast) env)]
+            [(Deref r n)
+              (lookup (get-name ast) env)]
+            [(Imm n) n]
+            [else
+              (error 'interp-R1-class/interp-x86-exp "unhandled ~a" ast)]
+          ))
         (copious "R1/interp-x86-exp" (observe-value result))
         result))
 
@@ -277,41 +280,105 @@
         (when (pair? ast)
           (copious "R1/interp-x86-instr" (car ast)))
         (match ast
-	   ['() env]
-	   [(cons (Callq 'read_int _) ss)
-            (let ([v (read)])
-              (copious "read " v)
-              ((interp-x86-instr (cons (cons 'rax v) env)) ss))]
-           [(cons (Instr 'movq (list s d)) ss)
+          ['() env]
+          [(? ral-empty?) env]
+          [(? ral?) (=> h)
+            (unless (ral? ast) (h))
+            (match (ral-viewl ast)
+              [(Callq 'read_int _) (void)]
+              [_ (h)])
+            (define v (read))
+            (copious "read " v)
+            (match-define-values (_ ss) (ral-dropl ast))
+            ((interp-x86-instr (cons (cons 'rax v) env)) ss)]
+          [(cons (Callq 'read_int _) ss)
+            (define v (read))
+            (copious "read " v)
+            ((interp-x86-instr (cons (cons 'rax v) env)) ss)]
+          [(? ral?) (=> eh)
+            (match-define-values (c ss) (ral-dropl ast))
+            (match c
+              [(Instr 'movq (list s d))
+                (define x (get-name d))
+                (define v ((interp-x86-exp env) s))
+                (copious "move " (observe-value v))
+                ((interp-x86-instr (cons (cons x v) env)) ss)
+              ]
+              [_ (eh)]
+            )]
+          [(cons (Instr 'movq (list s d)) ss)
             (define x (get-name d))
-	    (define v ((interp-x86-exp env) s))
+            (define v ((interp-x86-exp env) s))
             (copious "move " (observe-value v))
-	    ((interp-x86-instr (cons (cons x v) env)) ss)]
-           [(cons (Jmp conclusion) ss)
+            ((interp-x86-instr (cons (cons x v) env)) ss)]
+          [(? ral?) (=> eh)
+            (match (ral-viewl ast)
+              [(Jmp conclusion)
+                (unless (string-suffix? (symbol->string conclusion) "conclusion") (eh))
+                env
+              ]
+              [_ (eh)])
+          ]
+          [(cons (Jmp conclusion) _)
             #:when (string-suffix? (symbol->string conclusion) "conclusion")
             env]
-           [(cons (Jmp label) ss)
+          [(? ral?) (=> eh)
+            (match (ral-viewl ast)
+              [(Jmp label) ((interp-x86-block env) (goto-label label))]
+              [_ (eh)])
+          ]
+          [(cons (Jmp label) _)
             ((interp-x86-block env) (goto-label label))]
-	   [(X86Program info ss)
-	    (let ([env ((interp-x86-instr '()) ss)])
+          [(X86Program _ ss)
+            (let ([env ((interp-x86-instr '()) ss)])
               (lookup 'rax env))]
-	   [(cons (Instr binary-op (list s d)) ss)
-	    (let ([s ((interp-x86-exp env) s)]
-		  [d ((interp-x86-exp env) d)]
-		  [x (get-name d)]
-		  [f (interp-x86-op binary-op)])
+          [(? ral?) (=> eh)
+            (define-values (origin-s ss) (ral-dropl ast))
+            (match origin-s
+              [(Instr binary-op (list s d))
+                (let ([s ((interp-x86-exp env) s)]
+                  [d ((interp-x86-exp env) d)]
+                  [x (get-name d)]
+                  [f (interp-x86-op binary-op)])
+                  (let ([v (f s d)])
+                    (copious "binary-op result " (observe-value v))
+                    ((interp-x86-instr (cons (cons x v) env)) ss))
+                )
+              ]
+              [_ (eh)]
+            )
+          ]
+          [(cons (Instr binary-op (list s d)) ss)
+            (let ([s ((interp-x86-exp env) s)]
+            [d ((interp-x86-exp env) d)]
+            [x (get-name d)]
+            [f (interp-x86-op binary-op)])
               (let ([v (f s d)])
                 (copious "binary-op result " (observe-value v))
                 ((interp-x86-instr (cons (cons x v) env)) ss)))]
-	   [(cons (Instr unary-op (list d)) ss)
-	    (let ([d ((interp-x86-exp env) d)]
-		  [x (get-name d)]
-		  [f (interp-x86-op unary-op)])
+          [(? ral?) (=> eh)
+            (define-values (s ss) (ral-dropl ast))
+            (match s
+              [(Instr unary-op (list d))
+                (let ([d ((interp-x86-exp env) d)]
+                  [x (get-name d)]
+                  [f (interp-x86-op unary-op)])
+                  (let ([v (f d)])
+                    (copious "unary-op result " (observe-value v))
+                    ((interp-x86-instr (cons (cons x v) env)) ss)))
+              ]
+              [_ (eh)]
+            )
+          ]
+          [(cons (Instr unary-op (list d)) ss)
+            (let ([d ((interp-x86-exp env) d)]
+              [x (get-name d)]
+              [f (interp-x86-op unary-op)])
               (let ([v (f d)])
                 (copious "unary-op result " (observe-value v))
                 ((interp-x86-instr (cons (cons x v) env)) ss)))]
-	   [else (error "R1/interp-x86-instr no match for" ast)]
-	   )))
+          [else (error "R1/interp-x86-instr no match for" ast)]
+    )))
 
     (define/public (interp-pseudo-x86 env)
       (lambda (ast)
@@ -533,6 +600,15 @@
 	   (define val (eflags-status env cc))
 	   (verbose "set" cc val)
            ((interp-x86-instr (cons (cons name val) env)) ss)]
+          [(? ral?) (=> eh)
+            (define-values (s ss) (ral-dropl ast))
+            (match s [(IfStmt cnd thn els)
+              (if (not (eq? 0 ((interp-x86-exp env) cnd)))
+                ((interp-x86-instr env) (append thn ss))
+                ((interp-x86-instr env) (append els ss)))
+            ]
+            [_ (eh)])
+          ]
           [(cons (IfStmt cnd thn els) ss)
            (if (not (eq? 0 ((interp-x86-exp env) cnd)))
                ((interp-x86-instr env) (append thn ss))
@@ -541,6 +617,22 @@
           ;; (cmpq ,s2 ,s1) (jl thn) (jmp els)
           ;; is eqivalent to
           ;; (if (< s1 s2) thn els)
+          [(? ral?) (=> eh)
+            (define-values (s ss) (ral-dropl ast))
+            (match s [(Instr 'cmpq (list s2 s1))
+              (let* ([v1 ((interp-x86-exp env) s1)]
+                [v2 ((interp-x86-exp env) s2)]
+                [eflags 
+                  (cond
+                    [(< v1 v2) 'less]
+                    [(> v1 v2) 'greater]
+                    [else 'equal])])
+                ((interp-x86-instr (cons (cons '__flag eflags) env)) ss)
+              )
+              ]
+              [_ (eh)]
+            )
+          ]
           [(cons (Instr 'cmpq (list s2 s1)) ss)
            (let* ([v1 ((interp-x86-exp env) s1)]
                   [v2 ((interp-x86-exp env) s2)]
@@ -554,10 +646,20 @@
            (define x (get-name d))
            (define v ((interp-x86-exp env) s))
            ((interp-x86-instr (cons (cons x v) env)) ss)]
+
+          [(? ral?) (=> eh)
+            (define-values (s ss) (ral-dropl ast))
+            (match s [(JmpIf cc label)
+              (cond [(= (eflags-status env cc) 1)
+                ((interp-x86-block env) (goto-label label))]
+                [else ((interp-x86-instr env) ss)])
+            ]
+            [_ (eh)])
+          ]
           [(cons (JmpIf cc label) ss)
-	   (cond [(eq? (eflags-status env cc) 1)
-		  ((interp-x86-block env) (goto-label label))]
-		 [else ((interp-x86-instr env) ss)])]
+            (cond [(eq? (eflags-status env cc) 1)
+              ((interp-x86-block env) (goto-label label))]
+            [else ((interp-x86-instr env) ss)])]
           [else ((super interp-x86-instr env) ast)]
           )))
 
@@ -927,29 +1029,73 @@
            ((interp-x86-instr
              `((rax . ,(allocate-page! 'alloc num-bytes)) . ,env))
 	    ss)]
+          [(? ral?) (=> eh)
+            (when (ral-empty? ast) (eh))
+            (define-values (instr ss) (ral-dropl ast))
+            (match instr [(Callq 'collect _)
+              (define rootstack ((interp-x86-exp env) (Reg 'rdi)))
+              (define bytes-requested ((interp-x86-exp env) (Reg 'rsi)))
+              ((collect!) rootstack bytes-requested)
+              ((interp-x86-instr env) ss)
+            ]
+            [_ (eh)])
+          ]
           [(cons (Callq 'collect _) ss)
-           (define rootstack ((interp-x86-exp env) (Reg 'rdi)))
-           (define bytes-requested ((interp-x86-exp env) (Reg 'rsi)))
-           ((collect!) rootstack bytes-requested)
-           ((interp-x86-instr env) ss)]
+            (define rootstack ((interp-x86-exp env) (Reg 'rdi)))
+            (define bytes-requested ((interp-x86-exp env) (Reg 'rsi)))
+            ((collect!) rootstack bytes-requested)
+            ((interp-x86-instr env) ss)]
+          [(? ral?) (=> eh)
+            (when (ral-empty? ast) (eh))
+            (define-values (instr ss) (ral-dropl ast))
+            (match instr [(Instr 'movq (list s d))
+              (define value   ((interp-x86-exp env) s))
+              (define new-env ((interp-x86-store env) d value))
+              ((interp-x86-instr new-env) ss)
+            ]
+            [_ (eh)])
+          ]
           [(cons (Instr 'movq (list s d)) ss)
-           (define value   ((interp-x86-exp env) s))
-           (define new-env ((interp-x86-store env) d value))
-           ((interp-x86-instr new-env) ss)]
+            (define value   ((interp-x86-exp env) s))
+            (define new-env ((interp-x86-store env) d value))
+            ((interp-x86-instr new-env) ss)]
+          [(? ral?) (=> eh)
+            (when (ral-empty? ast) (eh))
+            (define-values (instr ss) (ral-dropl ast))
+            (match instr [(Instr (? x86-binary-op? binop) (list s d))
+              (define src ((interp-x86-exp env) s))
+              (define dst ((interp-x86-exp env) d))
+              (define op  (interp-x86-op binop))
+              (define new-env ((interp-x86-store env) d (op src dst)))
+              ((interp-x86-instr new-env) ss)
+            ]
+            [_ (eh)])
+          ]
           [(cons (Instr (? x86-binary-op? binop) (list s d)) ss)
            (define src ((interp-x86-exp env) s))
            (define dst ((interp-x86-exp env) d))
            (define op  (interp-x86-op binop))
            (define new-env ((interp-x86-store env) d (op src dst)))
            ((interp-x86-instr new-env) ss)]
+          [(? ral?) (=> eh)
+            (when (ral-empty? ast) (eh))
+            (define-values (instr ss) (ral-dropl ast))
+            (match instr [(Instr (? x86-unary-op? unary-op) (list d))
+              (define dst ((interp-x86-exp env) d))
+              (define op  (interp-x86-op unary-op))
+              (define new-env ((interp-x86-store env) d (op dst)))
+              ((interp-x86-instr new-env) ss)
+            ]
+            [_ (eh)])
+          ]
           [(cons (Instr (? x86-unary-op? unary-op) (list d)) ss)
            (define dst ((interp-x86-exp env) d))
            (define op  (interp-x86-op unary-op))
            (define new-env ((interp-x86-store env) d (op dst)))
            ((interp-x86-instr new-env) ss)]
           [else
-           ((super interp-x86-instr env) ast)]
-          )))
+            ((super interp-x86-instr env) ast)]
+        )))
 
     ;; before register allocation
     (define/override (interp-pseudo-x86 env)
