@@ -1463,7 +1463,7 @@ Changelog:
                   (match ast
                     [(Block info instr*)
                      (print-info info port mode)
-                     (for ([instr instr*])
+                     (for ([instr (if (ral? instr*) (in-ral0 instr*) instr*)])
                        (recur instr port))
                      ]))]
                [(eq? (AST-output-syntax) 'abstract-syntax)
@@ -1680,10 +1680,15 @@ Changelog:
     [else #f]
     ))
 
+(require cutie-ftree)
+
 (define (instr-list? es)
-  (or (null? es)
+  (or 
+      (ral? es)
+      (null? es)
       (and (instr? (car es))
-           (instr-list? (cdr es)))))
+           (instr-list? (cdr es)))
+           ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Parsing S-expressions into Abstract Syntax Trees (and back)
@@ -1815,7 +1820,7 @@ Changelog:
     (define/public (print-x86-block e)
       (match e
         [(Block info ss)
-         (string-append* (for/list ([s ss]) (print-x86-instr s)))]
+         (string-append* (for/list ([s (if (ral? ss) (in-ral0 ss) ss)]) (print-x86-instr s)))]
         [else (error "print-x86-block unhandled " e)]))
 
     (define/public (print-x86 e)
@@ -1940,6 +1945,9 @@ Changelog:
 (define (lookup x ls [default no-default])
   (let recur ([xs ls])
     (cond
+      [(ral? xs)
+        (printf "meet ral\n")
+      ]
       [(null? xs)
        (if (eq? default no-default)
            (error 'lookup "didn't find ~a in ~a" x (map fst ls))
