@@ -31,6 +31,7 @@
     (abstract pass)
   ))
 
+
 (define (pass-program-mixin clazz)
   (class clazz
     (super-new)
@@ -767,6 +768,67 @@
     ))
   ))
 
+(require cutie-ftree)
+  
+(define pass-prelude-and-conclusion-ral
+  (class pass-abstract
+    (super-new)
+    (define/public (get-prelude p) (match p [(X86Program info _)
+      (define stack-size (align (dict-ref info 'stack-size) 16))
+      (define insts (vector
+        (Instr 'pushq (list (Reg 'rbp)))
+        (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
+        (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
+        (Instr 'movq (list (Imm 65536) (Reg 'rdi)))
+        (Instr 'movq (list (Imm 65536) (Reg 'rsi)))
+        (Callq 'initialize 2)
+        (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15)))
+        (Instr 'movq (list (Imm 0) (Deref 'r15 0)))
+        (Instr 'addq (list (Imm 8) (Deref 'r15 0)))
+        (Jmp 'start)
+      ))
+      (Block (make-hash) (vector->ral insts))
+    ]))
+    (define/public (get-conclusion p) (match p [(X86Program info _)
+      (define stack-size (dict-ref info 'stack-size))
+      (define insts (vector
+        (Instr 'subq (list (Imm 8) (Reg 'r15)))
+        (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
+        (Instr 'popq (list (Reg 'rbp)))
+        (Retq )
+      ))
+      (Block (make-hash) (vector->ral insts))
+    ]))
+    (define/override (pass p) (match p [(X86Program info blocks)
+      (define prelude (get-prelude p))
+      (define conclusion (get-conclusion p))
+      (define blocks^
+        (for/hash ([(tag block) (in-hash blocks)]) 
+          (match-define (Block info instr*) block)
+          (match instr*
+            [(list) (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+            [_ (match (last instr*)
+              [(? Jmp?) (values tag block)]
+              [_ (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
+            )]
+          )
+          ; (match instr*
+          ;   [(list) (values tag 
+          ;     (Block info (ral-append instr* (vector->ral (vector (Jmp 'conclusion))))))]
+          ;   [_ (match (ral-viewR instr*)
+          ;     [(? Jmp?) (values tag block)]
+          ;     [_ (values tag (Block info (ral-append instr* (vector->ral (vector (Jmp 'conclusion))))))]
+          ;   )]
+          ; )
+        ))
+      (X86Program info 
+        (dict-set 
+          (dict-set blocks^ 'main prelude)
+          'conclusion conclusion))
+    ]))
+  ))
+
+
 (define pass-prelude-and-conclusion
   (class pass-abstract
     (super-new)
@@ -817,7 +879,8 @@
     ]))
   ))
 
-(define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
+; (define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
+(define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion-ral) pass p)))
 
 (define cnt (make-parameter #f))
 (define block-visited (make-parameter #f))
@@ -914,7 +977,7 @@
     (define/public (search-block-impl block-tag)
       (define g (graph))
       (define visited (block-visited))
-      (match (dict-ref visited block-tag (λ () #f))
+      (match (dict-ref visited block-tag #f)
         [#f 
           (define id (cnt))
           (cnt (+ id 1))
@@ -1407,9 +1470,13 @@
     ]))
   ))
 
+(define init-program-property (match-lambda 
+  ([Program _ x] [Program (ordl-make-empty symbol-compare) x])))
+
 ; (debug-level 2)
 (define compiler-passes
   `(
+    ("init" ,init-program-property ,interp-Lvec-prime ,type-check-Lvec)
     ("shrink" ,shrink ,interp-Lvec-prime ,type-check-Lvec)
     ("uniquify" ,uniquify ,interp-Lvec-prime ,type-check-Lvec)
     ("collect-set!" ,collect-set! ,interp-Lvec-prime ,type-check-Lvec)
@@ -1430,5 +1497,10 @@
     ; ("patch instructions" ,patch-instructions ,interp-x86-2)
   ))
 
-(provide compiler-passes)
+(define (std-hash->ordl-hash std)
+  (for/fold ([i (ordl-make-empty symbol-compare)]) ([(k v) (in-dict std)])
+    (ordl-insert i k v #f)
+  )
+)
 
+(provide compiler-passes)
