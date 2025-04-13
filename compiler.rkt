@@ -6,8 +6,7 @@
 (require "utilities.rkt")
 ; (provide (all-defined-out))
 
-(require "interp-Lvec-prime.rkt")
-(require "type-check-Lvec.rkt")
+(require "interp-Lvec-prime.rkt") (require "type-check-Lvec.rkt")
 (require "interp-Cvec.rkt")
 (require "type-check-Cvec.rkt")
 
@@ -483,7 +482,150 @@
     ))
   ))
 
-(define select-instructions (λ (p) (send (new pass-select-instructions-vec) pass p)))
+(define pass-select-instructions-vec-ral
+  (class object%
+    (super-new)
+    (define/public pass (match-lambda [(CProgram info blocks)
+      (define blocks^
+        (for/hash ([(block-tag block) (in-hash blocks)])
+          (values block-tag (Block '() (pass-instr* block)))
+        ))
+      (X86Program info blocks^)
+    ]))
+    (define/public pass-instr* (match-lambda
+      [(Seq a res) (pass-instr a (pass-instr* res))]      
+      [(Return arg) (pass-instr (Assign (Reg 'rax) arg) (ral-empty))]
+      [(Goto label) (vector->ral (vector (Jmp label)))]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
+        (pass-instr* (if (equal? lhs rhs) thn els))
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (and rhs (or (Var _))))) thn els)
+        (vector->ral (vector (Instr 'cmpq (list lhs rhs)) (JmpIf 'e (Goto-label thn)) (Jmp (Goto-label els))))
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Bool rhs))) thn els)
+        (vector->ral (vector
+          (Instr 'movq (list (Imm (if rhs 1 0)) (Reg 'rax)))
+          (Instr 'cmpq (list (Reg 'rax) lhs))
+          (JmpIf 'e (Goto-label thn))
+          (Jmp (Goto-label els))
+        ))
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Int rhs))) thn els)
+        (vector->ral (vector
+          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
+          (Instr 'cmpq (list (Reg 'rax) lhs))
+          (JmpIf 'e (Goto-label thn))
+          (Jmp (Goto-label els))
+        ))
+      ]
+      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _))) rhs)) thn els)
+        (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs)) thn els))
+      ]
+      [(IfStmt (Prim '< (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
+        (pass-instr* (if (< lhs rhs) thn els))
+      ]
+      [(IfStmt (Prim '< (list (and lhs (Var _)) (and rhs (Var _)))) thn els)
+        (vector->ral (vector
+          (Instr 'cmpq (list rhs lhs))
+          (JmpIf 'l (Goto-label thn))
+          (Jmp (Goto-label els))
+        ))
+      ]
+      [(IfStmt (Prim '< (list (and lhs (Var _)) (Int rhs))) thn els)
+        (vector->ral (vector
+          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
+          (Instr 'cmpq (list (Reg 'rax) lhs))
+          (JmpIf 'l (Goto-label thn))
+          (Jmp (Goto-label els))
+        ))
+      ]
+      [(IfStmt (Prim '< (list (Int lhs) (and rhs (Var _)))) thn els)
+        (vector->ral (vector
+          (Instr 'movq (list (Imm lhs) (Reg 'rax)))
+          (Instr 'cmpq (list rhs (Reg 'rax)))
+          (JmpIf 'l (Goto-label thn))
+          (Jmp (Goto-label els))
+        ))
+      ]
+    ))
+    (define/public (pass-instr instr cont) (match instr
+      [(Assign lhs (Int imm))
+        (ral-consl cont (Instr 'movq (list (Imm imm) lhs)))]
+      [(Assign lhs (and v (Var _)))
+        (ral-consl cont (Instr 'movq (list v lhs)))]
+      [(Assign lhs (Prim '+ (list lhs (Int r))))
+        (ral-consl cont (Instr 'addq (list (Imm r) lhs)))]
+      [(Assign lhs (Prim '+ (list lhs (and r (Var _)))))
+        (ral-consl cont (Instr 'addq (list r lhs)))]
+      [(Assign lhs (Prim '+ (list other lhs)))
+        (pass-instr (Assign lhs (Prim '+ (list lhs other)) cont))]
+      [(Assign lhs (Prim '+ (list (Int l) (Int r))))
+        (ral-consl cont (Instr 'movq (list (Imm (+ l r)) lhs)))]
+      [(Assign lhs (Prim '+ (list (Int l) (and r (Var _)))))
+        (ral-consl (ral-consl cont (Instr 'addq (list (Imm l) lhs))) (Instr 'movq (list r lhs)))]
+      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Var _)))))
+        (ral-consl (ral-consl cont (Instr 'addq (list r lhs))) (Instr 'movq (list l lhs)))]
+      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Int _)))))
+        (pass-instr (Assign lhs (Prim '+ (list r l))) cont)]
+      [(Assign lhs (Prim '- (list (Int a))))
+        (ral-consl cont (Instr 'movq (list (Imm (- a)) lhs)))]
+      [(Assign lhs (Prim '- (list (and a (Var _)))))
+        (ral-consl (ral-consl cont (Instr 'negq (list lhs))) (Instr 'movq (list a lhs)))]
+      [(Assign lhs (Prim 'read '()))
+        (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'rax) lhs))) (Callq 'read_int 0))]
+      [(Assign lhs (Bool rhs))
+        (ral-consl cont (Instr 'movq (list (if rhs (Imm 1) (Imm 0)) lhs)))]
+      [(Assign lhs (Prim 'not (list (and operand (Var _)))))
+        (ral-consl (ral-consl cont (Instr 'xorq (list (Imm 1) lhs))) (Instr 'movq (list operand lhs)))]
+      [(Assign lhs (Prim 'not (list (Bool operand))))
+        (ral-consl cont (Instr 'movq (list (if operand (Imm 0) (Imm 1)) lhs)))]
+      [(Assign lhs (Prim '- (list lhs lhs)))
+        (ral-consl cont (Instr 'movq (list (Imm 0) lhs)))]
+      [(Assign lhs (Prim '- (list lhs (and op1 (Var _)))))
+        (ral-consl cont (Instr 'subq (list op1 lhs)))]
+      [(Assign lhs (Prim '- (list lhs (Int op1))))
+        (ral-consl cont (Instr 'subq (list (Imm op1) lhs)))]
+      [(Assign lhs (Prim '- (list (and op0 (Var _)) (and op1 (Var _)))))
+        (ral-consl (ral-consl cont (Instr 'subq (list op1 lhs))) (Instr 'movq (list op0 lhs)))]
+      [(Assign lhs (Prim '- (list (and op0 (Var _)) (Int op1))))
+        (ral-consl (ral-consl cont (Instr 'subq (list (Imm op1) lhs))) (Instr 'movq (list op0 lhs)))]
+      [(Assign lhs (Prim '- (list (Int op0) (and op1 (Var _)))))
+        (ral-consl (ral-consl cont (Instr 'subq (list op1 lhs))) (Instr 'subq (list op1 lhs)))]
+      [(Assign lhs (Prim '- (list (Int op0) (Int op1))))
+        (ral-consl cont (Instr 'movq (list (Imm (- op0 op1)) lhs)))]
+      [(Assign _ (Void)) cont]
+      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (and rhs1 (Var _)))))
+        (ral-consl (ral-consl (ral-consl cont (Instr 'movzbq (list (ByteReg 'al) lhs))) (Instr 'sete (list (ByteReg 'al)))) (Instr 'cmpq (list rhs0 rhs1)))]
+      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (Int rhs1))))
+        (ral-consl (ral-consl (ral-consl cont (Instr 'movzbq (list (ByteReg 'al) lhs))) (Instr 'sete (list (ByteReg 'al)))) (Instr 'cmpq (list rhs0 (Imm rhs1))))]
+      [(Assign lhs (Prim 'eq? (list (Int rhs0) (and rhs1 (Var _)))))
+        (ral-consl (ral-consl (ral-consl cont (Instr 'movzbq (list (ByteReg 'al) lhs)))
+          (Instr 'sete (list (ByteReg 'al))))
+            (Instr 'cmpq (list (Imm rhs0) rhs1)))]
+      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (and val (Var _))))
+        (ral-consl (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))))
+          (Instr 'movq (list v (Reg 'r11))))
+            (Instr 'movq (list val (Reg 'rax))))]
+      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (Int val)))
+        (ral-consl (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))) 
+          (Instr 'movq (list v (Reg 'r11)))) (Instr 'movq (list (Imm val) (Reg 'rax))))]
+      [(Assign _ (and rhs (Prim 'vector-set! _)))
+        (pass-instr rhs cont)]
+      [(Assign lhs (Allocate len types))
+        (ral-consl (ral-consl (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'r11) lhs)))
+          (Instr 'movq (list (Imm (cast-types-to-tag types)) (Deref 'r11 0))))
+            (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr))))
+              (Instr 'movq (list (Global 'free_ptr) (Reg 'r11))))]
+      [(Collect bytes)
+        (ral-consl (ral-consl (ral-consl cont (Callq 'collect 2)) (Instr 'movq (list (Imm bytes) (Reg 'rsi)))) (Instr 'movq (list (Reg 'r15) (Reg 'rdi))))]
+      [(Assign lhs (GlobalValue v)) 
+        (ral-consl cont (Instr 'movq (list (Global v) lhs)))]
+      [(Assign lhs (Prim 'vector-ref (list (and rhs0 (Var _)) (Int rhs1))))
+        (ral-consl (ral-consl cont (Instr 'movq (list (Deref 'r11 (* 8 (+ rhs1 1))) lhs))) (Instr 'movq (list rhs0 (Reg 'r11))))]
+    ))
+  ))
+
+(define select-instructions (λ (p) (send (new pass-select-instructions-vec-ral) pass p)))
 
 (require "multigraph.rkt")
 
@@ -546,21 +688,26 @@
       graph
     )
     (define/public (init-build-interference b graph) (match b
-      [(cons instr instr*)
+      [(? ral-empty?) graph]
+      [_ (define-values (instr instr*) (ral-dropl b))
         (for ([w (in-set (get-write instr))])
           (add-vertex! graph w))
         (init-build-interference instr* graph)
       ]
-      ['() graph]
     ))
     (define/public ((pass-block interference) block) (match block
       [(Block info instr*)
-        (pass-instr* instr* (cdr (dict-ref info 'live)) interference)
+        (define live (dict-ref info 'live))
+        (match-define-values (_ l) (ral-dropl live))
+        (pass-instr* instr* l interference)
         block
       ]
     ))
     (define/public (pass-instr* instr* live graph) (match* (instr* live)
-      [((cons instr rest) (cons l live-rest))
+      [(_ (? ral-empty?)) (void)]
+      [(_ _)
+        (define-values (instr rest) (ral-dropl instr*))
+        (define-values (l live-rest) (ral-dropl live))
         (define writes (get-write instr))
         (define reads l)
         (for ([w (in-set writes)])
@@ -570,7 +717,6 @@
         )
         (pass-instr* rest live-rest graph)
       ]
-      [(_ '()) (void)]
     ))
   ))
 
@@ -713,7 +859,9 @@
     ))
     (define/public ((allocate-registers-block table) block) (match block
       [(Block info instr*)
-        (define instr*^ (map (allocate-instr table) instr*))
+        (define m (allocate-instr table))
+        (define instr*^ (vector->ral (for/vector #:length (ral-length instr*)
+          ([i (in-ral0 instr*)]) (m i))))
         (Block info instr*^)
       ]
     ))
@@ -732,45 +880,41 @@
     ))
     (define/public (patch-instr-block block) (match block
       [(Block info instr*)
-        (define instr*^ (patch-instr* instr*))
+        (define instr*^ (patch-instr* instr* (ral-empty)))
         (Block info instr*^)
       ]
     ))
-    (define/public (patch-instr* instr*) (match instr*
-      [(cons instr rest)
+    (define/public (patch-instr* instr* cont) (match instr*
+      [(? ral-empty?) cont]
+      [_ (define-values (instr rest) (ral-dropl instr*))
         (match instr
           [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
             (patch-instr*
-              (cons 
-                (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))
-                (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
-                  rest)))
+              rest
+              (ral-consr (ral-consr cont (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))
+            )
           ]
           [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
             (patch-instr*
-              (cons 
-                (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
-                (cons (Instr i (list (Deref r0 o0) (Reg 'rax)))
-                  (cons (Instr 'movq (list (Reg 'rax) (Deref r1 o1)))
-                    rest)))
-            )
+              rest
+              (ral-consr (ral-consr (ral-consr cont (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))) (Instr i (list (Deref r0 o0) (Reg 'rax)))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))
+            ) 
           ]
           [(Instr 'movq (list (Reg a) (Reg a))) 
-            (patch-instr* rest) ; optimize the useless movq op.
+            (patch-instr* rest cont)
           ]
           [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
-            (patch-instr* rest) ; drop the non-sense addition and subtraction.
+            (patch-instr* rest cont)
           ]
-          [_ (cons instr (patch-instr* rest))]
+          [_ (patch-instr* rest (ral-consr cont instr))]
         )
       ]
-      ['() '()]
     ))
   ))
 
 (require cutie-ftree)
   
-(define pass-prelude-and-conclusion-ral
+(define pass-prelude-and-conclusion
   (class pass-abstract
     (super-new)
     (define/public (get-prelude p) (match p [(X86Program info _)
@@ -805,23 +949,16 @@
       (define blocks^
         (for/hash ([(tag block) (in-hash blocks)]) 
           (match-define (Block info instr*) block)
-          (match instr*
-            [(list) (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-            [_ (match (last instr*)
-              [(? Jmp?) (values tag block)]
-              [_ (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-            )]
-          )
-          ; (match instr*
-          ;   [(list) (values tag 
-          ;     (Block info (ral-append instr* (vector->ral (vector (Jmp 'conclusion))))))]
-          ;   [_ (match (ral-viewR instr*)
-          ;     [(? Jmp?) (values tag block)]
-          ;     [_ (values tag (Block info (ral-append instr* (vector->ral (vector (Jmp 'conclusion))))))]
-          ;   )]
-          ; )
+          (define instr*^
+            (cond
+              [(ral-empty? instr*) (ral-consr instr* (Jmp 'conclusion))]
+              [else (define last-instr (ral-viewr instr*))
+                (if (Jmp? last-instr) instr* (ral-consr instr* (Jmp 'conclusion)))
+              ]
+            ))
+          (values tag (Block info instr*^))
         ))
-      (X86Program info 
+      (X86Program info
         (dict-set 
           (dict-set blocks^ 'main prelude)
           'conclusion conclusion))
@@ -829,58 +966,7 @@
   ))
 
 
-(define pass-prelude-and-conclusion
-  (class pass-abstract
-    (super-new)
-    (define/public (get-prelude p) (match p [(X86Program info _)
-      (define stack-size (align (dict-ref info 'stack-size) 16))
-      (Block '() 
-        (list 
-          (Instr 'pushq (list (Reg 'rbp))) 
-          (Instr 'movq (list (Reg 'rsp) (Reg 'rbp))) 
-          (Instr 'subq (list (Imm stack-size) (Reg 'rsp)))
-          (Instr 'movq (list (Imm 65536) (Reg 'rdi)))
-          (Instr 'movq (list (Imm 65536) (Reg 'rsi)))
-          (Callq 'initialize 2)
-          (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15)))
-          (Instr 'movq (list (Imm 0) (Deref 'r15 0)))
-          (Instr 'addq (list (Imm 8) (Deref 'r15 0)))
-          (Jmp 'start)
-        ))
-    ]))
-    (define/public (get-conclusion p) (match p [(X86Program info _)
-      (define stack-size (dict-ref info 'stack-size))
-      (Block '()
-        (list 
-          (Instr 'subq (list (Imm 8) (Reg 'r15)))
-          (Instr 'addq (list (Imm stack-size) (Reg 'rsp)))
-          (Instr 'popq (list (Reg 'rbp)))
-          (Retq )
-        ))
-    ]))
-    (define/override (pass p) (match p [(X86Program info blocks)
-      (define prelude (get-prelude p))
-      (define conclusion (get-conclusion p))
-      (define blocks^
-        (for/hash ([(tag block) (in-hash blocks)]) 
-          (match-define (Block info instr*) block)
-          (match instr*
-            [(list) (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-            [_ (match (last instr*)
-              [(? Jmp?) (values tag block)]
-              [_ (values tag (Block info (append instr* (list (Jmp 'conclusion)))))]
-            )]
-          )
-        ))
-      (X86Program info 
-        (dict-set 
-          (dict-set blocks^ 'main prelude)
-          'conclusion conclusion))
-    ]))
-  ))
-
-; (define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
-(define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion-ral) pass p)))
+(define prelude-and-conclusion (λ (p) (send (new pass-prelude-and-conclusion) pass p)))
 
 (define cnt (make-parameter #f))
 (define block-visited (make-parameter #f))
@@ -897,10 +983,18 @@
       (search-blocks p (get-blocks-graph p))
     ]))
     (define/public get-block-tail (match-lambda
-      [(cons (JmpIf _ tag) rest) (cons tag (get-block-tail rest))]
-      [(cons (Jmp tag) _) (list tag)]
-      [(cons _ rest) (get-block-tail rest)]
-      ['() '()]
+      [(? ral-empty?) (ral-empty)]
+      [seq (=> eh)
+        (define-values (l heads) (ral-dropr seq))
+        (when (ral-empty? heads) (eh))
+        (define l2 (ral-viewr heads))
+        (match* (l l2)
+          [((Jmp t) (JmpIf _ t2)) (vector->ral (vector t2 t))]
+          [((Jmp t) _) (vector->ral (vector t))]
+          [(_ _) (eh)]
+        )
+      ]
+      [_ (ral-empty)]
     ))
     (define/public get-blocks-tail (match-lambda [(X86Program info blocks)
       (for/hash ([(tag block) (in-hash blocks)]) 
@@ -914,7 +1008,7 @@
         (match-define (Block _ binstr*) block)
         (define tos (get-block-tail binstr*))
         (add-vertex! g tag)
-        (for ([t tos]) (add-directed-edge! g tag t))
+        (for ([t (in-ral0 tos)]) (add-directed-edge! g tag t))
       )
       g
     ]))
@@ -1073,7 +1167,9 @@
       (Block info instr*)
     ]))
     (define/public (pass-instr* instr* add-set drop-set) (match instr*
-      [(cons instr rest) 
+      [(? ral-empty?) (void)]
+      [_ (=> eh)
+        (define-values (instr rest) (ral-dropl instr*))
         (pass-instr* rest add-set drop-set)
         (define r (get-read instr))
         (define w (get-write instr))
@@ -1082,7 +1178,6 @@
         (set-union! add-set r)
         (set-subtract! drop-set r)
       ]
-      ['() (void)]
     ))
     (define/public pass (match-lambda [(X86Program info blocks)
       (define blocks^ (for/hash ([(tag block) (in-hash blocks)])
@@ -1134,17 +1229,19 @@
       mapping
     )
     (define/public (pass-instr* instr* end) (match instr*
-      ['() (list end)]
-      [(or (list (JmpIf _ _) (Jmp _)) (list (Jmp _)))
-        (list end)
+      [(? ral-empty?) (vector->ral (vector end))]
+      [_ (=> eh)
+        (define l (ral-viewl instr*))
+        (match l [(or (JmpIf _ _) (Jmp _)) (vector->ral (vector end))] [_ (eh)])
       ]
-      [(cons instr rest)
+      [_
+        (define-values (instr rest) (ral-dropl instr*))
         (define instr-write (get-write instr))
         (define instr-read (get-read instr))
         (define rest-set (pass-instr* rest end))
-        (define s-m (set-subtract (car rest-set) instr-write))
+        (define s-m (set-subtract (ral-viewl rest-set) instr-write))
         (define s (set-union s-m instr-read))
-        (cons s rest-set)
+        (ral-consl rest-set s)
       ]
     ))
     (define/override (pass p) (match p [(X86Program info blocks)
@@ -1447,7 +1544,7 @@
           )
           (loop #f)
         )
-        (print-graph graph)
+        ; (print-graph graph)
         (displayln (dominance-map))
         (displayln x)
         x
@@ -1494,7 +1591,7 @@
     ("allocate registers" ,allocate-registers ,interp-x86-2)
     ("patch instructions" ,patch-instructions ,interp-x86-2)
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
-    ; ("patch instructions" ,patch-instructions ,interp-x86-2)
+    ("patch instructions" ,patch-instructions ,interp-x86-2)
   ))
 
 (define (std-hash->ordl-hash std)
