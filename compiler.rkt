@@ -538,7 +538,10 @@
   )
 )
 
-(define connect-component (λ (p) (send (new (pass-uncover-live-mixin2 object%)) pass p)))
+;(define connect-component (λ (p) (send (new (pass-uncover-live-mixin2 object%)) pass p)))
+
+(require "compiler/connect-component.rkt")
+(define connect-component (λ (p) (send (new pass-uncover-live) pass p)))
 
 (define (pass-read-write-mixin2 super-class)
   (class super-class
@@ -614,17 +617,17 @@
   (class clz
     (super-new)
     (inherit get-read get-write)
-    (define/public (analyze-dataflow graph transfer bottom join)
+    (define/public (analyze-dataflow graph transfer bottom join id2block)
       (define s (subqueue))
       (define mapping (box (ordl-make-empty symbol-compare)))
       (define change-able (mutable-set))
       (define worklist (make-queue))
       (define graph-t (transpose graph))
       (for ([sij (in-vertices graph-t)]) (set-box! mapping (dict-set (unbox mapping) sij bottom)))
-      (for ([si s])
+      (for ([si (in-ral0 s)])
         (set-clear! change-able)
-        (for ([sij si]) (set-add! change-able sij))
-        (for ([sij si]) (enqueue! worklist sij))
+        (for ([sij (in-dict-keys si)]) (set-add! change-able (dict-ref id2block sij)))
+        (for ([sij (in-dict-keys si)]) (enqueue! worklist (dict-ref id2block sij)))
         (while (not (queue-empty? worklist))
           (define node (dequeue! worklist))
           (define preds (get-neighbors graph-t node))
@@ -678,6 +681,7 @@
     (define/override (pass p) (match p [(X86Program info blocks)
       (define graph (dict-ref info 'graph))
       (define components (dict-ref info 'connect-component))
+      (define id2block (dict-ref info 'id2block))
       (define live-map
         (parameterize ([subqueue components])
           (analyze-dataflow graph 
@@ -691,6 +695,7 @@
             )
             (set)
             set-union
+            id2block
           )
         )
       )
@@ -765,26 +770,6 @@
 )
 
 (define allocate-registers (λ (p) (send (new pass-allocate-registers-Lvec) pass p)))
-
-(define cast-types-to-tag (match-lambda
-  [`(Vector ,types ...)
-    (define types-mask 
-      (let get-bit-fields ([idx 0] [rest-types types] [mask 1] [rst 0])
-        (match rest-types
-          [`(Integer ,rest ...) 
-            (get-bit-fields (+ idx 1) rest (* mask 2) rst)]
-          [`((Vector ,_ ...) ,rest ...) 
-            (get-bit-fields (+ idx 1) rest (arithmetic-shift mask 1) (bitwise-ior rst mask))]
-          ['() rst]
-      ))
-    )
-    (bitwise-ior 
-      (arithmetic-shift types-mask 7)
-      (arithmetic-shift (length types) 1)
-      1
-    )
-  ]
-))
 
 (define collect-vector-variables 
   (class pass-abstract
@@ -882,13 +867,15 @@
         (for ([block full-set])
           (set-box! (dominance-map) (dict-set (unbox (dominance-map)) block full-set))
         )
-        (define connect-component (reverse (dict-ref info 'connect-component)))
+        (define connect-component (dict-ref info 'connect-component))
         (set-box! (dominance-map) (dict-set (unbox (dominance-map)) 'start (set 'start)))
         (define graph (dict-ref info 'graph))
+        (define id2block (dict-ref info 'id2block))
         (define graph-rev (transpose graph))
-        (for ([component connect-component]) 
+        (for ([component (in-ral0 connect-component)]) 
           (define (loop hint)
-            (for ([block component])
+            (for ([blockid (in-dict-keys component)])
+              (define block (dict-ref id2block blockid))
               (define dominance^
                 (for/fold ([collect (dict-ref (unbox (dominance-map)) block)]) ([src (in-neighbors graph-rev block)])
                   (set-intersect collect (dict-ref (unbox (dominance-map)) src))
