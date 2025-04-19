@@ -42,4 +42,4 @@
     )
   ))
 
-(provide interference)
+(provide interference interference-cmp-fn)

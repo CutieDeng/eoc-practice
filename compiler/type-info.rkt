@@ -67,9 +67,9 @@
   ))
 
 (define collect-vector-variables 
-  (class pass-abstract
+  (class object%
     (super-new)
-    (define/override pass (match-lambda 
+    (define/public pass (match-lambda 
       [(CProgram info blocks)
         (error 'pass "unimpl")
       ]))

@@ -11,7 +11,7 @@
       [(X86Program info blocks)
         (define table (dict-ref info 'color-graph))
         (define allo (allocate-registers-block table))
-        (define slot-num (+ 1 (foldl max -1 (map cdr table))))
+        (define slot-num (+ 1 (foldl max -1 (sequence->list (in-dict-values table)))))
         (define blocks^ 
           (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block-inner) (in-dict blocks)]) 
             (ordl-insert a tag (allo block-inner) #f))
