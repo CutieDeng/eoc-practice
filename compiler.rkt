@@ -4,13 +4,12 @@
 (require racket/fixnum)
 (require "interp.rkt")
 (require "utilities.rkt")
-; (provide (all-defined-out))
 
 (require "interp-Lvec-prime.rkt") (require "type-check-Lvec.rkt")
 (require "interp-Cvec.rkt")
 (require "type-check-Cvec.rkt")
 
-(require graph)
+(require "compiler/graph-core.rkt")
 (require "graph-printing.rkt")
 (require "priority_queue.rkt")
 
@@ -30,604 +29,20 @@
     (abstract pass)
   ))
 
+(require "compiler/shrink.rkt")
+(define shrink (λ (p) (send (new pass-shrink) pass p)))
 
-(define (pass-program-mixin clazz)
-  (class clazz
-    (super-new)
-    (inherit pass-exp)
-    (define/public pass (match-lambda 
-      [(Program info body) (Program info (pass-exp body))]))
-  )
-)
+(require "compiler/uniquify.rkt")
+(define uniquify (λ (p) (send (new pass-uniquify) pass p)))
 
-(define pass-program-abstract
-  (class pass-abstract
-    (super-new)
-    (abstract pass-exp)
-    (define/override pass (match-lambda 
-      [(Program info exp) (Program info (pass-exp exp))]
-    ))
-  ))
-
-(define pass-shrink
-  (class object%
-    (super-new)
-    (define/public pass-exp (match-lambda
-      [(Prim 'and (list a b)) (If (pass-exp a) (pass-exp b) (Bool #f))]
-      [(Prim 'or (list a b)) (If (pass-exp a) (Bool #t) (pass-exp b))]
-      [(Let x e body) (Let x (pass-exp e) (pass-exp body))]
-      [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
-      [(Prim op es) (Prim op (map (λ (v) (pass-exp v)) es))]
-      [(Begin es e) (Begin (map (λ (v) (pass-exp v)) es) (pass-exp e))]
-      [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
-      [(SetBang var exp) (SetBang var (pass-exp exp))]
-      [(and value (or (Int _) (Bool _) (Var _) (GetBang _) (Void ))) value]
-    ))
-  ))
-
-(define shrink (λ (p) (send (new (pass-program-mixin pass-shrink)) pass p)))
-
-(define uniquify-env (make-parameter '()))
-
-(define pass-program-ext-abstract
-  (class pass-abstract
-    (super-new)
-    (abstract pass-exp)
-    (define/public (init-env) '())
-    (define/override pass (match-lambda
-      [(Program info exp) (Program info ((pass-exp (init-env)) exp))]
-    ))
-  ))
-
-(define pass-Lwhile-uniquify
-  (class object%
-    (super-new)
-    (define/public (pass-exp exp)
-      (define e (uniquify-env))
-      (match exp
-        [(Var x) (Var (dict-ref e x))]
-        [(or (Int _) (Bool _) (Void )) exp]
-        [(Let x exp body)
-          (define exp^ (pass-exp exp))
-          (define x^ (gensym x))
-          (parameterize ([uniquify-env (dict-set e x x^)])
-            (define body^ (pass-exp body))
-            (Let x^ exp^ body^)
-          )
-        ]
-        [(Prim op es)
-          (Prim op (for/list ([e^ es]) (pass-exp e^)))]
-        [(If cnd thn els)
-          (define cnd^ (pass-exp cnd))
-          (define thn^ (pass-exp thn))
-          (define els^ (pass-exp els))
-          (If cnd^ thn^ els^)
-        ]
-        [(SetBang var rhs)
-          (SetBang (dict-ref e var) (pass-exp rhs))]
-        [(Begin es body)
-          (Begin (for/list ([e^ es]) (pass-exp e^)) (pass-exp body))]
-        [(WhileLoop cnd body)
-          (WhileLoop (pass-exp cnd) (pass-exp body))]
-      )
-    )
-  ))
-
-(define uniquify (λ (p) (send (new (pass-program-mixin pass-Lwhile-uniquify)) pass p)))
-
-(define rco-env (make-parameter #f))
-
-(define pass-Lvec-rco
-  (class object%
-    (super-new)
-    (define/public (pass-exp p)
-      (parameterize ([rco-env '()])
-        (expand-lets
-          (match p
-            [(? atom?) p]
-            [(Let x e body)
-              (Let x (pass-exp e) (pass-exp body))]
-            [(Prim op es) 
-              (Prim op (for/list ([e es]) (pass-atom e)))]
-            [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
-            [(GetBang _) p]
-            [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
-            [(SetBang var rhs) (SetBang var (pass-exp rhs))]
-            [(Begin rs e) (Begin (for/list ([r rs]) (pass-exp r)) (pass-exp e))]
-            [(Collect (? integer?)) p]
-            [(GlobalValue _) p]
-            [(Allocate (? integer?) _) p]
-          ))
-      )
-    )
-    (define/public (pass-atom p)
-      (define p^ (pass-exp p))
-      (cond
-        [(atom? p^) p^]
-        [else (define tmp (gensym 'tmp)) (rco-env (dict-set (rco-env) tmp p^)) (Var tmp)])
-    )
-    (define/public atom? (match-lambda 
-      [(or (Bool _) (Int _) (Var _) (Void )) #t]
-      [_ #f]
-    ))
-    (define/public (expand-lets p)
-      (for/fold ([init p]) ([e (rco-env)]) 
-        (match-define (cons var rhs) e)
-        (Let var rhs init)
-      ))
-    )
-  )
-
-(define pass-rco (pass-program-mixin pass-Lvec-rco))
-
+(require "compiler/rco.rkt")
 (define remove-complex-opera* (λ (p) (send (new pass-rco) pass p)))
 
-(define explicate-control-env (make-parameter #f))
+(require "compiler/explicate-control.rkt")
+(define explicate-control (λ (p) (send (new pass-explicate-control) pass p)))
 
-(define pass-Lvec-explicate-control
-  (class object%
-    (super-new)
-    (define/public pass (match-lambda 
-      [(Program info body)
-        (parameterize ([explicate-control-env (make-hash)]) 
-          (define b (explicate-tail body))
-          (hash-set! (explicate-control-env) 'start b)
-          (CProgram info (explicate-control-env))
-        ) 
-      ]
-    ))
-    (define/public (explicate-tail p) (match p
-      [(Collect _) (Return p)]
-      [(Allocate (? integer?) _) (Return p)]
-      [(GlobalValue _) (Return p)]
-      [(Prim 'vector-ref (list _ (Int _))) (Return p)]
-      [(Prim 'vector-set! (list _ (Int _) _)) (Return p)]
-      [(Prim 'vector-length (list _)) (Return p)]
-      [(Begin es body) 
-        (for/foldr ([init-cont (explicate-tail body)]) ([e es])
-          (explicate-effect e init-cont)
-        )]
-      [(or (WhileLoop _ _) (SetBang _ _)) 
-        (explicate-effect p (Return (Void )))]
-      [(If cnd thn els) (explicate-pred cnd (explicate-tail thn) (explicate-tail els))]
-      [(Let x e body) (explicate-assign e x (explicate-tail body))]
-      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (Return p)]
-    ))
-    (define/public (explicate-assign p x cont) (match p
-      [(or (Collect _) (Prim 'vector-set! _)) 
-        (Seq p cont)]
-      [(or (Allocate (? integer?) _) 
-          (Prim 'vector-ref (list (Int _) _)) (Prim 'vector-length _)
-          (GlobalValue _))
-        (Seq (Assign (Var x) p) cont)
-      ]
-      [(Begin es body) 
-        (for/foldr ([init-cont (explicate-assign body x cont)]) ([e es])
-          (explicate-effect e init-cont)
-        )]
-      [(or (WhileLoop _ _) (SetBang _ _)) 
-        (explicate-effect p cont)]
-      [(If cnd thn els) 
-        (define cont-blk (create-block cont)) 
-        (define thn-ass (explicate-assign thn x cont-blk))
-        (define els-ass (explicate-assign els x cont-blk))
-        (explicate-pred cnd thn-ass els-ass)
-      ]
-      [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
-      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (Seq (Assign (Var x) p) cont)]
-    ))
-    (define/public (explicate-pred cnd thn els) 
-      (define thn-blk (create-block thn))
-      (define els-blk (create-block els))
-      (match cnd
-        [(Prim 'vector-ref (list _ (Int _))) 
-          (define tmp (gensym 'tmp))
-          (Seq (Assign (Var tmp) cnd) (IfStmt (Prim 'eq? (Var tmp) (Bool #t)) thn-blk els-blk))
-        ]
-        [(Begin es body)
-          (define cont (explicate-pred body thn els))
-          (for/foldr ([cont cont]) ([e es])
-            (explicate-effect e cont)
-          )
-        ]
-        [(If cnd2 thn2 els2)
-          (define thn2-blk (explicate-pred thn2 thn-blk els-blk))
-          (define els2-blk (explicate-pred els2 thn-blk els-blk))
-          (explicate-pred cnd2 thn2-blk els2-blk)
-        ]
-        [(Let y e body)
-          (explicate-assign e y (explicate-pred body thn-blk els-blk))
-        ]
-        [(or (Var _) (Bool _))
-          (IfStmt (Prim 'eq? (list cnd (Bool #t))) thn-blk els-blk)
-        ]
-        [(Prim 'not (list _))
-          (IfStmt (Prim 'eq? (list cnd (Bool #f))) thn-blk els-blk)
-        ]
-        [(Prim (or 'eq? '< '>) (list _ _))
-          (IfStmt cnd thn-blk els-blk)
-        ]
-      ))
-    (define/public (explicate-effect p cont) (match p
-      [(Collect _) (Seq p cont)]
-      [(or (Allocate (? integer?) _) (GlobalValue _)) cont]
-      [(Prim 'vector-ref (list _ (Int _))) cont]
-      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p cont)]
-      [(Prim 'vector-length (list _)) cont]
-      [(SetBang var rhs) (explicate-assign rhs var cont)]
-      [(WhileLoop cnd body)
-        (define body-lbl (gensym 'label))
-        (define cnd-lbl (gensym 'label))
-        (define cnd^ (explicate-pred cnd (Goto body-lbl) cont))
-        (define body^ (explicate-effect body (Goto cnd-lbl))) 
-        (define env (explicate-control-env))
-        (hash-set! env body-lbl body^)
-        (hash-set! env cnd-lbl cnd^)
-        (Goto cnd-lbl)
-      ]
-      [(Begin es body)
-        (for/foldr ([init-body (explicate-effect body cont)]) ([e es])
-          (explicate-effect e init-body))
-      ]
-      [(If cnd thn els)
-        (define cont-blk (create-block cont))
-        (define thn^ (explicate-effect thn cont-blk))
-        (define els^ (explicate-effect els cont-blk))
-        (explicate-pred cnd thn^ els^)
-      ]
-      [(Let var rhs body)
-        (explicate-assign rhs var (explicate-effect body cont))
-      ]
-      [(Prim _ args)
-        (for/foldr ([init-body cont]) ([arg args])
-          (explicate-effect arg init-body) 
-        )]
-      [(or (Var _) (Int _) (Bool _) (Void )) cont]
-    ))
-    (define/public create-block (match-lambda 
-      [(and raw-jmp (Goto _)) raw-jmp]
-      [other (define lbl (gensym 'label)) (hash-set! (explicate-control-env) lbl other) (Goto lbl)]
-    ))
-  )
-)
-
-(define explicate-control (λ (p) (send (new pass-Lvec-explicate-control) pass p)))
-
-(define pass-select-instructions-vec
-  (class object%
-    (super-new)
-    (define/public pass (match-lambda [(CProgram info blocks)
-      (define blocks^
-        (for/hash ([(block-tag block) (in-hash blocks)])
-          (values block-tag (Block '() (pass-instr* block)))
-        ))
-      (X86Program info blocks^)
-    ]))
-    (define/public pass-instr* (match-lambda
-      [(Seq a res) (pass-instr a (pass-instr* res))]      
-      [(Return arg) (pass-instr (Assign (Reg 'rax) arg) '())]
-      [(Goto label) (list (Jmp label))]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
-        (pass-instr* (if (equal? lhs rhs) thn els))
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (and rhs (or (Var _))))) thn els)
-        (list
-          (Instr 'cmpq (list lhs rhs))
-          (JmpIf 'e (Goto-label thn))
-          (Jmp (Goto-label els))
-        )
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Bool rhs))) thn els)
-        (list
-          (Instr 'movq (list (Imm (if rhs 1 0)) (Reg 'rax)))
-          (Instr 'cmpq (list (Reg 'rax) lhs))
-          (JmpIf 'e (Goto-label thn))
-          (Jmp (Goto-label els))
-        )
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Int rhs))) thn els)
-        (list
-          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
-          (Instr 'cmpq (list (Reg 'rax) lhs))
-          (JmpIf 'e (Goto-label thn))
-          (Jmp (Goto-label els))
-        )
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _))) rhs)) thn els)
-        (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs)) thn els))
-      ]
-      [(IfStmt (Prim '< (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
-        (pass-instr* (if (< lhs rhs) thn els))
-      ]
-      [(IfStmt (Prim '< (list (and lhs (Var _)) (and rhs (Var _)))) thn els)
-        (list 
-          (Instr 'cmpq (list rhs lhs))
-          (JmpIf 'l (Goto-label thn))
-          (Jmp (Goto-label els))
-        )
-      ]
-      [(IfStmt (Prim '< (list (and lhs (Var _)) (Int rhs))) thn els)
-        (list
-          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
-          (Instr 'cmpq (list (Reg 'rax) lhs))
-          (JmpIf 'l (Goto-label thn))
-          (Jmp (Goto-label els))
-        )
-      ]
-      [(IfStmt (Prim '< (list (Int lhs) (and rhs (Var _)))) thn els)
-        (list
-          (Instr 'movq (list (Imm lhs) (Reg 'rax)))
-          (Instr 'cmpq (list rhs (Reg 'rax)))
-          (JmpIf 'l (Goto-label thn))
-          (Jmp (Goto-label els))
-        )
-      ]
-    ))
-    (define/public (pass-instr instr cont) (match instr
-      [(Assign lhs (Int imm))
-        (cons (Instr 'movq (list (Imm imm) lhs)) cont)]
-      [(Assign lhs (and v (Var _)))
-        (cons (Instr 'movq (list v lhs)) cont)]
-      [(Assign lhs (Prim '+ (list lhs (Int r))))
-        (cons (Instr 'addq (list (Imm r) lhs)) cont)]
-      [(Assign lhs (Prim '+ (list lhs (and r (Var _)))))
-        (cons (Instr 'addq (list r lhs)) cont)]
-      [(Assign lhs (Prim '+ (list other lhs)))
-        (pass-instr (Assign lhs (Prim '+ (list lhs other)) cont))]
-      [(Assign lhs (Prim '+ (list (Int l) (Int r))))
-        (cons (Instr 'movq (list (Imm (+ l r)) lhs)) cont)]
-      [(Assign lhs (Prim '+ (list (Int l) (and r (Var _)))))
-        #;(cons (Instr 'movq (list (Imm l) lhs))
-          (cons (Instr 'addq (list r lhs))
-            cont))
-        (cons (Instr 'movq (list r lhs))
-          (cons (Instr 'addq (list (Imm l) lhs))
-            cont))]
-      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Var _)))))
-        (cons (Instr 'movq (list l lhs))
-          (cons (Instr 'addq (list r lhs))
-            cont))]
-      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Int _)))))
-        (pass-instr (Assign lhs (Prim '+ (list r l))) cont)]
-      [(Assign lhs (Prim '- (list (Int a))))
-        (cons (Instr 'movq (list (Imm (- a)) lhs)) cont)]
-      [(Assign lhs (Prim '- (list (and a (Var _)))))
-        (cons (Instr 'movq (list a lhs))
-          (cons (Instr 'negq (list lhs)) cont))]
-      [(Assign lhs (Prim 'read '()))
-        (cons (Callq 'read_int 0)
-          (cons (Instr 'movq (list (Reg 'rax) lhs))
-            cont))]
-      [(Assign lhs (Bool rhs))
-        (cons (Instr 'movq (list (if rhs (Imm 1) (Imm 0)) lhs)) cont)]
-      [(Assign lhs (Prim 'not (list (and operand (Var _)))))
-        (cons (Instr 'movq (list operand lhs)) 
-          (cons (Instr 'xorq (list (Imm 1) lhs))
-            cont))]
-      [(Assign lhs (Prim 'not (list (Bool operand))))
-        (cons (Instr 'movq (list (if operand (Imm 0) (Imm 1)) lhs)) 
-          cont)]
-      [(Assign lhs (Prim '- (list lhs lhs)))
-        (cons (Instr 'movq (list (Imm 0) lhs)) cont)]
-      [(Assign lhs (Prim '- (list lhs (and op1 (Var _)))))
-        (cons (Instr 'subq (list op1 lhs)) cont)]
-      [(Assign lhs (Prim '- (list lhs (Int op1))))
-        (cons (Instr 'subq (list (Imm op1) lhs)) cont)]
-      [(Assign lhs (Prim '- (list (and op0 (Var _)) (and op1 (Var _)))))
-        (cons (Instr 'movq (list op0 lhs))
-          (cons (Instr 'subq (list op1 lhs))
-            cont))]
-      [(Assign lhs (Prim '- (list (and op0 (Var _)) (Int op1))))
-        (cons (Instr 'movq (list op0 lhs))
-          (cons (Instr 'subq (list (Imm op1) lhs))
-            cont))]
-      [(Assign lhs (Prim '- (list (Int op0) (and op1 (Var _)))))
-        (cons (Instr 'movq (list (Imm op0) lhs))
-          (cons (Instr 'subq (list op1 lhs))
-            cont))]
-      [(Assign lhs (Prim '- (list (Int op0) (Int op1))))
-        (cons (Instr 'movq (list (Imm (- op0 op1)) lhs))
-          cont)]
-      [(Assign _ (Void)) cont]
-      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (and rhs1 (Var _)))))
-        (cons (Instr 'cmpq (list rhs0 rhs1))
-          (cons (Instr 'sete (list (ByteReg 'al))) 
-            (cons (Instr 'movzbq (list (ByteReg 'al) lhs))
-              cont)))]
-      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (Int rhs1))))
-        (cons (Instr 'cmpq (list rhs0 (Imm rhs1)))
-          (cons (Instr 'sete (list (ByteReg 'al))) 
-            (cons (Instr 'movzbq (list (ByteReg 'al) lhs))
-              cont)))]
-      [(Assign lhs (Prim 'eq? (list (Int rhs0) (and rhs1 (Var _)))))
-        (cons (Instr 'cmpq (list (Imm rhs0) rhs1))
-          (cons (Instr 'sete (list (ByteReg 'al))) 
-            (cons (Instr 'movzbq (list (ByteReg 'al) lhs))
-              cont)))]
-      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (and val (Var _))))
-        (cons (Instr 'movq (list val (Reg 'rax)))
-          (cons (Instr 'movq (list v (Reg 'r11)))
-            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))) cont)))]
-      #;[(Prim 'vector-set! (list (Int v) (Int idx) (and val (Var _))))
-        (cons (Instr 'movq (list val (Reg 'rax)))
-          (cons (Instr 'movq (list (Imm v) (Reg 'r11)))
-            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))) cont)))]
-      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (Int val)))
-        (cons (Instr 'movq (list (Imm val) (Reg 'rax)))
-          (cons (Instr 'movq (list v (Reg 'r11)))
-            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))) cont)))]
-      #;[(Prim 'vector-set! (list (Int v) (Int idx) (Int val)))
-        (cons (Instr 'movq (list (Imm val) (Reg 'rax)))
-          (cons (Instr 'movq (list (Imm v) (Reg 'r11)))
-            (cons (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))
-              cont)))]
-      [(Assign _ (and rhs (Prim 'vector-set! _)))
-        (pass-instr rhs cont)]
-      [(Assign lhs (Allocate len types))
-        (cons (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
-          (cons (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr)))
-            (cons (Instr 'movq (list (Imm (cast-types-to-tag types)) (Deref 'r11 0)))
-              (cons (Instr 'movq (list (Reg 'r11) lhs)) 
-                cont))))]
-      [(Collect bytes)
-        (cons (Instr 'movq (list (Reg 'r15) (Reg 'rdi)))
-          (cons (Instr 'movq (list (Imm bytes) (Reg 'rsi)))
-            (cons (Callq 'collect 2)
-              cont)))]
-      [(Assign lhs (GlobalValue v)) 
-        (cons (Instr 'movq (list (Global v) lhs)) cont)]
-      [(Assign lhs (Prim 'vector-ref (list (and rhs0 (Var _)) (Int rhs1))))
-        (cons (Instr 'movq (list rhs0 (Reg 'r11)))
-          (cons (Instr 'movq (list (Deref 'r11 (* 8 (+ rhs1 1))) lhs)) cont))]
-    ))
-  ))
-
-(define pass-select-instructions-vec-ral
-  (class object%
-    (super-new)
-    (define/public pass (match-lambda [(CProgram info blocks)
-      (define blocks^
-        (for/hash ([(block-tag block) (in-hash blocks)])
-          (values block-tag (Block '() (pass-instr* block)))
-        ))
-      (X86Program info blocks^)
-    ]))
-    (define/public pass-instr* (match-lambda
-      [(Seq a res) (pass-instr a (pass-instr* res))]      
-      [(Return arg) (pass-instr (Assign (Reg 'rax) arg) (ral-empty))]
-      [(Goto label) (vector->ral (vector (Jmp label)))]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
-        (pass-instr* (if (equal? lhs rhs) thn els))
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (and rhs (or (Var _))))) thn els)
-        (vector->ral (vector (Instr 'cmpq (list lhs rhs)) (JmpIf 'e (Goto-label thn)) (Jmp (Goto-label els))))
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Bool rhs))) thn els)
-        (vector->ral (vector
-          (Instr 'movq (list (Imm (if rhs 1 0)) (Reg 'rax)))
-          (Instr 'cmpq (list (Reg 'rax) lhs))
-          (JmpIf 'e (Goto-label thn))
-          (Jmp (Goto-label els))
-        ))
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Var _))) (Int rhs))) thn els)
-        (vector->ral (vector
-          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
-          (Instr 'cmpq (list (Reg 'rax) lhs))
-          (JmpIf 'e (Goto-label thn))
-          (Jmp (Goto-label els))
-        ))
-      ]
-      [(IfStmt (Prim 'eq? (list (and lhs (or (Int _) (Bool _))) rhs)) thn els)
-        (pass-instr* (IfStmt (Prim 'eq? (list rhs lhs)) thn els))
-      ]
-      [(IfStmt (Prim '< (list (and lhs (or (Int _) (Bool _) (Void ))) (and rhs (or (Int _) (Bool _) (Void ))))) thn els)
-        (pass-instr* (if (< lhs rhs) thn els))
-      ]
-      [(IfStmt (Prim '< (list (and lhs (Var _)) (and rhs (Var _)))) thn els)
-        (vector->ral (vector
-          (Instr 'cmpq (list rhs lhs))
-          (JmpIf 'l (Goto-label thn))
-          (Jmp (Goto-label els))
-        ))
-      ]
-      [(IfStmt (Prim '< (list (and lhs (Var _)) (Int rhs))) thn els)
-        (vector->ral (vector
-          (Instr 'movq (list (Imm rhs) (Reg 'rax)))
-          (Instr 'cmpq (list (Reg 'rax) lhs))
-          (JmpIf 'l (Goto-label thn))
-          (Jmp (Goto-label els))
-        ))
-      ]
-      [(IfStmt (Prim '< (list (Int lhs) (and rhs (Var _)))) thn els)
-        (vector->ral (vector
-          (Instr 'movq (list (Imm lhs) (Reg 'rax)))
-          (Instr 'cmpq (list rhs (Reg 'rax)))
-          (JmpIf 'l (Goto-label thn))
-          (Jmp (Goto-label els))
-        ))
-      ]
-    ))
-    (define/public (pass-instr instr cont) (match instr
-      [(Assign lhs (Int imm))
-        (ral-consl cont (Instr 'movq (list (Imm imm) lhs)))]
-      [(Assign lhs (and v (Var _)))
-        (ral-consl cont (Instr 'movq (list v lhs)))]
-      [(Assign lhs (Prim '+ (list lhs (Int r))))
-        (ral-consl cont (Instr 'addq (list (Imm r) lhs)))]
-      [(Assign lhs (Prim '+ (list lhs (and r (Var _)))))
-        (ral-consl cont (Instr 'addq (list r lhs)))]
-      [(Assign lhs (Prim '+ (list other lhs)))
-        (pass-instr (Assign lhs (Prim '+ (list lhs other)) cont))]
-      [(Assign lhs (Prim '+ (list (Int l) (Int r))))
-        (ral-consl cont (Instr 'movq (list (Imm (+ l r)) lhs)))]
-      [(Assign lhs (Prim '+ (list (Int l) (and r (Var _)))))
-        (ral-consl (ral-consl cont (Instr 'addq (list (Imm l) lhs))) (Instr 'movq (list r lhs)))]
-      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Var _)))))
-        (ral-consl (ral-consl cont (Instr 'addq (list r lhs))) (Instr 'movq (list l lhs)))]
-      [(Assign lhs (Prim '+ (list (and l (Var _)) (and r (Int _)))))
-        (pass-instr (Assign lhs (Prim '+ (list r l))) cont)]
-      [(Assign lhs (Prim '- (list (Int a))))
-        (ral-consl cont (Instr 'movq (list (Imm (- a)) lhs)))]
-      [(Assign lhs (Prim '- (list (and a (Var _)))))
-        (ral-consl (ral-consl cont (Instr 'negq (list lhs))) (Instr 'movq (list a lhs)))]
-      [(Assign lhs (Prim 'read '()))
-        (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'rax) lhs))) (Callq 'read_int 0))]
-      [(Assign lhs (Bool rhs))
-        (ral-consl cont (Instr 'movq (list (if rhs (Imm 1) (Imm 0)) lhs)))]
-      [(Assign lhs (Prim 'not (list (and operand (Var _)))))
-        (ral-consl (ral-consl cont (Instr 'xorq (list (Imm 1) lhs))) (Instr 'movq (list operand lhs)))]
-      [(Assign lhs (Prim 'not (list (Bool operand))))
-        (ral-consl cont (Instr 'movq (list (if operand (Imm 0) (Imm 1)) lhs)))]
-      [(Assign lhs (Prim '- (list lhs lhs)))
-        (ral-consl cont (Instr 'movq (list (Imm 0) lhs)))]
-      [(Assign lhs (Prim '- (list lhs (and op1 (Var _)))))
-        (ral-consl cont (Instr 'subq (list op1 lhs)))]
-      [(Assign lhs (Prim '- (list lhs (Int op1))))
-        (ral-consl cont (Instr 'subq (list (Imm op1) lhs)))]
-      [(Assign lhs (Prim '- (list (and op0 (Var _)) (and op1 (Var _)))))
-        (ral-consl (ral-consl cont (Instr 'subq (list op1 lhs))) (Instr 'movq (list op0 lhs)))]
-      [(Assign lhs (Prim '- (list (and op0 (Var _)) (Int op1))))
-        (ral-consl (ral-consl cont (Instr 'subq (list (Imm op1) lhs))) (Instr 'movq (list op0 lhs)))]
-      [(Assign lhs (Prim '- (list (Int op0) (and op1 (Var _)))))
-        (ral-consl (ral-consl cont (Instr 'subq (list op1 lhs))) (Instr 'subq (list op1 lhs)))]
-      [(Assign lhs (Prim '- (list (Int op0) (Int op1))))
-        (ral-consl cont (Instr 'movq (list (Imm (- op0 op1)) lhs)))]
-      [(Assign _ (Void)) cont]
-      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (and rhs1 (Var _)))))
-        (ral-consl (ral-consl (ral-consl cont (Instr 'movzbq (list (ByteReg 'al) lhs))) (Instr 'sete (list (ByteReg 'al)))) (Instr 'cmpq (list rhs0 rhs1)))]
-      [(Assign lhs (Prim 'eq? (list (and rhs0 (Var _)) (Int rhs1))))
-        (ral-consl (ral-consl (ral-consl cont (Instr 'movzbq (list (ByteReg 'al) lhs))) (Instr 'sete (list (ByteReg 'al)))) (Instr 'cmpq (list rhs0 (Imm rhs1))))]
-      [(Assign lhs (Prim 'eq? (list (Int rhs0) (and rhs1 (Var _)))))
-        (ral-consl (ral-consl (ral-consl cont (Instr 'movzbq (list (ByteReg 'al) lhs)))
-          (Instr 'sete (list (ByteReg 'al))))
-            (Instr 'cmpq (list (Imm rhs0) rhs1)))]
-      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (and val (Var _))))
-        (ral-consl (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1))))))
-          (Instr 'movq (list v (Reg 'r11))))
-            (Instr 'movq (list val (Reg 'rax))))]
-      [(Prim 'vector-set! (list (and v (Var _)) (Int idx) (Int val)))
-        (ral-consl (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'rax) (Deref 'r11 (* 8 (+ idx 1)))))) 
-          (Instr 'movq (list v (Reg 'r11)))) (Instr 'movq (list (Imm val) (Reg 'rax))))]
-      [(Assign _ (and rhs (Prim 'vector-set! _)))
-        (pass-instr rhs cont)]
-      [(Assign lhs (Allocate len types))
-        (ral-consl (ral-consl (ral-consl (ral-consl cont (Instr 'movq (list (Reg 'r11) lhs)))
-          (Instr 'movq (list (Imm (cast-types-to-tag types)) (Deref 'r11 0))))
-            (Instr 'addq (list (Imm (* 8 (+ 1 len))) (Global 'free_ptr))))
-              (Instr 'movq (list (Global 'free_ptr) (Reg 'r11))))]
-      [(Collect bytes)
-        (ral-consl (ral-consl (ral-consl cont (Callq 'collect 2)) (Instr 'movq (list (Imm bytes) (Reg 'rsi)))) (Instr 'movq (list (Reg 'r15) (Reg 'rdi))))]
-      [(Assign lhs (GlobalValue v)) 
-        (ral-consl cont (Instr 'movq (list (Global v) lhs)))]
-      [(Assign lhs (Prim 'vector-ref (list (and rhs0 (Var _)) (Int rhs1))))
-        (ral-consl (ral-consl cont (Instr 'movq (list (Deref 'r11 (* 8 (+ rhs1 1))) lhs))) (Instr 'movq (list rhs0 (Reg 'r11))))]
-    ))
-  ))
-
-(define select-instructions (λ (p) (send (new pass-select-instructions-vec-ral) pass p)))
-
-(require "multigraph.rkt")
+(require "compiler/select-instructions.rkt")
+(define select-instructions (λ (p) (send (new pass-select-instructions) pass p)))
 
 (define (pass-read-write-mixin super-class)
   (class super-class
@@ -636,7 +51,7 @@
       [(Instr 'movq (list _ dst)) (set dst)]
       [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
       [(Callq _ _) (list->set (map Reg caller-save-regs))]
-      [(Instr 'negq dst) (set dst)]
+      [(Instr 'negq (list dst)) (set dst)]
       [(Instr 'cmpq (list _ _)) (set )]
       [(Jmp _) (set )]
       [(JmpIf _ _) (set )]
@@ -649,9 +64,9 @@
     (define/public (get-read-with-imm instr) (match instr
       [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
       [(Instr 'movq (list src _)) (set src)]
-      [(Instr 'negq src) (set src)]
+      [(Instr 'negq (list src)) (set src)]
       [(Callq _ count) 
-        (set (map Reg (take pass-args-regs count)))]
+        (list->set (map Reg (take pass-args-regs count)))]
       [(Jmp _) (set )]
       [(JmpIf _ _) (set )]
       [(Instr 'cmpq (list a b)) (set a b)]
@@ -666,24 +81,35 @@
     )
   ))
 
+(define (interference-cmp-fn lhs rhs)
+  (match* (lhs rhs)
+    [((Var _) (Reg _)) 'lt]
+    [((Reg _) (Var _)) 'gt]
+    [((Var l) (Var r)) (symbol-compare l r)]
+    [((Reg l) (Reg r)) (symbol-compare l r)]
+  )
+)
+
 (define (pass-build-interference-mixin super-class)
   (class super-class
     (super-new) 
     (inherit get-read get-write)
     (define/override (pass p) (match p
       [(X86Program info blocks)
-        (define init-graph (init-build-interference-from-blocks blocks (undirected-graph '())))
-        (define pass-block^ (pass-block init-graph))
-        (define blocks^ (for/hash ([(tag block-value) (in-hash blocks)]) 
+        (define init-graph (init-build-interference-from-blocks blocks (graph-make-empty-raw interference-cmp-fn)))
+        (define init-graph-var (box init-graph))
+        ; (add-vertex (add-vertex init-graph (Var 'ignore)) (Var 'ignore2))
+        (define pass-block^ (pass-block init-graph-var))
+        (define blocks^ (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block-value) (in-dict blocks)]) 
           (define block^ (pass-block^ block-value))
-          (values tag block^)
+          (ordl-insert a tag block^ #f)
         ))
-        (X86Program (dict-set info 'interference init-graph) blocks^)
+        (X86Program (dict-set info 'interference (unbox init-graph-var)) blocks^)
       ]
     ))
     (define/public (init-build-interference-from-blocks blocks graph)
-      (for ([(_ block) (in-hash blocks)])
-        (init-build-interference (Block-instr* block) graph)
+      (for ([(_ block) (in-dict blocks)])
+        (set! graph (init-build-interference (Block-instr* block) graph))
       )
       graph
     )
@@ -691,8 +117,11 @@
       [(? ral-empty?) graph]
       [_ (define-values (instr instr*) (ral-dropl b))
         (for ([w (in-set (get-write instr))])
-          (add-vertex! graph w))
-        (init-build-interference instr* graph)
+          ; (add-vertex! graph w)
+          (set! graph (add-vertex graph w))
+        )
+        (set! graph (init-build-interference instr* graph))
+        graph
       ]
     ))
     (define/public ((pass-block interference) block) (match block
@@ -704,7 +133,7 @@
       ]
     ))
     (define/public (pass-instr* instr* live graph) (match* (instr* live)
-      [(_ (? ral-empty?)) (void)]
+      [(_ (? ral-empty?)) graph]
       [(_ _)
         (define-values (instr rest) (ral-dropl instr*))
         (define-values (l live-rest) (ral-dropl live))
@@ -712,7 +141,8 @@
         (define reads l)
         (for ([w (in-set writes)])
           (for ([r (in-set reads)])
-            (add-edge! graph w r)
+            ; (add-edge! graph w r)
+            (set-box! graph (add-edge (unbox graph) w r))
           )
         )
         (pass-instr* rest live-rest graph)
@@ -726,23 +156,28 @@
     (define/override (pass p) (match p
       [(X86Program info blocks)
         (define interference (dict-ref info 'interference))
-        (pre-interference-handle interference)
-        ; (define color-graph (build-color-graph interference))
-        (define int-graph (build-int-color-graph interference (match-lambda 
+        (define interference-var (box interference))
+        (pre-interference-handle interference-var)
+        (define int-graph (build-int-color-graph (unbox interference-var) (match-lambda 
           [_ #t]
         )))
-        (define vec-graph (build-vec-color-graph interference (match-lambda
+        (define vec-graph (build-vec-color-graph (unbox interference-var) (match-lambda
           [_ #f]
         )))
         (X86Program (dict-set (dict-set info 'color-graph int-graph) 'vec-color-graph vec-graph) blocks)
       ]
     ))
     (define/public (pre-interference-handle interference-graph)
-      (for ([r (in-vertices interference-graph)])
-        (add-edge! interference-graph r (Reg 'r15))
-        (add-edge! interference-graph r (Reg 'rsp))
-        (add-edge! interference-graph r (Reg 'rbp))
+      (define graph (unbox interference-graph))
+      (for ([r (in-vertices graph)])
+        ; (add-edge! interference-graph r (Reg 'r15))
+        ; (add-edge! interference-graph r (Reg 'rsp))
+        ; (add-edge! interference-graph r (Reg 'rbp))
+        (set! graph (add-edge (add-vertex graph (Reg 'r15)) r (Reg 'r15)))
+        (set! graph (add-edge (add-vertex graph (Reg 'rsp)) r (Reg 'rsp)))
+        (set! graph (add-edge (add-vertex graph (Reg 'rbp)) r (Reg 'rbp)))
       )
+      (set-box! interference-graph graph)
     )
     (define/public (build-int-color-graph interference-graph int-filter)
       (define q (make-pqueue (λ (a b) (>= (cdr a) (cdr b)))))
@@ -833,10 +268,29 @@
         (define allo (allocate-registers-block table))
         (define slot-num (+ 1 (foldl max -1 (map cdr table))))
         (define blocks^ 
-          (for/hash ([(tag block-inner) (in-hash blocks)]) 
-            (values tag (allo block-inner)))
+          (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block-inner) (in-dict blocks)]) 
+            (ordl-insert a tag (allo block-inner) #f))
         )
         (define stack-size (max 0 (* (- slot-num (length caller-and-callee-regs)) 8)))
+        ; (printf "\n")
+        ; (printf "\n")
+        ; (printf "\n")
+        ; (for ([(k v) (in-dict blocks)]) (printf "~a:\n" k)
+        ;   (for ([vi (in-ral0 (Block-instr* v))]) (printf "\t~a\n" vi))
+        ;   (define live (dict-ref (Block-info v) 'live))
+        ;   (for ([li (in-ral0 live)]) (printf "\t\t~a\n" li))
+        ; )
+        ; (printf "\n")
+        ; (for ([(k v) (in-dict blocks^)]) (printf "~a:\n" k)
+        ;   (for ([vi (in-ral0 (Block-instr* v))]) (printf "\t~a\n" vi))
+        ; )
+        ; (printf "\n")
+        ; (define interference (dict-ref info 'interference))
+        ; (for ([(k v) (in-dict (Graph-out interference))])
+        ;   (for ([vi (in-dict-keys v)])
+        ;     (printf "inter: ~a - ~a\n" k vi)
+        ;   )
+        ; )
         (X86Program (dict-set info 'stack-size stack-size) blocks^)
       ]
     ))
@@ -868,50 +322,6 @@
   )
 )
 
-(define pass-patch-instructions
-  (class pass-abstract
-    (super-new)
-    (define/override (pass p) (match p
-      [(X86Program info blocks)
-        (define blocks^ (for/hash ([(tag block-inner) (in-hash blocks)]) 
-          (values tag (patch-instr-block block-inner))))
-        (X86Program info blocks^)
-      ]
-    ))
-    (define/public (patch-instr-block block) (match block
-      [(Block info instr*)
-        (define instr*^ (patch-instr* instr* (ral-empty)))
-        (Block info instr*^)
-      ]
-    ))
-    (define/public (patch-instr* instr* cont) (match instr*
-      [(? ral-empty?) cont]
-      [_ (define-values (instr rest) (ral-dropl instr*))
-        (match instr
-          [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
-            (patch-instr*
-              rest
-              (ral-consr (ral-consr cont (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))
-            )
-          ]
-          [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
-            (patch-instr*
-              rest
-              (ral-consr (ral-consr (ral-consr cont (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))) (Instr i (list (Deref r0 o0) (Reg 'rax)))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))
-            ) 
-          ]
-          [(Instr 'movq (list (Reg a) (Reg a))) 
-            (patch-instr* rest cont)
-          ]
-          [(or (Instr 'addq (list (Imm 0) _)) (Instr 'subq (list (Imm 0) _))) 
-            (patch-instr* rest cont)
-          ]
-          [_ (patch-instr* rest (ral-consr cont instr))]
-        )
-      ]
-    ))
-  ))
-
 (require cutie-ftree)
   
 (define pass-prelude-and-conclusion
@@ -931,7 +341,7 @@
         (Instr 'addq (list (Imm 8) (Deref 'r15 0)))
         (Jmp 'start)
       ))
-      (Block (make-hash) (vector->ral insts))
+      (Block (ordl-make-empty symbol-compare) (vector->ral insts))
     ]))
     (define/public (get-conclusion p) (match p [(X86Program info _)
       (define stack-size (dict-ref info 'stack-size))
@@ -941,13 +351,13 @@
         (Instr 'popq (list (Reg 'rbp)))
         (Retq )
       ))
-      (Block (make-hash) (vector->ral insts))
+      (Block (ordl-make-empty symbol-compare) (vector->ral insts))
     ]))
     (define/override (pass p) (match p [(X86Program info blocks)
       (define prelude (get-prelude p))
       (define conclusion (get-conclusion p))
       (define blocks^
-        (for/hash ([(tag block) (in-hash blocks)]) 
+        (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block) (in-dict blocks)]) 
           (match-define (Block info instr*) block)
           (define instr*^
             (cond
@@ -956,8 +366,9 @@
                 (if (Jmp? last-instr) instr* (ral-consr instr* (Jmp 'conclusion)))
               ]
             ))
-          (values tag (Block info instr*^))
-        ))
+          (ordl-insert a tag (Block info instr*^) #f)
+        )
+      )
       (X86Program info
         (dict-set 
           (dict-set blocks^ 'main prelude)
@@ -997,18 +408,21 @@
       [_ (ral-empty)]
     ))
     (define/public get-blocks-tail (match-lambda [(X86Program info blocks)
-      (for/hash ([(tag block) (in-hash blocks)]) 
+      (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block) (in-dict blocks)]) 
         (match-define (Block _ instr*) block)
-        (values tag (get-block-tail instr*))
+        (ordl-insert a tag (get-block-tail instr*) #f)
       )
     ]))
     (define/public get-blocks-graph (match-lambda [(X86Program info blocks)
-      (define g (make-multigraph '()))
-      (for ([(tag block) (in-hash blocks)])
+      ; (define g (make-multigraph '()))
+      (define g (graph-make-empty))
+      (for ([(tag block) (in-dict blocks)])
         (match-define (Block _ binstr*) block)
         (define tos (get-block-tail binstr*))
-        (add-vertex! g tag)
-        (for ([t (in-ral0 tos)]) (add-directed-edge! g tag t))
+        ; (add-vertex! g tag)
+        (set! g (add-vertex g tag))
+        ; (for ([t (in-ral0 tos)]) (add-directed-edge! g tag t))
+        (for ([t (in-ral0 tos)]) (set! g (add-vertex g t)) (set! g (add-directed-edge g tag t)))
       )
       g
     ]))
@@ -1034,24 +448,25 @@
     )
     (define/public (search-blocks program g)
       (match-define (X86Program info blocks) program)
-      (parameterize ([graph g] [cnt 0] [block-visited (make-hash)] [id-map (make-hash)] [id-inv-map (make-hash)] [visit-temporary-set (mutable-set)])
-        (for ([tag (in-hash-keys blocks)]) 
+      (parameterize ([graph g] [cnt 0] [block-visited (box (ordl-make-empty symbol-compare))] [id-map (box (ordl-make-empty symbol-compare))] [id-inv-map (box (ordl-make-empty integer-compare))] [visit-temporary-set (mutable-set)])
+        (for ([tag (in-dict-keys blocks)]) 
           (search-block-impl tag))
-        (for ([tag (in-hash-keys blocks)])
+        (for ([tag (in-dict-keys blocks)])
           (update-id tag))
-        (parameterize ([simple-graph (make-multigraph '())])
+        ; (parameterize ([simple-graph (make-multigraph '())])
+        (parameterize ([simple-graph (graph-make-empty-raw integer-compare)])
           (build-simple-graph)
           (define inv-graph (transpose (simple-graph)))
           (define torder (topology-order inv-graph))
-          (define collects (make-hash))
-          (let ([bv (block-visited)])
-            (for ([tag (in-hash-keys blocks)]) 
+          (define collects (box (ordl-make-empty integer-compare)))
+          (let ([bv (unbox (block-visited))])
+            (for ([tag (in-dict-keys blocks)]) 
               (define id (dict-ref bv tag))
-              (define get (dict-ref collects id (λ () '())))
-              (dict-set! collects id (cons tag get))
+              (define get (dict-ref (unbox collects) id '()))
+              (set-box! collects (dict-set (unbox collects) id (cons tag get)))
             )
           )
-          (define torder^ (for/list ([ti torder]) (dict-ref collects ti)))
+          (define torder^ (for/list ([ti torder]) (dict-ref (unbox collects) ti)))
           (set! info (dict-set info 'connect-component torder^))
           (set! info (dict-set info 'graph (graph)))
           (X86Program info blocks)
@@ -1059,25 +474,25 @@
       )
     )
     (define/public (update-id tag)
-      (define id (dict-ref (block-visited) tag))
+      (define id (dict-ref (unbox (block-visited)) tag))
       (cond
-        [(equal? id (dict-ref (id-map) tag)) id]
+        [(equal? id (dict-ref (unbox (id-map)) tag)) id]
         [else
-          (define nxt (update-id (dict-ref (id-inv-map) id)))
-          (dict-set! (block-visited) tag nxt)
+          (define nxt (update-id (dict-ref (unbox (id-inv-map)) id)))
+          (set-box! (block-visited) (dict-set (unbox (block-visited)) tag nxt))
           nxt
         ])
     )
     (define/public (search-block-impl block-tag)
       (define g (graph))
       (define visited (block-visited))
-      (match (dict-ref visited block-tag #f)
+      (match (dict-ref (unbox visited) block-tag #f)
         [#f 
           (define id (cnt))
           (cnt (+ id 1))
-          (dict-set! (id-map) block-tag id)
-          (dict-set! (id-inv-map) id block-tag)
-          (dict-set! visited block-tag id)
+          (set-box! (id-map) (dict-set (unbox (id-map)) block-tag id))
+          (set-box! (id-inv-map) (dict-set (unbox (id-inv-map)) id block-tag))
+          (set-box! visited (dict-set (unbox visited) block-tag id))
           (when (set-member? (visit-temporary-set) block-tag) (error 'search-block-impl "Invalid state, revisit a node. "))
           (set-add! (visit-temporary-set) block-tag)
           (define (drop) (set-remove! (visit-temporary-set) block-tag))
@@ -1092,7 +507,7 @@
             [_ (=> fail)
               (define m (apply min tos))
               (when (> m id) (fail))
-              (dict-set! visited block-tag m)
+              (set-box! visited (dict-set (unbox visited) block-tag m))
               m
             ]
             [_ id]
@@ -1107,15 +522,18 @@
       (define bv (block-visited))
       (define sg (simple-graph))
       (for ([f (in-vertices g)])
-        (define f^ (dict-ref bv f))
-        (add-vertex! sg f^)
+        (define f^ (dict-ref (unbox bv) f))
+        ; (add-vertex! sg f^)
+        (set! sg (add-vertex sg f^))
         (for ([t (in-neighbors g f)])
-          (define t^ (dict-ref bv t))
+          (define t^ (dict-ref (unbox bv) t))
           (unless (equal? f^ t^)
-            (add-directed-edge! sg f^ t^)
+            ; (add-directed-edge! sg f^ t^)
+            (set! sg (add-directed-edge sg f^ t^))
           )
         )
       )
+      (simple-graph sg)
     )
   )
 )
@@ -1129,7 +547,7 @@
       [(Instr 'movq (list _ dst)) (set dst)]
       [(or (Instr 'addq (list _ dst)) (Instr 'subq (list _ dst))) (set dst)]
       [(Callq _ _) (list->set (map Reg caller-save-regs))]
-      [(Instr 'negq dst) (set dst)]
+      [(Instr 'negq (list dst)) (set dst)]
       [(Instr 'cmpq (list _ _)) (set )]
       [(Jmp _) (set )]
       [(JmpIf _ _) (set )]
@@ -1146,9 +564,9 @@
     (define/public (get-read-with-imm instr) (match instr
       [(Instr (or 'addq 'subq) (list src dst)) (set src dst)]
       [(Instr 'movq (list src _)) (set src)]
-      [(Instr 'negq src) (set src)]
+      [(Instr 'negq (list src)) (set src)]
       [(Callq _ count) 
-        (set (map Reg (take pass-args-regs count)))]
+        (list->set (map Reg (take pass-args-regs count)))]
       [(Jmp _) (set )]
       [(JmpIf _ _) (set )]
       [(Instr 'cmpq (list a b)) (set a b)]
@@ -1180,8 +598,8 @@
       ]
     ))
     (define/public pass (match-lambda [(X86Program info blocks)
-      (define blocks^ (for/hash ([(tag block) (in-hash blocks)])
-        (values tag (pass-block block))
+      (define blocks^ (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block) (in-dict blocks)])
+        (ordl-insert a tag (pass-block block) #f)
       ))
       (X86Program info blocks^)
     ]))
@@ -1198,35 +616,48 @@
     (inherit get-read get-write)
     (define/public (analyze-dataflow graph transfer bottom join)
       (define s (subqueue))
-      (define mapping (make-hash))
+      (define mapping (box (ordl-make-empty symbol-compare)))
       (define change-able (mutable-set))
       (define worklist (make-queue))
       (define graph-t (transpose graph))
-      (for ([sij (in-vertices graph-t)]) (dict-set! mapping sij bottom))
+      (for ([sij (in-vertices graph-t)]) (set-box! mapping (dict-set (unbox mapping) sij bottom)))
       (for ([si s])
         (set-clear! change-able)
         (for ([sij si]) (set-add! change-able sij))
         (for ([sij si]) (enqueue! worklist sij))
         (while (not (queue-empty? worklist))
           (define node (dequeue! worklist))
-          (define preds (in-neighbors graph-t node))
+          (define preds (get-neighbors graph-t node))
+          #; (begin
+            (printf "node: ~a\n" node)
+            (for ([p (in-ral0 preds)]) (printf "\t~a\n" p))
+          )
           (define input
-            (match preds
-              ['() (set (Reg 'rax))]
-              [(cons _ _)
-                (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)]) 
-                  (join state (dict-ref mapping pred)))
+            (cond
+              [(ral-empty? preds) (set (Reg 'rax))]
+              [else
+                (for/fold ([state bottom]) ([pred (in-ral0 preds)])
+                  (join state (dict-ref (unbox mapping) pred))
+                )
               ]
-            ))
+            )
+            ; (match preds
+            ;   ['() (set (Reg 'rax))]
+            ;   [(cons _ _)
+            ;     (for/fold ([state bottom]) ([pred (in-neighbors graph-t node)]) 
+            ;       (join state (dict-ref (unbox mapping) pred)))
+            ;   ]
+            ; )
+          )
           (define output (transfer node input))
-          (cond [(not (equal? output (dict-ref mapping node))) 
-            (dict-set! mapping node output)
+          (cond [(not (equal? output (dict-ref (unbox mapping) node))) 
+            (set-box! mapping (dict-set (unbox mapping) node output))
             (for ([s (in-neighbors graph node)])
               (when (set-member? change-able s)
                 (enqueue! worklist s))
             )]))
       )
-      mapping
+      (unbox mapping)
     )
     (define/public (pass-instr* instr* end) (match instr*
       [(? ral-empty?) (vector->ral (vector end))]
@@ -1263,100 +694,29 @@
           )
         )
       )
-      (define blocks^ (for/hash ([(b-tag b) (in-hash blocks)])
+      (define blocks^ (for/fold ([a (ordl-make-empty symbol-compare)]) ([(b-tag b) (in-dict blocks)])
         (match-define (Block info instr*) b)
         (define tos (in-neighbors graph b-tag))
         (define end (for/fold ([end-set (set)]) ([to tos])
           (set-union (dict-ref live-map to) end-set)))
-        (values b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*))
+        (ordl-insert a b-tag (Block (dict-set info 'live (pass-instr* instr* end)) instr*) #f)
       ))
       (X86Program info blocks^)
     ]))
   )
 )
 
-(define pass-collect-set! 
-  (class pass-abstract
-    (super-new)
-    (define/public (pass-body body) (match body
-      [(or (Var _) (Int _) (Bool _) (Void)) (set)]
-      [(Let _ rhs body) (set-union (pass-body rhs) (pass-body body))]
-      [(SetBang var rhs) (set-union (pass-body rhs) (set var))]
-      [(If cnd thn els) (set-union (pass-body cnd) (set-union (pass-body thn) (pass-body els)))]
-      [(Prim _ args) (for/fold ([s (set)]) ([a args]) (set-union s (pass-body a)))]
-      [(Begin es e) (set-union (for/fold ([s (set)]) ([e es]) (set-union s (pass-body e))) (pass-body e))]
-      [(WhileLoop cnd body) (set-union (pass-body cnd) (pass-body body))]
-    ))
-    (define/override (pass p)
-      (match p [(Program info body)
-        (Program (dict-set info 'set! (pass-body body)) body)
-      ])
-    )
-  ))
-
+(require "compiler/collect-set.rkt")
 (define collect-set! (lambda (p) (send (new pass-collect-set!) pass p)))
 
-(define pass-uncover-get!-exp 
-  (class pass-abstract
-    (super-new)
-    (define/public ((pass-body set!-vars) body) (match body
-      [(Var x) #:when (set-member? set!-vars body) (GetBang x)]
-      [(or (Var _) (Int _) (Bool _) (Void)) body]
-      [(SetBang var rhs) (SetBang var ((pass-body set!-vars) rhs))]
-      [(Let x rhs body) (Let x ((pass-body set!-vars) rhs) ((pass-body set!-vars) body))]
-      [(If cnd thn els) (If ((pass-body set!-vars) cnd) ((pass-body set!-vars) thn) ((pass-body set!-vars) els))]
-      [(Prim op args) (Prim op (for/list ([a args]) ((pass-body set!-vars) a)))]
-      [(WhileLoop cnd body) (WhileLoop ((pass-body set!-vars) cnd) ((pass-body set!-vars) body))]
-      [(Begin es e) (Begin (for/list ([e es]) ((pass-body set!-vars) e)) ((pass-body set!-vars) e))]
-    ))
-    (define/override (pass p) (match p [(Program info body)
-      (Program (dict-remove info 'set!) ((pass-body (dict-ref info 'set!)) body))
-    ]))
-  ))
-
+(require "compiler/uncover-get.rkt")
 (define uncover-get!-exp (λ (p) (send (new pass-uncover-get!-exp) pass p)))
 
-(define (patch-instructions p) (send (new pass-patch-instructions) pass p))
+(require "compiler/patch-instructions.rkt")
+(define patch-instructions (λ (p) (send (new pass-patch-instructions) pass p)))
 
-(define pass-expose-allocation
-  (class pass-program-abstract
-    (super-new)
-    (define/public (expand-env-r body env) (match env
-      [(cons (cons x v) rest) (Let x v (expand-env-r body rest))]
-      ['() body]
-    ))
-    (define/override pass-exp (match-lambda
-      [(HasType (Prim 'vector es) types)
-        (define-values (es^ env^) (for/fold ([es^ '()] [env^ '()]) ([e es])
-          (define tmp (gensym 'tmp))
-          (values (cons tmp es^) (dict-set env^ tmp (pass-exp e)))
-          ))
-        (define bytes (* (+ 1 (length es)) 8))
-        (define pre-collect (λ (b) (Let '_ (If 
-          (Prim '< (list 
-            (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes)))
-            (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) b)))
-        (define v (gensym 'tmp))
-        (define inner (for/foldr ([b (Var v)]) ([e es^] [idx (in-range (length es))])
-          (Let '_ (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
-          ))
-        (set! inner (expand-env-r inner env^))
-        (set! inner (Let v (Allocate (length es) types) inner))
-        (set! inner (pre-collect inner))
-        inner
-      ]
-      [(Prim o es) (Prim o (for/list ([e es]) (pass-exp e)))]
-      [(If cnd thn els) (If (pass-exp cnd) (pass-exp thn) (pass-exp els))]
-      [(Begin es e) (Begin (for/list ([e es]) (pass-exp e)) (pass-exp e))]
-      [(Let x rhs body) (Let x (pass-exp rhs) (pass-exp body))]
-      [(SetBang var rhs) (SetBang var (pass-exp rhs))]
-      [(WhileLoop cnd body) (WhileLoop (pass-exp cnd) (pass-exp body))]
-      [body body]
-    ))
-  ))
-
+(require "compiler/expose-allocation.rkt")
 (define expose-allocation (λ (p) (send (new pass-expose-allocation) pass p)))
-
 
 (define (pass-build-interference-mixin2 super-class)
   (class super-class
@@ -1456,7 +816,7 @@
         (error 'pass) 
       ]
     ))
-    (field [prim-table (make-hash)])
+    (field [prim-table (ordl-make-empty symbol-compare)])
     (define/public (pass-exp table) (match-lambda
       [(Let var rhs body)
         (define rhs-t ((pass-exp table) rhs))
@@ -1517,27 +877,27 @@
   (class pass-abstract
     (super-new)
     (define/override pass (match-lambda [(and x (X86Program info blocks))
-      (parameterize ([dominance-map (make-hash)])
+      (parameterize ([dominance-map (box (ordl-make-empty symbol-compare))])
         (define full-set (list->set (dict-keys blocks)))
         (for ([block full-set])
-          (dict-set! (dominance-map) block full-set)
+          (set-box! (dominance-map) (dict-set (unbox (dominance-map)) block full-set))
         )
         (define connect-component (reverse (dict-ref info 'connect-component)))
-        (dict-set! (dominance-map) 'start (set 'start))
+        (set-box! (dominance-map) (dict-set (unbox (dominance-map)) 'start (set 'start)))
         (define graph (dict-ref info 'graph))
         (define graph-rev (transpose graph))
         (for ([component connect-component]) 
           (define (loop hint)
             (for ([block component])
               (define dominance^
-                (for/fold ([collect (dict-ref (dominance-map) block)]) ([src (in-neighbors graph-rev block)])
-                  (set-intersect collect (dict-ref (dominance-map) src))
+                (for/fold ([collect (dict-ref (unbox (dominance-map)) block)]) ([src (in-neighbors graph-rev block)])
+                  (set-intersect collect (dict-ref (unbox (dominance-map)) src))
                 ))
               (set! dominance^ (set-union dominance^ (set block)))
-              (define dominance-old (dict-ref (dominance-map) block))
+              (define dominance-old (dict-ref (unbox (dominance-map)) block))
               (unless (equal? dominance^ dominance-old)
                 (set! hint #t)
-                (dict-set! (dominance-map) block dominance^)
+                (set-box! (dominance-map) (dict-set (unbox (dominance-map)) block dominance^))
               )
             )
             (when hint (loop #f))
@@ -1545,8 +905,8 @@
           (loop #f)
         )
         ; (print-graph graph)
-        (displayln (dominance-map))
-        (displayln x)
+        ; (displayln (dominance-map))
+        ; (displayln x)
         x
       )
     ]))
@@ -1554,23 +914,11 @@
 
 (define pass-dominace (λ (x) (send (new dominance) pass x)))
 
-(define ssa-constructor
-  (class pass-abstract
-    (super-new)
-    (define/override pass (match-lambda [(CProgram info instr*)
-      (error 'pass "unimpl")
-    ])) 
-    (define var-defs #hash())
-    (define var-uses #hash())
-    (define/public extract-block (match-lambda [(Block info instr*)
-      (error 'extract-block "unimpl")
-    ]))
-  ))
-
 (define init-program-property (match-lambda 
   ([Program _ x] [Program (ordl-make-empty symbol-compare) x])))
 
 ; (debug-level 2)
+(debug-level 0)
 (define compiler-passes
   `(
     ("init" ,init-program-property ,interp-Lvec-prime ,type-check-Lvec)
@@ -1593,11 +941,5 @@
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
     ("patch instructions" ,patch-instructions ,interp-x86-2)
   ))
-
-(define (std-hash->ordl-hash std)
-  (for/fold ([i (ordl-make-empty symbol-compare)]) ([(k v) (in-dict std)])
-    (ordl-insert i k v #f)
-  )
-)
 
 (provide compiler-passes)
