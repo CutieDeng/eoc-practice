@@ -8,7 +8,7 @@
 (require "connect-component-core.rkt")
 (require "x86-cfg.rkt")
 
-(define pass-uncover-live
+(define pass-connect-component
   (class object%
     (super-new)
     (define/public (pass p) (match p
@@ -34,4 +34,4 @@
   )
 )
 
-(provide pass-uncover-live)
+(provide pass-connect-component)
