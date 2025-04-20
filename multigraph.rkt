@@ -1,5 +1,6 @@
 #lang racket
-(require graph)
+; (require graph)
+(require "compiler/graph-core.rkt")
 (provide (all-defined-out))
 
 (define (remove-all v lst)

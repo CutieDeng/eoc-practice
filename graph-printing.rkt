@@ -1,5 +1,5 @@
 #lang racket
-(require graph)
+(require "compiler/graph-core.rkt")
 (require "utilities.rkt")
 
 (provide print-dot print-graph)
