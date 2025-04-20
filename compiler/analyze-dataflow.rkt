@@ -8,7 +8,7 @@
   (class object%
     (super-new)
     (field [worklist (ral-empty)] [result (ordl-make-empty symbol-compare)])
-    (define/public (analyze-dataflow graph transfer bottom join batches fn)
+    (define/public (analyze-dataflow graph transfer bottom join batches fn default)
       (define change-able (mutable-set))
       (define graph-t (transpose graph))
       (for ([sij (in-vertices graph-t)])
@@ -24,7 +24,7 @@
           (define preds (get-neighbors graph-t node))
           (define input
             (cond
-              [(ral-empty? preds) (set (Reg 'rax))]
+              [(ral-empty? preds) default]
               [else
                 (for/fold ([state bottom]) ([pred (in-ral0 preds)])
                   (join state (dict-ref result pred))
