@@ -30,9 +30,8 @@
       (define node-id (dict-ref block2id node #f))
       (cond
         [node-id
-          (define i (dict-ref id2group node-id))
           (cond
-            [(dict-ref in-stack node #f) i]
+            [(dict-ref in-stack node #f) (dict-ref id2group node-id)]
             [else #f]
           )
         ]
@@ -42,12 +41,11 @@
           (set! block2id (dict-set block2id node id))
           (set! id2group (dict-set id2group id id))
           (set! in-stack (dict-set in-stack node #t))
-          (define min-id (for/fold ([min-id #f]) ([nxt-node (in-neighbors graph node)])
+          (define min-id (for/fold ([min-id id]) ([nxt-node (in-neighbors graph node)])
             (define nxt-node-group (init-node nxt-node graph in-stack))
             (match* (min-id nxt-node-group)
               [(_ #f) min-id]
-              [(#f _) nxt-node-group]
-              [(a b) (if (<= a b) a b)]
+              [(a b) (min a b)]
             )
           ))
           (cond 
@@ -72,18 +70,6 @@
           (set! id2group (dict-set id2group id id^^))
           id^^
         ]
-      )
-    )
-    (define (build-directed-acyclic-graph-d graph)
-      (for ([i (in-range id-cnt)]) (set! directed-acyclic-graph (add-vertex directed-acyclic-graph i)))
-      (for ([u (in-vertices graph)])
-        (define u-id (dict-ref block2id u))
-        (for ([v (in-neighbors graph u)])
-          (define v-id (dict-ref block2id v))
-          (unless (equal? u-id v-id)
-            (set! directed-acyclic-graph (add-directed-edge directed-acyclic-graph u-id v-id))
-          )
-        )
       )
     )
     (define (build-directed-acyclic-graph graph)

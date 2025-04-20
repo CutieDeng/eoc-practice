@@ -19,6 +19,8 @@
         (define info^ (dict-set info 'graph control-flow-graph))
         (define info^^ (dict-set info^ 'connect-component (torder cc)))
         (define info^^^ (dict-set info^^ 'id2block (get-field id2block cc)))
+        (set! info^^^ (dict-set info^^^ 'dag (get-field directed-acyclic-graph cc)))
+        (set! info^^^ (dict-set info^^^ 'group2id (get-field group2id cc)))
         (X86Program info^^^ blocks)
       ]
     ))
