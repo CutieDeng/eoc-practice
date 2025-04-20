@@ -70,7 +70,12 @@
 (define allocate-registers (λ (p) (send (new pass-allocate-registers) pass p)))
 
 (require "compiler/dominance.rkt")
-(define dominace (λ (x) (send (new pass-dominance) pass x)))
+(require "compiler/dominance-tree.rkt")
+(define dominace (λ (x) 
+  (define x^ (send (new pass-dominance) pass x))
+  (define x^^ (send (new pass-dominance-tree) pass x^))
+  x^^
+))
 
 (define init-program (match-lambda 
   ([Program info x] [Program (for/fold ([info (ordl-make-empty symbol-compare)]) ([(k v) (in-dict info)])
@@ -90,7 +95,7 @@
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
     ("connect component preparation" ,connect-component ,interp-pseudo-x86-2)
-    ("ssa-calc" ,dominace ,interp-pseudo-x86-2)
+    ("dominance" ,dominace ,interp-pseudo-x86-2)
     ("block uncover live" ,block-uncover-live ,interp-pseudo-x86-2)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)
