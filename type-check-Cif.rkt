@@ -1,6 +1,6 @@
 #lang racket
-(require graph)
-(require "multigraph.rkt")
+(require "compiler/graph-core.rkt")
+; (require "multigraph.rkt")
 (require "utilities.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Lif.rkt")
@@ -111,12 +111,16 @@
         [else (set)]))
 
     (define/public (C-blocks->CFG blocks)
-      (define G (make-multigraph '()))
-      (for ([label (in-dict-keys blocks)])
+      ; (define G (make-multigraph '()))
+      (define G (graph-make-empty))
+      #; (for ([label (in-dict-keys blocks)])
         (add-vertex! G label))
+      (for ([label (in-dict-keys blocks)])
+        (set! G (add-vertex G label)))
       (for ([(src b) (in-dict blocks)])
         (for ([tgt (adjacent-tail b)])
-          (add-directed-edge! G src tgt)))
+          #; (add-directed-edge! G src tgt)
+	    (set! G (add-directed-edge G src tgt))))
       G)
 
     ;; Do the iterative dataflow analysis because of deadcode
