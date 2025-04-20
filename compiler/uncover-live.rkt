@@ -50,6 +50,7 @@
         set-union
         (rev components)
         (lambda (i) (dict-ref id2block i))
+        (set (Reg 'rax))
       )
       (define t (get-field result ana))
       (define blocks^ (for/fold ([a (ordl-make-empty symbol-compare)]) ([(b-tag b) (in-dict blocks)])
