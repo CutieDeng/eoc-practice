@@ -71,10 +71,12 @@
 
 (require "compiler/dominance.rkt")
 (require "compiler/dominance-tree.rkt")
+(require "compiler/dominance-join.rkt")
 (define dominace (λ (x) 
   (define x^ (send (new pass-dominance) pass x))
   (define x^^ (send (new pass-dominance-tree) pass x^))
-  x^^
+  (define x^^^ (send (new pass-dominance-dj-graph) pass x^^))
+  x^^^
 ))
 
 (define init-program (match-lambda 
