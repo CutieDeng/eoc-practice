@@ -6,20 +6,21 @@
 
 (require "debug0.rkt")
 
-(define pass-dominance-tree
+(define dominance-tree
   (class object%
     (super-new)
-    (define/public (pass p) (match p [(X86Program info blocks)
-      (define domin (dict-ref info 'dominanced))
+    (field [intermediate-dominator (ordl-make-empty symbol-compare)] [tree #f])
+    (define/public (get domined)
       (define sz (ordl-make-empty symbol-compare))
-      (define sz^ (for/fold ([sz sz]) ([(name d) (in-dict domin)])
+      (define sz^ (for/fold ([sz sz]) ([(name d) (in-dict domined)])
         (dict-set sz name (length (set->list d)))
       ))
-      (define graph (graph-make-empty))
-      (define graph^ (for/fold ([graph graph]) ([name (in-dict-keys domin)])
+      (define graph^ (graph-make-empty))
+      (define graph^^ (for/fold ([graph graph^]) ([name (in-dict-keys domined)])
         (add-vertex graph name)
       ))
-      (define graph^^ (for/fold ([graph graph^]) ([(node domined) (in-dict domin)])
+      (define intermediate-dominator^ (ordl-make-empty symbol-compare))
+      (define graph^^^ (for/fold ([graph graph^^]) ([(node domined) (in-dict domined)])
         (define domined^ (set->list domined))
         (define node-value (dict-ref sz^ node))
         (define node-value-sub1 (sub1 node-value))
@@ -28,21 +29,26 @@
         ))
         (match rst
           ['() (unless (equal? (length domined^) 1)
-            ; (debug-graph (dict-ref info 'graph))
-            ; (debug-con-seq (dict-ref info 'connect-component) (dict-ref info 'id2block))
-            ; (debug-dag (dict-ref info 'dag) (dict-ref info 'group2id) (dict-ref info 'id2block))
-            ; (debug-dict domin)
-            ; (printf "now node: ~a\n" node)
-            ; (printf "\tnode domined: ~a\n" domined^)
             (assert-unreachable))
             graph]
-          [(list x) (add-directed-edge graph x node)]
+          [(list x) (set! intermediate-dominator^ (dict-set intermediate-dominator^ node x)) (add-directed-edge graph x node)]
         )
       ))
-      (define info^ (dict-set info 'dominance-tree graph^^))
-      (X86Program info^ blocks)
-    ]))
-  )
-)
+      (set! intermediate-dominator intermediate-dominator^)
+      (set! tree graph^^)
+    )
+  ))
 
-(provide pass-dominance-tree)
+(define pass-dominance-tree
+  (class object%
+    (super-new)
+    (define/public (pass p) (match p [(X86Program info blocks)
+      (define t (new dominance-tree))
+      (send t get (dict-ref info 'dominanced))
+      (X86Program 
+        (dict-set (dict-set info 'dominance-tree (get-field tree t)) 'intermediate-dominator (get-field intermediate-dominator t))
+        blocks)
+    ]))
+  ))
+
+(provide pass-dominance-tree dominance-tree)
