@@ -5,7 +5,8 @@
 (require "interp.rkt")
 (require "utilities.rkt")
 
-(require "interp-Lvec-prime.rkt") (require "type-check-Lvec.rkt")
+(require "interp-Lvec-prime.rkt")
+(require "type-check-Lvec.rkt")
 (require "interp-Cvec.rkt")
 (require "type-check-Cvec.rkt")
 
@@ -83,8 +84,6 @@
   ([Program info x] [Program (for/fold ([info (ordl-make-empty symbol-compare)]) ([(k v) (in-dict info)])
     (ordl-insert info k v #f)) x])))
 
-; (debug-level 2)
-(debug-level 0)
 (define compiler-passes
   `(
     ("init" ,init-program ,interp-Lvec-prime ,type-check-Lvec)
