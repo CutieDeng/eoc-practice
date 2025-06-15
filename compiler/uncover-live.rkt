@@ -18,10 +18,9 @@
       ]
     ))
     (field [instr-ana (new instr-analysis)])
-    (define (pass-instr instr* current cont) (cond
-      [(ral-empty? instr*) (ral-consl cont current)]
-      [else
-        (define-values (instr rest) (ral-dropr instr*))
+    (define (pass-instr instr* current cont) (match instr*
+      [(ral) (ral-consl cont current)]
+      [(ral (rest unlength) (instr atom))
         (define r (send instr-ana read-from-instr instr))
         (define w (send instr-ana write-from-instr instr))
         (define current^ (set-union r (set-subtract current w)))
