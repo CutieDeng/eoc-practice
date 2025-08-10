@@ -1,65 +1,72 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt")
+(require "core/utilities.rkt")
 (require "graph-core.rkt")
+(require "core/integer-set.rkt")
 (require cutie-ftree)
 
 (require "analyze-dataflow.rkt")
 (require "x86instr.rkt")
 
+(define (ral-rev seq)
+  (for/fold ([v (ral-empty)]) ([i (in-ral0 seq)]) (ral-consl v i))
+)
+
 (define pass-uncover-live
   (class object%
     (super-new)
-    (define (pass-instr* instr* end) (cond
-      [(ral-empty? instr*) (vector->ral (vector end))]
-      [else
-        (define-values (last rest) (ral-dropr instr*))
-        (if (or (Jmp? last) (JmpIf? last)) (pass-instr* rest end) (pass-instr instr* end (ral-empty)))
+    (field [instr-ana (new instr-analysis)])
+    (define (pass-instr* instr* end) (match instr*
+      [(ral) (ral-consl (ral-empty) end)]
+      [(ral (rest unlength) (last atom))
+        (match last
+          [(or (? Jmp?) (? JmpIf?)) (pass-instr* rest end)]
+          [_ (pass-instr instr* end (ral-empty))]
+        )
       ]
     ))
-    (field [instr-ana (new instr-analysis)])
     (define (pass-instr instr* current cont) (match instr*
       [(ral) (ral-consl cont current)]
       [(ral (rest unlength) (instr atom))
         (define r (send instr-ana read-from-instr instr))
         (define w (send instr-ana write-from-instr instr))
-        (define current^ (set-union r (set-subtract current w)))
+        (define current^ (bset-union r (bset-subtract current w)))
         (pass-instr rest current^ (ral-consl cont current))
       ]
     ))
-    (define (rev seq)
-      (for/fold ([v (ral-empty)]) ([i (in-ral0 seq)]) (ral-consl v i))
-    )
     (define/public (pass p) (match p [(X86Program info blocks)
+      (debug "pass" info)
       (define graph (dict-ref info 'graph))
       (define components (dict-ref info 'connect-component))
-      (define id2block (dict-ref info 'id2block))
       (define ana (new analyzer))
-      (send ana analyze-dataflow 
-        (transpose graph)
-        (lambda (node input)
-          (define block (dict-ref blocks node))
-          (match-define (Block info _) block)
-          (match-define (cons add drop) (dict-ref info 'live-change))
-          (define input^ (set-subtract input drop))
-          (define input^^ (set-union input^ add))
-          input^^
-        )
-        (set)
-        set-union
-        (rev components)
-        (lambda (i) (dict-ref id2block i))
-        (set (Reg 'rax))
+      (define graph-t (transpose graph))
+      (define (transfer bb-id input)
+        (match-define (Block info _) (dict-ref blocks bb-id))
+        (match-define (cons add-set drop-set) (dict-ref info 'live-change))
+        (bset-union (bset-subtract input drop-set) add-set)
       )
-      (define t (get-field result ana))
-      (define blocks^ (for/fold ([a (ordl-make-empty symbol-compare)]) ([(b-tag b) (in-dict blocks)])
-        (match-define (Block info instr*) b)
-        (define tos (in-neighbors graph b-tag))
-        (define end (mutable-set))
-        (for ([to tos])
-          (set-union! end (dict-ref t to)))
-        (define end^ (for/set ([i (in-mutable-set end)]) i))
-        (ordl-insert a b-tag (Block (dict-set info 'live (pass-instr* instr* end^)) instr*) #f)
+      (define bottom 0)
+      (define default-set (bset 0)) ; (Reg 'rax)
+      (define join bset-union)
+      (send ana analyze-dataflow 
+        graph-t
+        transfer
+        bottom
+        join
+        (ral-rev components)
+        (lambda (i) i)
+        default-set
+      )
+      (define t (get-field analyze-value ana))
+      (define blocks^ (for/fold ([blocks^ (ordl-make-empty integer-compare)]) ([(bb-id bb) (in-dict blocks)])
+        (match-define (Block info instr*) bb)
+        (define succs (in-neighbors graph bb-id))
+        (define cur
+          (for/fold ([cur (bset)]) ([i succs])
+            (bset-union cur (dict-ref t i))
+          ))
+        (dict-set blocks^ bb-id (Block (dict-set info 'live (pass-instr* instr* cur)) instr*))
       ))
       (X86Program info blocks^)
     ]))

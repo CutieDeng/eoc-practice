@@ -1,6 +1,6 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt")
 (require "program-default.rkt")
 
 (define pass-shrink

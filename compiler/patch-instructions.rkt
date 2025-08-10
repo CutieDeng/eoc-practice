@@ -1,6 +1,6 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt" "core/utilities.rkt")
 (require cutie-ftree)
 
 (define pass-patch-instructions
@@ -8,7 +8,8 @@
     (super-new)
     (define/public (pass p) (match p
       [(X86Program info blocks)
-        (define blocks^ (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block-inner) (in-dict blocks)]) 
+        (define blocks^ (for/fold ([a (ordl-make-empty integer-compare)]) ([(tag block-inner) (in-dict blocks)]) 
+          (debug "pass-tag" tag)
           (ordl-insert a tag (patch-instr-block block-inner) #f)))
         (X86Program info blocks^)
       ]
@@ -26,13 +27,13 @@
           [(Instr 'movq (list (Deref r0 o0) (Deref r1 o1)))
             (patch-instr*
               rest
-              (ral-consr (ral-consr cont (Instr 'movq (list (Deref r0 o0) (Reg 'rax)))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))
+              (ral-consr (ral-consr cont (Instr 'movq (list (Deref r0 o0) (Reg 0)))) (Instr 'movq (list (Reg 0) (Deref r1 o1))))
             )
           ]
           [(Instr i (list (Deref r0 o0) (Deref r1 o1)))
             (patch-instr*
               rest
-              (ral-consr (ral-consr (ral-consr cont (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))) (Instr i (list (Deref r0 o0) (Reg 'rax)))) (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))
+              (ral-consr (ral-consr (ral-consr cont (Instr 'movq (list (Deref r1 o1) (Reg 0)))) (Instr i (list (Deref r0 o0) (Reg 0)))) (Instr 'movq (list (Reg 0) (Deref r1 o1))))
             ) 
           ]
           [(Instr 'movq (list (Reg a) (Reg a))) 

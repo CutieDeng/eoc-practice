@@ -1,6 +1,6 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt" "core/utilities.rkt")
 (require cutie-ftree)
 (require "x86abi.rkt")
 
@@ -13,7 +13,7 @@
         (define allo (allocate-registers-block table))
         (define slot-num (+ 1 (foldl max -1 (sequence->list (in-dict-values table)))))
         (define blocks^ 
-          (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block-inner) (in-dict blocks)]) 
+          (for/fold ([a (ordl-make-empty integer-compare)]) ([(tag block-inner) (in-dict blocks)]) 
             (ordl-insert a tag (allo block-inner) #f))
         )
         (define stack-size (max 0 (* (- slot-num (length caller-and-callee-regs)) 8)))

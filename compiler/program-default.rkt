@@ -1,6 +1,7 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt")
+(require cutie-ftree)
 
 (define pass-program
   (class object%
@@ -23,10 +24,10 @@
         (if (and (eq? cnd cnd^) (eq? thn thn^) (eq? els els^)) exp (If cnd^ thn^ els^))
       ]
       [(Begin es e)
-        (define-values (change? rst) (for/fold ([change? #f] [rst '()]) ([e es]) (define e^ (pass-exp e))
-          (values (or change? (not (eq? e e^))) (cons e^ rst))))
+        (define-values (change? rst) (for/fold ([change? #f] [rst (ral-empty)]) ([e (in-ral0 es)]) (define e^ (pass-exp e))
+          (values (or change? (not (eq? e e^))) (ral-consr rst e^))))
         (define e^ (pass-exp e))
-        (if (and (not change?) (eq? e e^)) exp (Begin (reverse rst) e^))
+        (if (and (not change?) (eq? e e^)) exp (Begin rst e^))
       ]
       [(Let x rhs body)
         (define rhs^ (pass-exp rhs))
@@ -40,6 +41,10 @@
         (define cnd^ (pass-exp cnd))
         (define body^ (pass-exp body))
         (if (and (eq? cnd cnd^) (eq? body body^)) exp (WhileLoop cnd^ body^))]
+      [(GetBang v)
+        (define v^ (pass-exp v))
+        (if (eq? v v^) exp (GetBang v^))
+      ]
       [_ exp]
     ))
   ))

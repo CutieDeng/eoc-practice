@@ -1,6 +1,7 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/utilities.rkt")
+(require "core/core-types.rkt")
 (require "graph-core.rkt")
 (require cutie-ftree)
 
@@ -8,11 +9,11 @@
   (class object%
     (super-new)
     (field
-      [block2id (ordl-make-empty symbol-compare)]
+      [block2id (ordl-make-empty integer-compare)]
       [id2block (ordl-make-empty integer-compare)]
       [id-cnt 0]
       [id2group (ordl-make-empty integer-compare)]
-      [directed-acyclic-graph (graph-make-empty-raw integer-compare)]
+      [directed-acyclic-graph (graph-make-empty)]
       [group2id (ordl-make-empty integer-compare)]
     )
     ; (public block2id id2block id-cnt id2group group2id directed-acyclic-graph)
@@ -24,7 +25,7 @@
     )
     (define (init-nodes graph)
       (for ([n (in-vertices graph)])
-        (init-node n graph (ordl-make-empty symbol-compare)))
+        (init-node n graph (ordl-make-empty integer-compare)))
     )
     (define (init-node node graph in-stack)
       (define node-id (dict-ref block2id node #f))

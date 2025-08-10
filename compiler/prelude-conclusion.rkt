@@ -1,6 +1,6 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt" "core/utilities.rkt")
 (require cutie-ftree)
 
 (define pass-prelude-and-conclusion
@@ -18,7 +18,7 @@
         (Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15)))
         (Instr 'movq (list (Imm 0) (Deref 'r15 0)))
         (Instr 'addq (list (Imm 8) (Deref 'r15 0)))
-        (Jmp 'start)
+        (Jmp 2)
       ))
       (Block (ordl-make-empty symbol-compare) (vector->ral insts))
     ]))
@@ -36,13 +36,13 @@
       (define prelude (get-prelude p))
       (define conclusion (get-conclusion p))
       (define blocks^
-        (for/fold ([a (ordl-make-empty symbol-compare)]) ([(tag block) (in-dict blocks)]) 
+        (for/fold ([a (ordl-make-empty integer-compare)]) ([(tag block) (in-dict blocks)]) 
           (match-define (Block info instr*) block)
           (define instr*^
             (cond
-              [(ral-empty? instr*) (ral-consr instr* (Jmp 'conclusion))]
+              [(ral-empty? instr*) (ral-consr instr* (Jmp 1))]
               [else (define last-instr (ral-viewr instr*))
-                (if (Jmp? last-instr) instr* (ral-consr instr* (Jmp 'conclusion)))
+                (if (Jmp? last-instr) instr* (ral-consr instr* (Jmp 1)))
               ]
             ))
           (ordl-insert a tag (Block info instr*^) #f)
@@ -50,8 +50,8 @@
       )
       (X86Program info
         (dict-set 
-          (dict-set blocks^ 'main prelude)
-          'conclusion conclusion))
+          (dict-set blocks^ 0 prelude)
+          1 conclusion))
     ]))
   ))
 

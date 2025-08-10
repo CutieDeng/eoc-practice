@@ -1,73 +1,96 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt")
+(require "control-flow-graph/var-id-reassign.rkt")
 (require cutie-ftree)
 
+(define (ral-single stmt)
+  (ral-consl (ral-empty) stmt)
+)
+(define (return-single-bb p)
+  (ral-single (Return p))
+)
+
 (define pass-explicate-control
-  (class object%
+  (class (pass-var-id-reassign-mixin object% #f)
     (super-new)
-    (field [control-flow (ordl-make-empty symbol-compare)])
+    (define (bind-bb-id id bb)
+      (set! control-flow-graph (dict-set control-flow-graph id bb))
+    )
+    (define create-block (match-lambda
+      [(and raw-jmp (ral ((Goto _) atom))) raw-jmp]
+      [other (define lbl (gen-bb-id))
+        (bind-bb-id lbl other)
+        (ral-single (Goto lbl))]
+      ))
+    (define (gen-bb-id)
+      (begin0 bb-cnt (set! bb-cnt (+ bb-cnt 1))))
+    (inherit-field var-cnt)
+    (inherit gen-var-id)
+    (field [control-flow-graph (ordl-make-empty integer-compare)] [bb-cnt 3])
     (define/public pass (match-lambda 
       [(Program info body)
+        (set! var-cnt (dict-ref info 'var-cnt))
         (define b (explicate-tail body))
-        (set! control-flow (dict-set control-flow 'start b))
-        (CProgram info control-flow)
+        (bind-bb-id 2 b)
+        (define info^ (dict-set* info 'bb-cnt bb-cnt 'var-cnt var-cnt))
+        (CProgram info^ control-flow-graph)
       ]
     ))
     (define (explicate-tail p) (match p
-      [(Collect _) (Return p)]
-      [(Allocate (? integer?) _) (Return p)]
-      [(GlobalValue _) (Return p)]
-      [(Prim 'vector-ref (list _ (Int _))) (Return p)]
-      [(Prim 'vector-set! (list _ (Int _) _)) (Return p)]
-      [(Prim 'vector-length (list _)) (Return p)]
+      [(Collect _) (return-single-bb p)]
+      [(Allocate (? integer?) _) (return-single-bb p)]
+      [(GlobalValue _) (return-single-bb p)]
+      [(Prim 'vector-ref (list _ (Int _))) (return-single-bb p)]
+      [(Prim 'vector-set! (list _ (Int _) _)) (return-single-bb p)]
+      [(Prim 'vector-length (list _)) (return-single-bb p)]
       [(Begin es body) 
-        (for/foldr ([init-cont (explicate-tail body)]) ([e es])
+        (for/foldr ([init-cont (explicate-tail body)]) ([e (in-ral0 es)])
           (explicate-effect e init-cont)
         )]
-      [(or (WhileLoop _ _) (SetBang _ _)) 
-        (explicate-effect p (Return (Void )))]
+      [(or (WhileLoop _ _) (SetBang _ _))
+        (explicate-effect p (return-single-bb (Void )))]
       [(If cnd thn els) (explicate-pred cnd (explicate-tail thn) (explicate-tail els))]
       [(Let x e body) (explicate-assign e x (explicate-tail body))]
-      [(GetBang x) (Return (Var x))]
-      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (Return p)]
+      [(GetBang x) (return-single-bb (Var x))]
+      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (return-single-bb p)]
     ))
     (define (explicate-assign p x cont) (match p
-      [(or (Collect _) (Prim 'vector-set! _)) 
-        (Seq p cont)]
-      [(or (Allocate (? integer?) _) 
+      [(or (Collect _) (Prim 'vector-set! _))
+        (ral-consl cont p)]
+      [(or (Allocate (? integer?) _)
           (Prim 'vector-ref (list (Int _) _)) (Prim 'vector-length _)
           (GlobalValue _))
-        (Seq (Assign (Var x) p) cont)
+        (ral-consl cont (Assign (Var x) p))
       ]
-      [(Begin es body) 
-        (for/foldr ([init-cont (explicate-assign body x cont)]) ([e es])
+      [(Begin es body)
+        (for/foldr ([init-cont (explicate-assign body x cont)]) ([e (in-ral0 es)])
           (explicate-effect e init-cont)
         )]
-      [(or (WhileLoop _ _) (SetBang _ _)) 
+      [(or (WhileLoop _ _) (SetBang _ _))
         (explicate-effect p cont)]
-      [(If cnd thn els) 
-        (define cont-blk (create-block cont)) 
+      [(If cnd thn els)
+        (define cont-blk (create-block cont))
         (define thn-ass (explicate-assign thn x cont-blk))
         (define els-ass (explicate-assign els x cont-blk))
         (explicate-pred cnd thn-ass els-ass)
       ]
       [(Let y e body) (explicate-assign e y (explicate-assign body x cont))]
       [(GetBang v)
-        (Seq (Assign (Var x) (Var v)) cont)]
-      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (Seq (Assign (Var x) p) cont)]
+        (ral-consl cont (Assign (Var x) (Var v)))]
+      [(or (Prim _ _) (Int _) (Bool _) (Void ) (Var _)) (ral-consl cont (Assign (Var x) p))]
     ))
-    (define (explicate-pred cnd thn els) 
+    (define (explicate-pred cnd thn els)
       (define thn-blk (create-block thn))
       (define els-blk (create-block els))
       (match cnd
-        [(Prim 'vector-ref (list _ (Int _))) 
-          (define tmp (gensym 'tmp))
-          (Seq (Assign (Var tmp) cnd) (IfStmt (Prim 'eq? (Var tmp) (Bool #t)) thn-blk els-blk))
+        [(Prim 'vector-ref (list _ (Int _)))
+          (define tmp (Var (gen-var-id)))
+          (ral-consl (ral-single (IfStmt (Prim 'eq? tmp (Bool #t)) thn-blk els-blk)) (Assign tmp cnd))
         ]
         [(Begin es body)
           (define cont (explicate-pred body thn els))
-          (for/foldr ([cont cont]) ([e es])
+          (for/foldr ([cont cont]) ([e (in-ral0 es)])
             (explicate-effect e cont)
           )
         ]
@@ -80,39 +103,36 @@
           (explicate-assign e y (explicate-pred body thn-blk els-blk))
         ]
         [(or (Var _) (Bool _))
-          (IfStmt (Prim 'eq? (list cnd (Bool #t))) thn-blk els-blk)
+          (ral-single (IfStmt (Prim 'eq? (list cnd (Bool #t))) thn-blk els-blk))
         ]
         [(Prim 'not (list _))
-          (IfStmt (Prim 'eq? (list cnd (Bool #f))) thn-blk els-blk)
+          (ral-single (IfStmt (Prim 'eq? (list cnd (Bool #f))) thn-blk els-blk))
         ]
         [(Prim (or 'eq? '< '>) (list _ _))
-          (IfStmt cnd thn-blk els-blk)
+          (ral-single (IfStmt cnd thn-blk els-blk))
         ]
         [(GetBang v)
-          (IfStmt (Prim 'eq? (list (Var v) (Bool #t)) thn-blk els-blk))
+          (ral-single (IfStmt (Prim 'eq? (list (Var v) (Bool #t)) thn-blk els-blk)))
         ]
       ))
     (define (explicate-effect p cont) (match p
-      [(Collect _) (Seq p cont)]
+      [(Collect _) (ral-consl cont p)]
       [(or (Allocate (? integer?) _) (GlobalValue _)) cont]
       [(Prim 'vector-ref (list _ (Int _))) cont]
-      [(Prim 'vector-set! (list _ (Int _) _)) (Seq p cont)]
+      [(Prim 'vector-set! (list _ (Int _) _)) (ral-consl cont p)]
       [(Prim 'vector-length (list _)) cont]
       [(SetBang var rhs) (explicate-assign rhs var cont)]
       [(WhileLoop cnd body)
-        (define body-lbl (gensym 'label))
-        (define cnd-lbl (gensym 'label))
+        (define body-lbl (gen-bb-id))
+        (define cnd-lbl (gen-bb-id))
         (define cnd^ (explicate-pred cnd (Goto body-lbl) cont))
         (define body^ (explicate-effect body (Goto cnd-lbl))) 
-        (set! control-flow
-          (dict-set 
-            (dict-set control-flow body-lbl body^)
-            cnd-lbl cnd^)
-        )
-        (Goto cnd-lbl)
+        (bind-bb-id body-lbl body^)
+        (bind-bb-id cnd-lbl cnd^)
+        (ral-single (Goto cnd-lbl))
       ]
       [(Begin es body)
-        (for/foldr ([init-body (explicate-effect body cont)]) ([e es])
+        (for/foldr ([init-body (explicate-effect body cont)]) ([e (in-ral0 es)])
           (explicate-effect e init-body))
       ]
       [(If cnd thn els)
@@ -125,39 +145,13 @@
         (explicate-assign rhs var (explicate-effect body cont))
       ]
       [(Prim _ args)
-        (for/foldr ([init-body cont]) ([arg args])
+        (for/foldr ([init-body cont]) ([arg (in-ral0 args)])
           (explicate-effect arg init-body) 
         )]
-      [(GetBang x) (Assign (Var (gensym 'utmp)) (Var x))]
+      [(GetBang x) (ral-consl cont (Assign (Var (gen-var-id)) (Var x)))]
       [(or (Var _) (Int _) (Bool _) (Void )) cont]
-    ))
-    (define create-block (match-lambda 
-      [(and raw-jmp (Goto _)) raw-jmp]
-      [other (define lbl (gensym 'label)) 
-        (set! control-flow (dict-set control-flow lbl other))
-        (Goto lbl)]
     ))
   )
 )
 
 (provide pass-explicate-control)
-
-(define cast-types-to-tag (match-lambda
-  [`(Vector ,types ...)
-    (define types-mask 
-      (let get-bit-fields ([idx 0] [rest-types types] [mask 1] [rst 0])
-        (match rest-types
-          [`(Integer ,rest ...) 
-            (get-bit-fields (+ idx 1) rest (* mask 2) rst)]
-          [`((Vector ,_ ...) ,rest ...) 
-            (get-bit-fields (+ idx 1) rest (arithmetic-shift mask 1) (bitwise-ior rst mask))]
-          ['() rst]
-      ))
-    )
-    (bitwise-ior 
-      (arithmetic-shift types-mask 7)
-      (arithmetic-shift (length types) 1)
-      1
-    )
-  ]
-))

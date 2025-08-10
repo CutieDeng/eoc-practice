@@ -1,37 +1,51 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt")
 (require "program-default.rkt")
+(require "control-flow-graph/var-id-reassign.rkt")
+(require cutie-ftree)
 
 (define pass-expose-allocation
-  (class pass-program
+  (class (pass-var-id-reassign-mixin pass-program #f)
     (super-new)
-    (define/public (expand-env-r body env) (match env
-      [(cons (cons x v) rest) (Let x v (expand-env-r body rest))]
-      ['() body]
-    ))
+    (inherit-field var-cnt)
+    (inherit gen-var-id)
+    (define/private (expand-envs body env) 
+      (for/fold ([body body]) ([e (in-ral0 env)])
+        (match-define (cons x v) e)
+        (Let x v body)
+      ))
+    (define/private (prepare-alloc-bytes es-length)
+      (* (+ 1 es-length) 8)
+    )
     (define/override pass-exp (match-lambda
       [(HasType (Prim 'vector es) types)
-        (define-values (es^ env^) (for/fold ([es^ '()] [env^ '()]) ([e es])
-          (define tmp (gensym 'tmp))
-          (values (cons tmp es^) (dict-set env^ tmp (pass-exp e)))
-          ))
-        (define bytes (* (+ 1 (length es)) 8))
-        (define pre-collect (λ (b) (Let '_ (If 
+        (define-values (es^ env^) (for/fold ([es^ (ral-empty)] [env^ (ral-empty)]) ([e es])
+          (define tmp (gen-var-id))
+          (values (ral-consl es^ tmp) (ral-consl env^ (cons tmp (pass-exp e))))
+        ))
+        (define bytes (prepare-alloc-bytes (ral-length es^)))
+        (define pre-collect (λ (b) (Let (gen-var-id) (If 
           (Prim '< (list 
             (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes)))
             (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) b)))
-        (define v (gensym 'tmp))
-        (define inner (for/foldr ([b (Var v)]) ([e es^] [idx (in-range (length es))])
-          (Let '_ (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
-          ))
-        (set! inner (expand-env-r inner env^))
-        (set! inner (Let v (Allocate (length es) types) inner))
-        (set! inner (pre-collect inner))
-        inner
+        (define v (gen-var-id))
+        (define inner (for/fold ([b (Var v)]) ([e (in-ral0 es^)] [idx (in-range (length es))])
+          (Let (gen-var-id) (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
+        ))
+        (define inner^ (expand-envs inner env^))
+        (define inner^^ (Let v (Allocate (length es) types) inner^))
+        (define inner^^^ (pre-collect inner^^))
+        inner^^^
       ]
       [body (super pass-exp body)]
     ))
+    (define/override (pass p)
+      (define info (Program-info p))
+      (set! var-cnt (dict-ref info 'var-cnt))
+      (define p^ (super pass p))
+      (Program (dict-set* (Program-info p^) 'var-cnt var-cnt) (Program-body p^))
+    )
   ))
 
 (provide pass-expose-allocation)

@@ -2,26 +2,29 @@
 
 (require cutie-ftree)
 (require "graph-core.rkt")
+(require "core/integer-set.rkt")
 
 (define topology
   (class object%
     (super-new)
-    (field [visit #f] [rst #f])
+    (field [visit 0] [rst (ral-empty)] [graph #f])
     (define/public (order graph)
-      (set! visit (mutable-set))
-      (set! rst (ral-empty))
+      (set-field! graph this graph)
       (for ([i (in-vertices graph)])
-        (find i graph)
+        (find i)
       )
       rst
     )
-    (define (find current-node graph)
+    (define/private (visit-add! i)
+      (set! visit (bset-add visit i)) 
+    )
+    (define (find current-node)
       (cond
-        [(set-member? visit current-node) (void)]
+        [(bset-member? visit current-node) (void)]
         [else
-          (set-add! visit current-node)
+          (visit-add! current-node)
           (for ([t (in-neighbors graph current-node)])
-            (find t graph)
+            (find t)
           )
           (set! rst (ral-consl rst current-node))
         ]
