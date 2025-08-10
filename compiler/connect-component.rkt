@@ -1,12 +1,13 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt")
+(require "core/utilities.rkt")
 (require "graph-core.rkt")
 (require cutie-ftree)
 
 (require "topology-sort.rkt")
-(require "connect-component-core.rkt")
-(require "x86-cfg.rkt")
+(require "connect-component-core-2.rkt")
+(require "x86-control-flow-graph.rkt")
 
 (define pass-connect-component
   (class object%
@@ -16,23 +17,19 @@
         (define control-flow-graph (send (new x86-control-flow-graph) build-cfg p))
         (define cc (new connect-component))
         (send cc get-connect-component control-flow-graph)
-        (define info^ (dict-set info 'graph control-flow-graph))
-        (define info^^ (dict-set info^ 'connect-component (torder cc)))
-        (define info^^^ (dict-set info^^ 'id2block (get-field id2block cc)))
-        (set! info^^^ (dict-set info^^^ 'dag (get-field directed-acyclic-graph cc)))
-        (set! info^^^ (dict-set info^^^ 'group2id (get-field group2id cc)))
-        (X86Program info^^^ blocks)
+        (define alist (topology-sort (get-field agraph cc)))
+        (define group2id (get-field group2id cc))
+        (define alist-connect-component (for/fold ([c (ral-empty)]) ([a (in-ral0 alist)])
+          (ral-consr c (dict-ref group2id a))))
+        (define info^ (dict-set* info 
+          'graph control-flow-graph
+          'agraph (get-field agraph cc)
+          'topology-order alist
+          'group2id group2id
+          'connect-component alist-connect-component))
+        (X86Program info^ blocks)
       ]
     ))
-    ; listof dict
-    (define (torder cc)
-      (define dag (get-field directed-acyclic-graph cc))
-      (define group2id (get-field group2id cc))
-      (define torders (topology-sort dag))
-      (for/fold ([to (ral-empty)]) ([t (in-ral0 torders)])
-        (ral-consr to (dict-ref group2id t))
-      )
-    )
   )
 )
 

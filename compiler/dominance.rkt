@@ -1,6 +1,6 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/core-types.rkt" "core/utilities.rkt" "core/integer-set.rkt")
 (require "graph-core.rkt")
 (require cutie-ftree)
 
@@ -10,22 +10,26 @@
   (class object%
     (super-new)
     (define/public (pass p) (match p [(X86Program info blocks)
-      (define bottom (list->set (dict-keys blocks)))
+      (define full-bb-set (bset* (dict-keys blocks)))
+      (define empty-bb-set (bset))
+      (define (id-fn x) x)
+      (define (transfer node input) (bset-add input node))
       (define ana (new analyzer))
       (define graph (dict-ref info 'graph))
-      (define id2block (dict-ref info 'id2block))
       (define components (dict-ref info 'connect-component))
+      (debug "components" components)
       (send ana analyze-dataflow
         graph
-        (λ (node input) (set-add input node))
-        bottom
-        set-intersect
+        transfer
+        full-bb-set
+        bset-and
         components
-        (λ (i) (dict-ref id2block i))
-        (set)
+        id-fn
+        empty-bb-set
       )
-      (define t (get-field result ana))
-      (define info^ (dict-set info 'dominanced t))
+      (define t (get-field analyze-value ana))
+      (define info^ (dict-set* info 'dominanced t))
+      (debug "analyze value" t)
       (X86Program info^ blocks)
     ]))
   ))
