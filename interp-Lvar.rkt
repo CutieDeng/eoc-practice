@@ -1,7 +1,7 @@
 #lang racket
 (require racket/fixnum)
 (require racket/dict)
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt")
 (require "interp-Lint.rkt")
 (provide interp-Lvar-class)
 
