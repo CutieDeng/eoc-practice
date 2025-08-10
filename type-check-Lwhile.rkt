@@ -1,7 +1,7 @@
 #lang racket
 ;(require graph)
 ;(require "multigraph.rkt")
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt" "compiler/core/utilities.rkt")
 (require "type-check-Lif.rkt")
 (provide type-check-Lwhile type-check-Lwhile-class)
 

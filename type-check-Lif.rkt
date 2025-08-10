@@ -1,5 +1,5 @@
 #lang racket
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt" "compiler/core/utilities.rkt")
 (require "type-check-Lvar.rkt")
 (provide type-check-Lif type-check-Lif-class type-check-if-mixin)
 
@@ -44,7 +44,7 @@
       (lambda (e)
         (debug 'type-check-exp "Lif" e)
         (match e
-          [(Bool b) (values (Bool b) 'Boolean)]
+          [(Bool b) (values e 'Boolean)]
           [(Prim 'eq? (list e1 e2))
            (define-values (e1^ T1) ((type-check-exp env) e1))
            (define-values (e2^ T2) ((type-check-exp env) e2))

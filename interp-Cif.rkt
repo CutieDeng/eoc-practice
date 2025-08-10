@@ -1,5 +1,7 @@
 #lang racket
-(require "utilities.rkt")
+(require "compiler/core/utilities.rkt" "compiler/core/core-types.rkt")
+(require cutie-ftree)
+
 (require "interp-Lif.rkt")
 (require "interp-Cvar.rkt")
 (provide interp-Cif interp-Cif-mixin)
@@ -21,18 +23,18 @@
       (lambda (t)
         (match t
           ;; Cvar cases, repeated logic but with blocks added
-          [(Return e)
+          [(ral ((Return e) atom))
            ((interp-exp env) e)]
-          [(Seq s t2)
+          [(ral (s atom) (t2 unlength))
            (define new-env ((interp-stmt env) s))
            ((interp-tail new-env blocks) t2)]
           ;; Cif cases
-          [(Goto l)
+          [(ral ((Goto l) atom))
            ((interp-tail env blocks) (dict-ref blocks l))]
           ; fix by cutiedeng, just ignore it as Prim or not...  
           ; [(IfStmt (Prim op arg*) (Goto thn-label) (Goto els-label))
           ;  (if ((interp-exp env) (Prim op arg*))
-          [(IfStmt cnd (Goto thn-label) (Goto els-label))
+          [(ral ((IfStmt cnd (Goto thn-label) (Goto els-label)) atom))
            (if ((interp-exp env) cnd)
                ((interp-tail env blocks) (dict-ref blocks thn-label))
                ((interp-tail env blocks) (dict-ref blocks els-label)))]

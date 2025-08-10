@@ -1,7 +1,9 @@
 #lang racket
 (require "compiler/graph-core.rkt")
 ; (require "multigraph.rkt")
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt" "compiler/core/utilities.rkt")
+(require cutie-ftree)
+
 (require "type-check-Cvar.rkt")
 (require "type-check-Lif.rkt")
 (provide type-check-Cif type-check-Cif-class)
@@ -77,19 +79,16 @@
     (define/override ((type-check-tail env block-env blocks) t)
       (debug 'type-check-tail "Cif" t)
       (match t
-        [(Return e)
+        [(ral ((Return e) atom))
          #:when (exp-ready? e env)
          (define-values (e^ t) ((type-check-exp env) e))
          t]
-        [(Return e) '_]      
-        [(Seq s t)
-         ((type-check-stmt env) s)
-         ((type-check-tail env block-env blocks) t)]
-        [(Goto label)
+        [(ral ((Return e) atom)) '_]      
+        [(ral ((Goto label) atom))
          (cond [(dict-has-key? block-env label)
                 (dict-ref block-env label)]
                [else '_])]
-        [(IfStmt cnd tail1 tail2)
+        [(ral ((IfStmt cnd tail1 tail2) atom))
          (cond [(exp-ready? cnd env)
                 (define-values (c Tc) ((type-check-exp env) cnd))
                 (unless (type-equal? Tc 'Boolean)
@@ -101,13 +100,16 @@
            (error "type error: branches of if should have same type, not"
                   T1 T2))
          (combine-types T1 T2)]
+        [(ral (s atom) (t unlength))
+         ((type-check-stmt env) s)
+         ((type-check-tail env block-env blocks) t)]
         [else ((super type-check-tail env block-env blocks) t)]))
 
     (define/public (adjacent-tail t)
       (match t
-        [(Goto label) (set label)]
-        [(IfStmt cnd t1 t2) (set-union (adjacent-tail t1) (adjacent-tail t2))]
-        [(Seq s t) (adjacent-tail t)]
+        [(ral ((Goto label) atom)) (set label)]
+        [(ral ((IfStmt cnd t1 t2) atom)) (set-union (adjacent-tail t1) (adjacent-tail t2))]
+        [(ral (s atom) (t unlength)) (adjacent-tail t)]
         [else (set)]))
 
     (define/public (C-blocks->CFG blocks)
@@ -132,6 +134,7 @@
         (cond [type-changed
                (set! type-changed #f)
                (for ([(label tail) (in-dict blocks)])
+                  (debug "tail" tail)
                  (define t ((type-check-tail env block-env blocks) tail))
                  (update-type label t block-env)
                  )
@@ -149,7 +152,7 @@
         [(CProgram info blocks)
          (define empty-env (make-hash))
          (define-values (env t)
-           (type-check-blocks info blocks empty-env 'start))
+           (type-check-blocks info blocks empty-env 2))
          (unless (type-equal? t 'Integer)
            (error "return type of program must be Integer, not" t))
          (define locals-types

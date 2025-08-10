@@ -1,6 +1,6 @@
 #lang racket
 (require racket/fixnum)
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt")
 (provide interp-Lint interp-Lint-class)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

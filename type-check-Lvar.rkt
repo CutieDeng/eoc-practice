@@ -1,5 +1,6 @@
 #lang racket
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt")
+(require "compiler/core/utilities.rkt")
 (provide type-check-Lvar type-check-Lvar-class type-check-var-mixin)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -36,8 +37,9 @@
       (lambda (e)
         (debug 'type-check-exp "Lvar ~a" e)
         (match e
-          [(Var x)  (values (Var x) (dict-ref env x))]
-          [(Int n)  (values (Int n) 'Integer)]
+          [(Var x)  (values e (dict-ref env x))]
+          [(Var:r x)  (values e (dict-ref env x))]
+          [(Int n)  (values e 'Integer)]
           [(Prim op es)
            (define-values (new-es ts)
              (for/lists (exprs types) ([e es]) ((type-check-exp env) e)))

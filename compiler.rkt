@@ -3,7 +3,7 @@
 (require racket/set)
 (require racket/fixnum)
 (require "interp.rkt")
-(require "utilities.rkt")
+(require "compiler/core/core-types.rkt")
 
 (require "interp-Lvec-prime.rkt")
 (require "type-check-Lvec.rkt")
@@ -19,6 +19,9 @@
 (require racket/pretty)
 
 (require "compiler/x86abi.rkt")
+
+(require "compiler/drop-var-raw.rkt")
+(define drop-var:r (λ (p) (send (new pass-var-new-name) pass p)))
 
 (require "compiler/shrink.rkt")
 (define shrink (λ (p) (send (new pass-shrink) pass p)))
@@ -73,12 +76,13 @@
 (require "compiler/dominance.rkt")
 (require "compiler/dominance-tree.rkt")
 (require "compiler/dominance-join.rkt")
-(define dominace (λ (x) 
-  (define x^ (send (new pass-dominance) pass x))
-  (define x^^ (send (new pass-dominance-tree) pass x^))
-  (define x^^^ (send (new pass-dominance-dj-graph) pass x^^))
-  x^^^
-))
+
+(define ((compose-pass . passes) p)
+  (for/fold ([p p]) ([pa passes])
+    (send (new pa) pass p))
+)
+
+(define dominance (λ (x) ((compose-pass pass-dominance pass-dominance-tree pass-dominance-dj-graph) x)))
 
 (define init-program (match-lambda 
   ([Program info x] [Program (for/fold ([info (ordl-make-empty symbol-compare)]) ([(k v) (in-dict info)])
@@ -87,6 +91,7 @@
 (define compiler-passes
   `(
     ("init" ,init-program ,interp-Lvec-prime ,type-check-Lvec)
+    ("drop-var:r" ,drop-var:r ,interp-Lvec-prime ,type-check-Lvec)
     ("shrink" ,shrink ,interp-Lvec-prime ,type-check-Lvec)
     ("uniquify" ,uniquify ,interp-Lvec-prime ,type-check-Lvec)
     ("collect-set!" ,collect-set! ,interp-Lvec-prime ,type-check-Lvec)
@@ -96,7 +101,7 @@
     ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-2)
     ("connect component preparation" ,connect-component ,interp-pseudo-x86-2)
-    ("dominance" ,dominace ,interp-pseudo-x86-2)
+    ("dominance" ,dominance ,interp-pseudo-x86-2)
     ("block uncover live" ,block-uncover-live ,interp-pseudo-x86-2)
     ("uncover live" ,uncover-live ,interp-pseudo-x86-2)
     ("build interference graph" ,build-interference ,interp-pseudo-x86-2)

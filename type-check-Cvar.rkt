@@ -1,5 +1,7 @@
 #lang racket
-(require "utilities.rkt" "type-check-Lvar.rkt")
+(require "compiler/core/core-types.rkt" "compiler/core/utilities.rkt" "type-check-Lvar.rkt")
+(require cutie-ftree)
+
 (provide type-check-Cvar type-check-Cvar-class)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -29,10 +31,10 @@
     (define/public ((type-check-tail env block-env blocks) t)
       (debug 'type-check-tail "Cvar ~a ~a" t env)
       (match t
-        [(Return e)
+        [(ral ((Return e) atom))
          (define-values (e^ t) ((type-check-exp env) e))
          t]
-        [(Seq s t)
+        [(ral (s atom) (t unlength))
          ((type-check-stmt env) s)
          ((type-check-tail env block-env blocks) t)]
         [else (error 'type-check-tail "expected a Cvar tail, not ~a" t)]))
@@ -43,7 +45,7 @@
          (define env (make-hash))
          (define block-env (make-hash))
          (define t ((type-check-tail env block-env blocks)
-                    (dict-ref blocks 'start)))
+                    (dict-ref blocks 2)))
          (unless (type-equal? t 'Integer)
            (error "return type of program must be Integer, not" t))
          (define locals-types (for/list ([(x t) (in-dict env)])
