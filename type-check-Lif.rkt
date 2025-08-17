@@ -42,7 +42,6 @@
 
     (define/override (type-check-exp env)
       (lambda (e)
-        (debug 'type-check-exp "Lif" e)
         (match e
           [(Bool b) (values e 'Boolean)]
           [(Prim 'eq? (list e1 e2))

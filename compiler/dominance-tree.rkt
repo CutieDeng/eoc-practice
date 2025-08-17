@@ -47,7 +47,6 @@
       (define t (new dominance-tree))
       (send t build-intermediate-dominator-tree (dict-ref info 'dominanced))
       (define info^ (dict-set* info 'dominator-tree-graph (get-field tree-graph t) 'intermediate-dominator (get-field intermediate-dominator t)))
-      (debug "pass" info^)
       (X86Program info^ blocks)
     ]))
   ))

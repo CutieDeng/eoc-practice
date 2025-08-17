@@ -29,7 +29,6 @@
     (define/public pass (match-lambda [(CProgram info blocks)
       (define blocks^
         (for/fold ([bbs (ordl-make-empty integer-compare)]) ([(bb-id block) (in-dict blocks)])
-          (debug "select" (ral->vector block))
           (dict-set bbs bb-id (Block (ordl-make-empty symbol-compare) (pass-instr* block)))
         )
       )

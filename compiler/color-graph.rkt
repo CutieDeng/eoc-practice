@@ -3,12 +3,10 @@
 (require "core/core-types.rkt")
 (require "core/integer-set.rkt")
 (require "graph-core.rkt")
+(require "core/utilities.rkt")
 (require cutie-ftree)
 
-(require "../priority_queue.rkt")
-
 (require "x86abi.rkt")
-(require "interference.rkt")
 
 (define (min-reg-id-from-mask mask)
   (define maska1 (+ mask 1))
@@ -114,7 +112,7 @@
                     (define cur-m^ (bitwise-ior cur-m (arithmetic-shift 1 reg-id)))
                     (define cur-m-sz (bset-length cur-m))
                     (define q^ (dict-set (dict-remove q (cons cur-m-sz u)) (cons (+ cur-m-sz 1) u) #t))
-                    (define m^ (dict-set u cur-m^))
+                    (define m^ (dict-set m u cur-m^))
                     (values m^ q^)
                   ])
               ))

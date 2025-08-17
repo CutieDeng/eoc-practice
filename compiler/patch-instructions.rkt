@@ -8,9 +8,8 @@
     (super-new)
     (define/public (pass p) (match p
       [(X86Program info blocks)
-        (define blocks^ (for/fold ([a (ordl-make-empty integer-compare)]) ([(tag block-inner) (in-dict blocks)]) 
-          (debug "pass-tag" tag)
-          (ordl-insert a tag (patch-instr-block block-inner) #f)))
+        (define blocks^ (for/fold ([a (ordl-make-empty integer-compare)]) ([(bb-id bb) (in-dict blocks)]) 
+          (dict-set a bb-id (patch-instr-block bb))))
         (X86Program info blocks^)
       ]
     ))
