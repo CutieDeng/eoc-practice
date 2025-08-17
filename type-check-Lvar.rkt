@@ -35,7 +35,6 @@
 
     (define/public (type-check-exp env)
       (lambda (e)
-        (debug 'type-check-exp "Lvar ~a" e)
         (match e
           [(Var x)  (values e (dict-ref env x))]
           [(Var:r x)  (values e (dict-ref env x))]
@@ -58,13 +57,12 @@
 
     (define/override (type-check-exp env)
       (lambda (e)
-        (debug 'type-check-exp "Lvar ~a" e)
         (match e
           [(Let x e body)
            (define-values (e^ Te) ((type-check-exp env) e))
            (define-values (b Tb) ((type-check-exp (dict-set env x Te)) body))
            (values (Let x e^ b) Tb)]
-          [else ((super type-check-exp env) e)])))
+          [_ ((super type-check-exp env) e)])))
 
     (define/public (type-check-program e)
       (match e

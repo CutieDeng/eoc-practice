@@ -21,7 +21,6 @@
     ]))
     ; return list, 0, 1, 2 element
     (define (init-graph blocks)
-      (debug "init-graph" (sequence->list (in-dict-keys blocks)))
       (for/fold ([graph (graph-make-empty)]) ([bb-id (in-dict-keys blocks)])
         (add-vertex graph bb-id)
       )

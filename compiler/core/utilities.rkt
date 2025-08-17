@@ -1,6 +1,7 @@
 #lang racket
 
 (require "core-types.rkt")
+(require "../x86abi.rkt")
 
 (require racket/struct racket/dict racket/set racket/class racket/string racket/bool racket/function)
 (require racket/port racket/system racket/list racket/contract/base)
@@ -204,11 +205,14 @@
 (define x86-asm-printer-class
   (class object% (super-new)
     (define/public print-asm-label (match-lambda
+      [0 (printf "main")]
+      [(? integer? x) (printf "L~a" x)]
       [x (printf "~a" x)]
     ))
     (define/public print-asm-imm (match-lambda
       [(Deref r i) (printf "~a(%~a)" i r)]
       [(Imm n) (printf "$~a" n)]
+      [(Reg (? integer? r)) (printf "%~a" (car (list-ref x86_64-regs r)))]
       [(Reg r) (printf "%~a" r)]
       [(ByteReg r) (printf "%~a" r)]
       [(Global label) (print-asm-label label) (printf "(%rip)")]

@@ -17,7 +17,6 @@
       (define ana (new analyzer))
       (define graph (dict-ref info 'graph))
       (define components (dict-ref info 'connect-component))
-      (debug "components" components)
       (send ana analyze-dataflow
         graph
         transfer
@@ -29,7 +28,6 @@
       )
       (define t (get-field analyze-value ana))
       (define info^ (dict-set* info 'dominanced t))
-      (debug "analyze value" t)
       (X86Program info^ blocks)
     ]))
   ))
