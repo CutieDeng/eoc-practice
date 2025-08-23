@@ -19,3 +19,5 @@ compiled/
 # Dependency tracking files
 *.dep
 *.patch
+tests/*.dSYM
+.vscode/

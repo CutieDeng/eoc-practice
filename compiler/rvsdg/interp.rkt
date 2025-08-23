@@ -16,7 +16,7 @@
     env^^
   )
   (define/public (interp-theta env id)
-    (match-define (Gamma n m input output argument result) id)
+    (match-define (Gamma '() n m input output argument result) id)
     (void)
     (error 'interp-theta "unimpl")
   )
