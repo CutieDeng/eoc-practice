@@ -1,0 +1,42 @@
+#lang racket/base
+
+(require racket/match racket/dict)
+(require cutie-ftree)
+
+(require "core-def.rkt")
+(require "ctor.rkt")
+(require "connect-raw.rkt")
+; (require "node-ctor-raw.rkt")
+(require "node-ctor.rkt")
+(require "input-raw.rkt")
+(require "output-raw.rkt")
+
+(define (rvsdg-raw/split-wires-with-node region wires inputs outputs)
+  (define wires-length (ral-length wires))
+  (define-values (node input output region^) (rvsdg/alloc-node region wires-length wires-length))
+  (define-values (wires^ region^^) (rvsdg-raw/alloc-wire-ids region^ (* wires-length 2)))
+  (define-values (wires-sections region^^^)
+    (for/fold ([wires-sections (ordl-make-empty wire-compare)] [region region^^]) ([w (in-ral0 wires)] [a (in-naturals)] [i (in-ral0 inputs)] [o (in-ral0 outputs)])
+      (define new-wire-input-section (rvsdg-raw/wire-offset wires^ (* a 2)))
+      (define new-wire-output-section (rvsdg-raw/wire-offset wires^ (+ (* a 2) 1)))
+      (define wires-sections^ (dict-set wires-sections 
+        w (cons new-wire-input-section new-wire-output-section)))
+      (define region^ (rvsdg-raw/input-wire-reconnect region i new-wire-input-section w))
+      (define region^^ (rvsdg-raw/output-wire-reconnect region^ o new-wire-output-section w))
+      (values wires-sections^ region^^)
+    ))
+  (define region^^^^
+    (for/fold ([region region^^^]) ([i (in-range wires-length)])
+      (define output^ (rvsdg-raw/output-offset output i))
+      (define w (rvsdg-raw/wire-offset wires^ (* i 2)))
+      (rvsdg-raw/wire-input-connect region w output^)
+    ))
+  (define region^^^^^
+    (for/fold ([region region^^^^]) ([i (in-range wires-length)])
+      (define input^ (rvsdg-raw/input-offset input i))
+      (define w (rvsdg-raw/wire-offset wires^ (+ (* i 2) 1)))
+      (rvsdg-raw/wire-input-connect region w input^)
+    ))
+  (values node wires-sections region^^^^^)
+)
+(provide rvsdg-raw/split-wires-with-node)

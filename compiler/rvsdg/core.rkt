@@ -6,9 +6,9 @@
 
 (define (string-compare lhs rhs)
   (cond
-    [(string<? lhs rhs) 'lt] 
-    [(string=? lhs rhs) 'eq]
-    [else 'gt]
+    [(string<? lhs rhs) '<] 
+    [(string=? lhs rhs) '=]
+    [else '>]
   )
 )
 
@@ -19,14 +19,16 @@
 
 (struct WireId (id) #:transparent)
 
-(define ((abstract-compare map inner-compare) x y)
-  (inner-compare (map x) (map y))
+(define (((abstract-compare-generator compare) map) lhs rhs)
+  (compare (map lhs) (map rhs))
 )
 
-(define wire-compare (abstract-compare WireId-id integer-compare))
-(define input-compare (abstract-compare InputId-id integer-compare))
-(define output-compare (abstract-compare OutputId-id integer-compare))
-(define node-compare (abstract-compare NodeId-id integer-compare))
+(define integer-compare-generator (abstract-compare-generator integer-compare))
+
+(define wire-compare (integer-compare-generator WireId-id))
+(define input-compare (integer-compare-generator InputId-id))
+(define output-compare (integer-compare-generator OutputId-id))
+(define node-compare (integer-compare-generator NodeId-id))
 
 (define INPUT-NODE-ID 0)
 (define OUTPUT-NODE-ID 1)
@@ -42,8 +44,6 @@
   node->input
   node->output
   node->value
-  node->name
-  name->node
   wire-cnt
   input-cnt
   output-cnt
@@ -60,8 +60,6 @@
   (ordl-make-empty node-compare)
   (ordl-make-empty node-compare)
   (ordl-make-empty node-compare)
-  (ordl-make-empty node-compare)
-  (ordl-make-empty string-compare)
   0
   0
   0
