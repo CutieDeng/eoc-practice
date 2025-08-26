@@ -2,10 +2,16 @@
 
 (require racket/match racket/dict)
 
-(require "core-def.rkt")
+(require "../core-def.rkt")
 
 (define (rvsdg-raw/node-offset id index) (match id [(NodeId x) (NodeId (+ x index))]))
 (provide rvsdg-raw/node-offset)
+
+(define (rvsdg-raw/input-offset id index) (match id [(InputId x) (InputId (+ x index))]))
+(provide rvsdg-raw/input-offset)
+
+(define (rvsdg-raw/output-offset id index) (match id [(OutputId x) (OutputId (+ x index))]))
+(provide rvsdg-raw/output-offset)
 
 (define (rvsdg-raw/alloc-node-ids region [cnt 1])
   (define node-id (NodeId (Region-node-cnt region)))

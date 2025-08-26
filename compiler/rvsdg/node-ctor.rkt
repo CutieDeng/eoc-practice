@@ -3,8 +3,9 @@
 (require racket/match)
 
 (require "core-def.rkt")
-(require "node-ctor-raw.rkt")
-(require "connect-raw.rkt")
+(require "raw/node-ctor.rkt")
+(require "raw/node-ctor2.rkt")
+(require "raw/wire.rkt")
 
 (define (rvsdg/alloc-node region input-cnt output-cnt)
   (define-values (node-id region^) (rvsdg-raw/alloc-node-ids region 1))

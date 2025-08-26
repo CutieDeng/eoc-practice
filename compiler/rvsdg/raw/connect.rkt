@@ -2,10 +2,7 @@
 
 (require racket/match racket/dict)
 
-(require "core-def.rkt")
-
-(define (rvsdg-raw/wire-offset id index) (match id [(WireId x) (WireId (+ x index))]))
-(provide rvsdg-raw/wire-offset)
+(require "../core-def.rkt")
 
 (define (rvsdg-raw/wire-input-connect region wire-id input-id)
   (define input->wire (Region-input->wire region))
@@ -31,13 +28,6 @@
 )
 (provide rvsdg-raw/wire-input-output-connect)
 
-(define (rvsdg-raw/alloc-wire-ids region [cnt 1])
-  (define wire-id (WireId (Region-wire-cnt region)))
-  (define region^ (struct-copy Region region [wire-cnt (+ wire-id cnt)]))
-  (values wire-id region^)
-)
-(provide rvsdg-raw/alloc-wire-ids)
-
 (define (rvsdg-raw/wire-input-disconnect region wire-id input-id)
   (define input->wire (Region-input->wire region))
   (define wire->input (Region-wire->input region))
@@ -61,27 +51,6 @@
   (rvsdg-raw/wire-output-disconnect region^ wire-id output-id)
 )
 (provide rvsdg-raw/wire-input-output-disconnect)
-
-(define (rvsdg-raw/alloc-input-ids region [cnt 1])
-  (define input-id (InputId (Region-input-cnt region)))
-  (define region^ (struct-copy Region region [input-cnt (+ input-id cnt)]))
-  (values input-id region^)
-)
-(provide rvsdg-raw/alloc-input-ids)
-
-(define (rvsdg-raw/alloc-output-ids region [cnt 1])
-  (define output-id (OutputId (Region-output-cnt region)))
-  (define region^ (struct-copy Region region [output-cnt (+ output-id cnt)]))
-  (values output-id region^)
-)
-(provide rvsdg-raw/alloc-output-ids)
-
-(define (rvsdg-raw/alloc-input-output-ids region input-cnt output-cnt)
-  (define-values (input-id region^) (rvsdg-raw/alloc-input-ids region input-cnt))
-  (define-values (output-id region^^) (rvsdg-raw/alloc-output-ids region^ output-cnt))
-  (values input-id output-id region^^)
-)
-(provide rvsdg-raw/alloc-input-output-ids)
 
 (define (rvsdg-raw/wire-input-reconnect region wire-id new-input-id old-input-id)
   (define region^ (rvsdg-raw/wire-input-disconnect region wire-id old-input-id))

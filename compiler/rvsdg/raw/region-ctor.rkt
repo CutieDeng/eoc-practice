@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require "core-def.rkt")
+(require "../core-def.rkt")
+
 (require cutie-ftree)
 
 (define (((abstract-compare-generator compare) map) lhs rhs)
