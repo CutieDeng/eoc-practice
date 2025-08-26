@@ -3,13 +3,12 @@
 (require racket/match racket/dict)
 (require cutie-ftree)
 
-(require "core-def.rkt")
-(require "ctor.rkt")
-(require "connect-raw.rkt")
-; (require "node-ctor-raw.rkt")
+(require "../core-def.rkt")
+(require "region-ctor.rkt")
+(require "connect.rkt")
+(require "wire.rkt")
 (require "node-ctor.rkt")
-(require "input-raw.rkt")
-(require "output-raw.rkt")
+(require "../node-ctor.rkt")
 
 (define (rvsdg-raw/split-wires-with-node region wires inputs outputs)
   (define wires-length (ral-length wires))

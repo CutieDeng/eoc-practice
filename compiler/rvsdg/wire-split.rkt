@@ -4,12 +4,7 @@
 (require cutie-ftree)
 
 (require "core-def.rkt")
-(require "ctor.rkt")
-(require "connect-raw.rkt")
-(require "node-ctor.rkt")
-(require "input-raw.rkt")
-(require "output-raw.rkt")
-(require "advanced-connect-raw.rkt")
+(require "raw/wire-split.rkt")
 
 ; wires: ral
 (define (rvsdg/split-wires-with-node region wires)
