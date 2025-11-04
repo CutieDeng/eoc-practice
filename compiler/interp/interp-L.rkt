@@ -97,6 +97,24 @@
   (define op-> (match-lambda** [((and (? fixnum?) v1) (and (? fixnum?) v2)) (> v1 v2)]))
   (define op->= (match-lambda** [((and (? fixnum?) v1) (and (? fixnum?) v2)) (>= v1 v2)]))
 
+  (define (op-vectorof-ref v i)
+    (cond
+      [(< i (vector-length v)) (vector-ref v i)]
+      [else (error 'trapped "vectorof-ref: index ~a out of bounds~nin ~a" i v)]
+    )
+  )
+
+  (define (op-vectorof-set! v i e)
+    (cond
+      [(< i (vector-length v)) (vector-set! v i e)]
+      [else (error 'trapped "vectorof-set!: index ~a out of bounds~nin ~a" i v)]
+    )
+  )
+
+  (define (op-exit)
+    (error 'interp "exiting")
+  )
+
   (define/public (interp-op op) (match op
     ['+ fx+]
     ['- fx-]
@@ -111,6 +129,12 @@
     ['vector-length vector-length]
     ['vector-ref vector-ref]
     ['vector-set! vector-set!]
+    ['make-vector make-vector]
+    ['vectorof-length vector-length]
+    ['vectorof-ref op-vectorof-ref]
+    ['vectorof-set! op-vectorof-set!]
+    ['* fx*]
+    ['exit op-exit]
     [_ (error 'interp-op "unknown op: ~a" op)]
   ))
 
