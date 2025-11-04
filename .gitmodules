@@ -1,0 +1,3 @@
+[submodule "cutie-ftree"]
+	path = cutie-ftree
+	url = git@github.com:CutieDeng/cutie-ftree.git
