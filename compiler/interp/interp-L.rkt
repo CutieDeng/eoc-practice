@@ -30,6 +30,10 @@
     (assert-boolean! (interp-exp e)))
 
   (define/public (interp-exp e) (match e
+    [(HasType v _tt) (interp-exp/wrap v)]
+    [_ (interp-exp/wrap e)]))
+
+  (define/private (interp-exp/wrap e) (match e
     [(Var x) (unbox (dict-ref (env) x))]
     [(Var:r x) (unbox (dict-ref (env) x))]
     [(Let x e body)
@@ -85,6 +89,7 @@
     [((and (? fixnum?) v1) (and (? fixnum?) v2)) (eq? v1 v2)]
     [((and (? boolean?) v1) (and (? boolean?) v2)) (eq? v1 v2)]
     [((and (? vector?) v1) (and (? vector?) v2)) (eq? v1 v2)]
+    [((and (? void?) v1) (and (? void?) v2)) (eq? v1 v2)]
   ))
 
   (define op-< (match-lambda** [((and (? fixnum?) v1) (and (? fixnum?) v2)) (< v1 v2)]))
@@ -102,6 +107,10 @@
     ['<= op-<=]
     ['> op->]
     ['>= op->=]
+    ['vector vector]
+    ['vector-length vector-length]
+    ['vector-ref vector-ref]
+    ['vector-set! vector-set!]
     [_ (error 'interp-op "unknown op: ~a" op)]
   ))
 
