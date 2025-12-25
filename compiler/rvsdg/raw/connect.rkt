@@ -1,7 +1,14 @@
 #lang racket/base
 
-(require racket/match racket/dict)
+;; ============================================================
+;; Raw Layer: 边的连接操作
+;; ============================================================
+;;
+;; 提供边 (Wire) 与端口 (Input/Output) 之间的连接操作
+;; 这些是不安全的低级操作，不进行存在性检查
+;; ============================================================
 
+(require racket/match racket/dict)
 (require "../core-def.rkt")
 
 (define (rvsdg-raw/wire-input-connect region wire-id input-id)
