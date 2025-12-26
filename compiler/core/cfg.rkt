@@ -16,11 +16,15 @@
 ;; 变量 ID（值流形式中的变量）
 (struct VarId (id) #:prefab)
 
-;; 指令索引（块内）
+;; 指令 ID（全局唯一，稳定标识符）
+(struct InsnId (id) #:prefab)
+
+;; 指令索引（块内，用于遍历，非稳定）
 (struct InsnIdx (id) #:prefab)
 
 (provide (struct-out BlockId))
 (provide (struct-out VarId))
+(provide (struct-out InsnId))
 (provide (struct-out InsnIdx))
 
 ;; === ID 操作 ===
@@ -31,7 +35,10 @@
 (define (var-id-offset base n)
   (VarId (+ (VarId-id base) n)))
 
-(provide block-id-offset var-id-offset)
+(define (insn-id-offset base n)
+  (InsnId (+ (InsnId-id base) n)))
+
+(provide block-id-offset var-id-offset insn-id-offset)
 
 ;; === CFG 结构 ===
 
@@ -39,6 +46,7 @@
 (struct Cfg (
   block-cnt       ; 下一个可分配的 BlockId (整数)
   var-cnt         ; 下一个可分配的 VarId (整数)
+  insn-cnt        ; 下一个可分配的 InsnId (整数)
   entry           ; BlockId - 入口块
   blocks          ; ordl: BlockId → CfgBlock
   info            ; ordl: symbol → any
@@ -59,11 +67,15 @@
 ;; === 值流指令 ===
 
 ;; 值流指令（栈消除后的形式）
+;; id 字段可选：
+;;   - #f: 未分配 ID（轻量模式）
+;;   - InsnId: 已分配稳定 ID（用于 SSA 分析）
 (struct VfInsn (
   op              ; Symbol - 操作符
-  inputs          ; (Listof VarId) - 输入变量
+  inputs          ; (Listof Any) - 输入（可含 VarId 和其他数据）
   outputs         ; (Listof VarId) - 输出变量
   info            ; 附加信息（可选）
+  id              ; InsnId or #f - 稳定标识符（可选）
 ) #:prefab)
 
 (provide (struct-out VfInsn))
@@ -129,10 +141,22 @@
 
 ;; === info 键名约定 ===
 ;;
-;; 'var->def      : ordl: VarId → (cons BlockId InsnIdx)  ; 变量定义位置
+;; --- 基础映射 ---
+;; 'insn->block   : ordl: InsnId → BlockId                ; 指令所属块（双向映射之一）
+;; 'block->insns  : ordl: BlockId → (Listof InsnId)       ; 块内指令（双向映射之一）
+;;
+;; --- Use-Def 链（可选，按需构建）---
+;; 'var->def      : ordl: VarId → InsnId                  ; 变量定义指令
+;; 'var->uses     : ordl: VarId → (Listof (cons InsnId ArgIdx))  ; 变量使用位置
+;;
+;; --- 类型信息 ---
 ;; 'var->type     : ordl: VarId → Type                    ; 变量类型
+;;
+;; --- 控制流分析 ---
 ;; 'block->preds  : ordl: BlockId → (Listof BlockId)      ; 前驱块
 ;; 'block->succs  : ordl: BlockId → (Listof BlockId)      ; 后继块
 ;; 'block->dom    : ordl: BlockId → BlockId               ; 直接支配者
 ;; 'block->idom   : ordl: BlockId → (Listof BlockId)      ; 被支配者
-;; 'source-map   : ordl: (cons BlockId InsnIdx) → SourceLoc  ; 源码映射
+;;
+;; --- 调试信息 ---
+;; 'source-map    : ordl: InsnId → SourceLoc              ; 源码位置映射

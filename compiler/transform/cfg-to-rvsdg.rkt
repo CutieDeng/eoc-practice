@@ -219,7 +219,7 @@
 ;; 处理值流指令 → Simple 节点
 (define (process-vf-insn insn region var-map)
   (match insn
-    [(VfInsn op inputs outputs info)
+    [(VfInsn op inputs outputs info _id)
      ;; 查找输入对应的 OutputId
      (define input-ports
        (for/list ([v inputs] #:when (VarId? v))

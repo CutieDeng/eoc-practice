@@ -316,7 +316,7 @@
     ;; === 对象创建 ===
     ['NEW
      (define-values (vid cfg^) (cfg-alloc-var-id cfg))
-     (define insn^ (VfInsn 'new (list (first operands)) (list vid) #f))
+     (define insn^ (VfInsn 'new (list (first operands)) (list vid) #f #f))
      (define cfg^^ (cfg-block-append-insn cfg^ block-id insn^))
      (values cfg^^ block-id (cons vid stack))]
 
@@ -324,19 +324,19 @@
     ['NEWARRAY
      (define-values (vid cfg^) (cfg-alloc-var-id cfg))
      (define size (car stack))
-     (define insn^ (VfInsn 'newarray (list size (first operands)) (list vid) #f))
+     (define insn^ (VfInsn 'newarray (list size (first operands)) (list vid) #f #f))
      (define cfg^^ (cfg-block-append-insn cfg^ block-id insn^))
      (values cfg^^ block-id (cons vid (cdr stack)))]
     ['ANEWARRAY
      (define-values (vid cfg^) (cfg-alloc-var-id cfg))
      (define size (car stack))
-     (define insn^ (VfInsn 'anewarray (list size (first operands)) (list vid) #f))
+     (define insn^ (VfInsn 'anewarray (list size (first operands)) (list vid) #f #f))
      (define cfg^^ (cfg-block-append-insn cfg^ block-id insn^))
      (values cfg^^ block-id (cons vid (cdr stack)))]
     ['ARRAYLENGTH
      (define-values (vid cfg^) (cfg-alloc-var-id cfg))
      (define arr (car stack))
-     (define insn^ (VfInsn 'arraylength (list arr) (list vid) #f))
+     (define insn^ (VfInsn 'arraylength (list arr) (list vid) #f #f))
      (define cfg^^ (cfg-block-append-insn cfg^ block-id insn^))
      (values cfg^^ block-id (cons vid (cdr stack)))]
     [(or 'IALOAD 'LALOAD 'FALOAD 'DALOAD 'AALOAD 'BALOAD 'CALOAD 'SALOAD)
@@ -366,7 +366,7 @@
     ['INSTANCEOF
      (define-values (vid cfg^) (cfg-alloc-var-id cfg))
      (define obj (car stack))
-     (define insn^ (VfInsn 'instanceof (list obj (first operands)) (list vid) #f))
+     (define insn^ (VfInsn 'instanceof (list obj (first operands)) (list vid) #f #f))
      (define cfg^^ (cfg-block-append-insn cfg^ block-id insn^))
      (values cfg^^ block-id (cons vid (cdr stack)))]
 
@@ -379,13 +379,13 @@
 
 (define (push-const cfg block-id stack value)
   (define-values (vid cfg^) (cfg-alloc-var-id cfg))
-  (define insn (VfInsn 'const (list value) (list vid) #f))
+  (define insn (VfInsn 'const (list value) (list vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
   (values cfg^^ block-id (cons vid stack)))
 
 (define (load-local cfg block-id stack index)
   (define-values (vid cfg^) (cfg-alloc-var-id cfg))
-  (define insn (VfInsn 'load-local (list index) (list vid) #f))
+  (define insn (VfInsn 'load-local (list index) (list vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
   (values cfg^^ block-id (cons vid stack)))
 
@@ -394,12 +394,12 @@
   (if (null? stack)
       (let-values ([(vid cfg^) (cfg-alloc-var-id cfg)])
         ;; 创建一个占位变量表示异常处理器的隐式参数
-        (define insn (VfInsn 'store-local (list vid index) '() #f))
+        (define insn (VfInsn 'store-local (list vid index) '() #f #f))
         (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
         (values cfg^^ block-id '()))
       (let ()
         (define val (car stack))
-        (define insn (VfInsn 'store-local (list val index) '() #f))
+        (define insn (VfInsn 'store-local (list val index) '() #f #f))
         (define cfg^ (cfg-block-append-insn cfg block-id insn))
         (values cfg^ block-id (cdr stack)))))
 
@@ -407,14 +407,14 @@
   (define-values (vid cfg^) (cfg-alloc-var-id cfg))
   (define v2 (car stack))
   (define v1 (cadr stack))
-  (define insn (VfInsn op (list v1 v2) (list vid) #f))
+  (define insn (VfInsn op (list v1 v2) (list vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
   (values cfg^^ block-id (cons vid (cddr stack))))
 
 (define (unary-op cfg block-id stack op)
   (define-values (vid cfg^) (cfg-alloc-var-id cfg))
   (define v (car stack))
-  (define insn (VfInsn op (list v) (list vid) #f))
+  (define insn (VfInsn op (list v) (list vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
   (values cfg^^ block-id (cons vid (cdr stack))))
 
@@ -429,7 +429,7 @@
                    [(IFGE) 'ge0]
                    [(IFGT) 'gt0]
                    [(IFLE) 'le0]))
-  (define cmp-insn (VfInsn cmp-op (list val) (list cmp-vid) #f))
+  (define cmp-insn (VfInsn cmp-op (list val) (list cmp-vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id cmp-insn))
 
   ;; 创建分支终结器
@@ -451,7 +451,7 @@
                    [(IF_ICMPGE) 'ge]
                    [(IF_ICMPGT) 'gt]
                    [(IF_ICMPLE) 'le]))
-  (define cmp-insn (VfInsn cmp-op (list v1 v2) (list cmp-vid) #f))
+  (define cmp-insn (VfInsn cmp-op (list v1 v2) (list cmp-vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id cmp-insn))
 
   (define then-block (dict-ref label->block-id target-label))
@@ -477,13 +477,13 @@
          (let-values ([(vid cfg^) (cfg-alloc-var-id cfg)])
            (define insn (VfInsn 'invoke
                           (list opcode owner name desc (reverse args))
-                          (list vid) #f))
+                          (list vid) #f #f))
            (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
            (values cfg^^ block-id (cons vid rest-stack)))
          (let ()
            (define insn (VfInsn 'invoke
                           (list opcode owner name desc (reverse args))
-                          '() #f))
+                          '() #f #f))
            (define cfg^ (cfg-block-append-insn cfg block-id insn))
            (values cfg^ block-id rest-stack)))]))
 
@@ -493,12 +493,12 @@
      (define-values (vid cfg^) (cfg-alloc-var-id cfg))
      (if (eq? opcode 'GETSTATIC)
          (let ()
-           (define insn (VfInsn 'get-static (list owner name desc) (list vid) #f))
+           (define insn (VfInsn 'get-static (list owner name desc) (list vid) #f #f))
            (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
            (values cfg^^ block-id (cons vid stack)))
          (let ()
            (define obj (car stack))
-           (define insn (VfInsn 'get-field (list obj owner name desc) (list vid) #f))
+           (define insn (VfInsn 'get-field (list obj owner name desc) (list vid) #f #f))
            (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
            (values cfg^^ block-id (cons vid (cdr stack)))))]))
 
@@ -508,13 +508,13 @@
      (if (eq? opcode 'PUTSTATIC)
          (let ()
            (define val (car stack))
-           (define insn (VfInsn 'put-static (list val owner name desc) '() #f))
+           (define insn (VfInsn 'put-static (list val owner name desc) '() #f #f))
            (define cfg^ (cfg-block-append-insn cfg block-id insn))
            (values cfg^ block-id (cdr stack)))
          (let ()
            (define val (car stack))
            (define obj (cadr stack))
-           (define insn (VfInsn 'put-field (list obj val owner name desc) '() #f))
+           (define insn (VfInsn 'put-field (list obj val owner name desc) '() #f #f))
            (define cfg^ (cfg-block-append-insn cfg block-id insn))
            (values cfg^ block-id (cddr stack))))]))
 
@@ -522,7 +522,7 @@
   (define-values (vid cfg^) (cfg-alloc-var-id cfg))
   (define idx (car stack))
   (define arr (cadr stack))
-  (define insn (VfInsn 'aload (list arr idx) (list vid) #f))
+  (define insn (VfInsn 'aload (list arr idx) (list vid) #f #f))
   (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
   (values cfg^^ block-id (cons vid (cddr stack))))
 
@@ -530,7 +530,7 @@
   (define val (car stack))
   (define idx (cadr stack))
   (define arr (caddr stack))
-  (define insn (VfInsn 'astore (list arr idx val) '() #f))
+  (define insn (VfInsn 'astore (list arr idx val) '() #f #f))
   (define cfg^ (cfg-block-append-insn cfg block-id insn))
   (values cfg^ block-id (cdddr stack)))
 

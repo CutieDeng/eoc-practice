@@ -16,7 +16,10 @@
 (define (var-id-compare a b)
   (integer-compare (VarId-id a) (VarId-id b)))
 
-(provide block-id-compare var-id-compare)
+(define (insn-id-compare a b)
+  (integer-compare (InsnId-id a) (InsnId-id b)))
+
+(provide block-id-compare var-id-compare insn-id-compare)
 
 ;; === 空 CFG ===
 
@@ -24,6 +27,7 @@
   (Cfg
     0                                      ; block-cnt
     0                                      ; var-cnt
+    0                                      ; insn-cnt
     #f                                     ; entry (未设置)
     (ordl-make-empty block-id-compare)    ; blocks
     (ordl-make-empty symbol-compare)))    ; info
@@ -52,8 +56,19 @@
   (define cfg^ (struct-copy Cfg cfg [var-cnt (+ n (Cfg-var-cnt cfg))]))
   (values base-id cfg^))
 
+(define (cfg-alloc-insn-id cfg)
+  (define id (InsnId (Cfg-insn-cnt cfg)))
+  (define cfg^ (struct-copy Cfg cfg [insn-cnt (+ 1 (Cfg-insn-cnt cfg))]))
+  (values id cfg^))
+
+(define (cfg-alloc-insn-ids cfg n)
+  (define base-id (InsnId (Cfg-insn-cnt cfg)))
+  (define cfg^ (struct-copy Cfg cfg [insn-cnt (+ n (Cfg-insn-cnt cfg))]))
+  (values base-id cfg^))
+
 (provide cfg-alloc-block-id cfg-alloc-block-ids)
 (provide cfg-alloc-var-id cfg-alloc-var-ids)
+(provide cfg-alloc-insn-id cfg-alloc-insn-ids)
 
 ;; === 块操作 ===
 
