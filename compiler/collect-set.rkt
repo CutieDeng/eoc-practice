@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "core/integer-set.rkt")
 (require "program-default.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define pass-collect-set! 
   (class pass-program

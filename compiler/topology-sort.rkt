@@ -1,6 +1,6 @@
 #lang racket
 
-(require cutie-ftree)
+(require "ftree.rkt")
 (require "graph-core.rkt")
 (require "core/integer-set.rkt")
 

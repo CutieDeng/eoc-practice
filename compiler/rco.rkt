@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "control-flow-graph/var-id-reassign.rkt")
 (require "program-default.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define pass-rco
   (class (pass-var-id-reassign-mixin pass-program #f)

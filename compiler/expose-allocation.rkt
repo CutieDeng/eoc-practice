@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "program-default.rkt")
 (require "control-flow-graph/var-id-reassign.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define pass-expose-allocation
   (class (pass-var-id-reassign-mixin pass-program #f)

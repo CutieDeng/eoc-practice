@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/match racket/dict)
-(require cutie-ftree)
+(require "../../ftree.rkt")
 
 (require "../core-def.rkt")
 (require "region-ctor.rkt")

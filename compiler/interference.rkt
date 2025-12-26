@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "graph-core.rkt")
 (require "core/integer-set.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define (interference-cmp-fn lhs rhs)
   (match* (lhs rhs)

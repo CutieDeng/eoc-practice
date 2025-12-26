@@ -2,7 +2,7 @@
 
 (require racket/match racket/dict)
 
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (struct Graph (cmp-fn out in))
 

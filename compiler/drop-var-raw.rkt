@@ -4,7 +4,7 @@
 (require "program-default.rkt" "control-flow-graph/var-id-reassign.rkt")
 
 (require racket/class racket/match racket/dict)
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define pass-var-new-name
   (class (pass-var-id-reassign-mixin pass-program 0)

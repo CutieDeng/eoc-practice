@@ -5,7 +5,7 @@
 (require racket/dict)
 (require "../core/core-types.rkt")
 
-(require cutie-ftree)
+(require "../ftree.rkt")
 
 (define interp-L-class (class object% (super-new)
 

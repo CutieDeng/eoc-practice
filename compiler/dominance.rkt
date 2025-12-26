@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt" "core/utilities.rkt" "core/integer-set.rkt")
 (require "graph-core.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (require "analyze-dataflow.rkt")
 

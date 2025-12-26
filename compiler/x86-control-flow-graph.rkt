@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "core/utilities.rkt")
 (require "graph-core.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define (block-tos block)
   (match block

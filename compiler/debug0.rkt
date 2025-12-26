@@ -19,7 +19,7 @@
 
 (provide debug-graph)
 
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define (debug-con-seq s d)
   (printf "(\n")

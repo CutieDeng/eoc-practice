@@ -3,7 +3,7 @@
 (require "core/utilities.rkt" "core/core-types.rkt")
 (require "core/integer-set.rkt")
 (require "graph-core.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define connect-component
   (class object%

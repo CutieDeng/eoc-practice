@@ -9,7 +9,7 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict racket/set)
-(require cutie-ftree)
+(require "../ftree.rkt")
 (require "../core/jvm.rkt")
 (require "../core/cfg.rkt")
 (require "../cfg/raw.rkt")

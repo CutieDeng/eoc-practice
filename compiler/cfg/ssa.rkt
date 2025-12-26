@@ -9,7 +9,7 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict racket/set)
-(require (except-in cutie-ftree symbol-compare))
+(require (except-in "../ftree.rkt" symbol-compare))
 (require "../core/cfg.rkt")
 (require "raw.rkt")  ; provides block-id-compare, var-id-compare, insn-id-compare
 

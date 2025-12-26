@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt")
 (require "program-default.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define pass-var-new-name
   (class pass-program

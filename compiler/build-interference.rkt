@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt")
 (require "graph-core.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (require "x86abi.rkt")
 (require "interference.rkt")

@@ -1,7 +1,7 @@
 #lang racket
 
 (require "../utilities.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define type-info
   (class object%

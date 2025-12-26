@@ -4,7 +4,7 @@
 (require "core/utilities.rkt")
 (require "graph-core.rkt")
 (require "core/integer-set.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (require "analyze-dataflow.rkt")
 (require "x86instr.rkt")

@@ -1,7 +1,7 @@
 #lang racket
 
 (require "core/core-types.rkt" "core/utilities.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define pass-patch-instructions
   (class object%

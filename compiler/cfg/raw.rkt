@@ -5,7 +5,7 @@
 ;; ============================================================
 
 (require racket/dict)
-(require cutie-ftree)
+(require "../ftree.rkt")
 (require "../core/cfg.rkt")
 
 ;; === 比较函数 ===

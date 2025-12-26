@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/contract/base)
-(require cutie-ftree)
+(require "../ftree.rkt")
 
 (struct Value (val) #:transparent)
 (provide (struct-out Value))

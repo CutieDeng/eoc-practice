@@ -11,7 +11,7 @@
 (require racket/vector)
 (require racket/file)
 
-(require cutie-ftree)
+(require "../ftree.rkt")
 
 (define src-primitives 
   '(

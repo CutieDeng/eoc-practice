@@ -2,7 +2,7 @@
 
 (require "../utilities.rkt")
 (require "graph-core.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define x86-control-flow-graph
   (class object%

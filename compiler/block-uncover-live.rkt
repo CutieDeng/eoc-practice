@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt")
 (require "core/integer-set.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (require "x86instr.rkt")
 

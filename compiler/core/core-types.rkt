@@ -3,7 +3,7 @@
 (require racket/contract/base)
 (require "p-types.rkt")
 
-(require cutie-ftree)
+(require "../ftree.rkt")
 
 (struct Assign (lhs rhs) #:transparent)
 (provide (struct-out Assign))

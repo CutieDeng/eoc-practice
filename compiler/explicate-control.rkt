@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt")
 (require "control-flow-graph/var-id-reassign.rkt")
-(require cutie-ftree)
+(require "ftree.rkt")
 
 (define (ral-single stmt)
   (ral-consl (ral-empty) stmt)

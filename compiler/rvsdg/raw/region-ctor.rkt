@@ -6,7 +6,7 @@
 
 (require racket/dict)
 (require "../core-def.rkt")
-(require cutie-ftree)
+(require "../../ftree.rkt")
 
 ;; === 比较函数生成器 ===
 
