@@ -12,6 +12,24 @@
 (require racket/file)
 (require "../../core/jvm.rkt")
 
+;; === Java 工具输出的 prefab 结构 ===
+;; 这些结构必须与 Java 端输出格式完全匹配
+
+(struct Class (name access fields methods annotations inner-classes) #:prefab)
+(struct Field (name desc access value) #:prefab)
+(struct Method (name desc access exceptions local-vars insns line-infos) #:prefab)
+(struct Insn (opcode args) #:prefab)
+(struct Line-Info (line label) #:prefab)
+(struct InnerClass (name outer inner access) #:prefab)
+(struct Annotation (name values) #:prefab)
+
+(provide (struct-out Class))
+(provide (struct-out Field))
+(provide (struct-out Method))
+(provide (struct-out Insn))
+(provide (struct-out Line-Info))
+(provide (struct-out InnerClass))
+
 ;; === 读取序列化文件 ===
 
 (define (read-jvm-class-file path)
@@ -20,112 +38,114 @@
 
 (provide read-jvm-class-file)
 
-;; === 从 datum 解析 JvmClass ===
-
-;; 原始格式 (来自 JvmBytecodeWrapper):
-;; (Class name access fields methods annotations inner-classes)
+;; === 从 prefab 解析 JvmClass ===
 
 (define (parse-jvm-class datum)
-  (match datum
-    [`(Class ,name ,access ,fields ,methods ,annotations ,inner-classes)
-      (JvmClass
-        (JvmVersion 52 0)  ; 默认 Java 8，实际版本需从属性获取
-        name
-        access
-        #f                 ; super-class (需从属性获取)
-        '()                ; interfaces
-        (map parse-jvm-field fields)
-        (map parse-jvm-method methods)
-        '()                ; attributes
-        (map parse-jvm-annotation annotations)
-        (map parse-jvm-inner-class inner-classes))]
-    [_ (error 'parse-jvm-class "Invalid class datum: ~a" datum)]))
+  (JvmClass
+    (JvmVersion 52 0)  ; 默认 Java 8
+    (Class-name datum)
+    (parse-access-flags (Class-access datum))
+    #f                 ; super-class (需从属性获取)
+    '()                ; interfaces
+    (map parse-jvm-field (Class-fields datum))
+    (map parse-jvm-method (Class-methods datum))
+    '()                ; attributes
+    '()                ; annotations
+    (map parse-jvm-inner-class (Class-inner-classes datum))))
 
 (provide parse-jvm-class)
+
+;; === 解析访问标志 ===
+
+(define (parse-access-flags flags)
+  (define flag-map
+    '((PUBLIC . #x0001)
+      (PRIVATE . #x0002)
+      (PROTECTED . #x0004)
+      (STATIC . #x0008)
+      (FINAL . #x0010)
+      (SUPER . #x0020)
+      (SYNCHRONIZED . #x0020)
+      (VOLATILE . #x0040)
+      (BRIDGE . #x0040)
+      (TRANSIENT . #x0080)
+      (VARARGS . #x0080)
+      (NATIVE . #x0100)
+      (INTERFACE . #x0200)
+      (ABSTRACT . #x0400)
+      (STRICT . #x0800)
+      (SYNTHETIC . #x1000)
+      (ANNOTATION . #x2000)
+      (ENUM . #x4000)
+      (MODULE . #x8000)
+      (OPEN . #x0020)
+      (TRANSITIVE . #x0020)))
+  (for/fold ([result 0])
+            ([flag flags])
+    (define pair (assq flag flag-map))
+    (if pair
+        (bitwise-ior result (cdr pair))
+        result)))
 
 ;; === 解析 JvmField ===
 
 (define (parse-jvm-field datum)
-  (match datum
-    [`(Field ,name ,descriptor ,access ,value)
-      (JvmField name descriptor access value '() '())]
-    [_ (error 'parse-jvm-field "Invalid field datum: ~a" datum)]))
+  (JvmField
+    (Field-name datum)
+    (Field-desc datum)
+    (parse-access-flags (Field-access datum))
+    (Field-value datum)
+    '()    ; attributes
+    '()))  ; annotations
 
 ;; === 解析 JvmMethod ===
 
 (define (parse-jvm-method datum)
-  (match datum
-    [`(Method ,name ,descriptor ,access ,exceptions ,local-vars ,insns ,line-infos)
-      (JvmMethod
-        name
-        descriptor
-        access
-        0                  ; max-stack (需计算或从属性获取)
-        0                  ; max-locals (需计算或从属性获取)
-        (map parse-jvm-insn insns)
-        '()                ; exception-table (需从 TRY-CATCH-BLOCK 指令提取)
-        (map parse-jvm-local-var local-vars)
-        (map parse-jvm-line-number line-infos)
-        '()                ; attributes
-        '()                ; annotations
-        '())]              ; param-annots
-    [_ (error 'parse-jvm-method "Invalid method datum: ~a" datum)]))
+  (JvmMethod
+    (Method-name datum)
+    (Method-desc datum)
+    (parse-access-flags (Method-access datum))
+    0                  ; max-stack
+    0                  ; max-locals
+    (map parse-jvm-insn (Method-insns datum))
+    (extract-exception-entries (Method-insns datum))
+    '()                ; local-vars
+    (map parse-jvm-line-number (Method-line-infos datum))
+    '()                ; attributes
+    '()                ; annotations
+    '()))              ; param-annots
 
 ;; === 解析 JvmInsn ===
 
 (define (parse-jvm-insn datum)
-  (match datum
-    [`(Insn ,opcode ,operands)
-      (JvmInsn opcode operands)]
-    [_ (error 'parse-jvm-insn "Invalid insn datum: ~a" datum)]))
-
-;; === 解析 JvmLocalVar ===
-
-(define (parse-jvm-local-var datum)
-  (match datum
-    [`#(,name ,descriptor ,start ,end ,index)
-      (JvmLocalVar name descriptor #f start end index)]
-    [(list name descriptor start end index)
-      (JvmLocalVar name descriptor #f start end index)]
-    [_ (error 'parse-jvm-local-var "Invalid local-var datum: ~a" datum)]))
+  (JvmInsn (Insn-opcode datum) (Insn-args datum)))
 
 ;; === 解析 JvmLineNumber ===
 
 (define (parse-jvm-line-number datum)
-  (match datum
-    [`(Line-Info ,line ,label)
-      (JvmLineNumber line label)]
-    [_ (error 'parse-jvm-line-number "Invalid line-number datum: ~a" datum)]))
-
-;; === 解析 JvmAnnotation ===
-
-(define (parse-jvm-annotation datum)
-  (match datum
-    [`(Annotation ,name ,values)
-      (JvmAnnotation name values #t)]
-    [_ (error 'parse-jvm-annotation "Invalid annotation datum: ~a" datum)]))
+  (JvmLineNumber (Line-Info-line datum) (Line-Info-label datum)))
 
 ;; === 解析 JvmInnerClass ===
 
 (define (parse-jvm-inner-class datum)
-  (match datum
-    [`(InnerClass ,name ,access ,outer-name ,inner-name)
-      (JvmInnerClass name outer-name inner-name access)]
-    [_ (error 'parse-jvm-inner-class "Invalid inner-class datum: ~a" datum)]))
+  (JvmInnerClass
+    (InnerClass-name datum)
+    (InnerClass-outer datum)
+    (InnerClass-inner datum)
+    (parse-access-flags (InnerClass-access datum))))
 
 ;; === 提取异常表 ===
 
-;; 从指令序列中提取 TRY-CATCH-BLOCK 伪指令
-(define (extract-exception-table insns)
+(define (extract-exception-entries insns)
   (for/list ([insn insns]
-             #:when (and (JvmInsn? insn)
-                        (eq? (JvmInsn-opcode insn) 'TRY-CATCH-BLOCK)))
-    (match (JvmInsn-operands insn)
+             #:when (and (Insn? insn)
+                        (eq? (Insn-opcode insn) 'TRY-CATCH-BLOCK)))
+    (match (Insn-args insn)
       [`(,start ,end ,handler ,type)
         (JvmExceptionEntry start end handler type)]
-      [_ (error 'extract-exception-table "Invalid try-catch datum")])))
+      [_ #f])))
 
-(provide extract-exception-table)
+(provide extract-exception-entries)
 
 ;; === 过滤掉伪指令 ===
 
@@ -137,15 +157,3 @@
           insns))
 
 (provide filter-real-insns)
-
-;; === 提取标签 ===
-
-(define (extract-labels insns)
-  (for/list ([insn insns]
-             #:when (and (JvmInsn? insn)
-                        (eq? (JvmInsn-opcode insn) 'CUTIEDENG-LABEL)))
-    (match (JvmInsn-operands insn)
-      [`(,label) label]
-      [_ (error 'extract-labels "Invalid label datum")])))
-
-(provide extract-labels)

@@ -9,6 +9,9 @@
 
 (require racket/system)
 (require racket/path)
+(require racket/file)
+(require racket/dict)
+(require racket/string)
 
 ;; === 配置 ===
 
@@ -22,6 +25,16 @@
 (define src-dir "src")
 
 (define compile-files '(
+  "com/cutiedeng/util/StringUtil.java"
+  "com/cutiedeng/util/AccessUtil.java"
+  "com/cutiedeng/util/AsmOpcodeUtil.java"
+  "com/cutiedeng/info/DatumInsn.java"
+  "com/cutiedeng/info/DatumField.java"
+  "com/cutiedeng/info/DatumMethod.java"
+  "com/cutiedeng/info/DatumClass.java"
+  "com/cutiedeng/info/DatumDebugLineInfo.java"
+  "com/cutiedeng/info/DatumAnnotation.java"
+  "com/cutiedeng/info/DatumInnerClass.java"
   "com/cutiedeng/ClassTransform.java"
 ))
 
@@ -66,17 +79,18 @@
 
   (make-directory* out-path)
 
+  ;; Classpath: libs/* (for jars) and src (for other sources)
   (define classpath
-    (string-join
-      (list (path->string libs-path) (path->string src-path))
-      ":"))
+    (string-append
+      (path->string libs-path) "/*:"
+      (path->string src-path)))
 
   (for/and ([src-file compile-files])
     (define full-path (build-path src-path src-file))
     (eprintf "Compiling ~a...~n" src-file)
     (system* (find-executable-path "javac")
              "-d" (path->string out-path)
-             "-cp" (string-append classpath "/*")
+             "-cp" classpath
              (path->string full-path))))
 
 (provide compile-java)

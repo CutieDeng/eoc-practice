@@ -180,16 +180,19 @@ public class ClassTransform {
         ArrayList<Object> args = new ArrayList();
         args.add((Long) value);
         DatumInsn i = DatumInsn.createOpcode("LDC", args);
+        self.insns.add(i);
       }
       void visitLdcInsnDouble(double value) {
         ArrayList<Object> args = new ArrayList();
         args.add((Double) value);
         DatumInsn i = DatumInsn.createOpcode("LDC", args);
+        self.insns.add(i);
       }
       void visitLdcInsnString(String value) {
         ArrayList<Object> args = new ArrayList();
         args.add(value);
         DatumInsn i = DatumInsn.createOpcode("LDC", args);
+        self.insns.add(i);
       }
       @Override
       public void visitLdcInsn(Object value) {

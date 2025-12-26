@@ -28,13 +28,21 @@
   (define cfg1
     (populate-blocks insns label->block-id block-boundaries cfg0))
 
-  ;; 设置入口
+  ;; 设置入口：找到第一个标签对应的块
+  (define first-label (find-first-label insns))
   (define entry-block
-    (if (null? (dict-keys label->block-id))
-        (BlockId 0)
-        (first-block-id block-boundaries)))
+    (if first-label
+        (dict-ref label->block-id first-label (BlockId 0))
+        (BlockId 0)))
 
   (cfg-set-entry cfg1 entry-block))
+
+;; 找到第一个标签
+(define (find-first-label insns)
+  (for/first ([insn insns]
+              #:when (and (JvmInsn? insn)
+                         (eq? (JvmInsn-opcode insn) 'CUTIEDENG-LABEL)))
+    (car (JvmInsn-operands insn))))
 
 (provide jvm-method->cfg)
 
@@ -382,10 +390,18 @@
   (values cfg^^ block-id (cons vid stack)))
 
 (define (store-local cfg block-id stack index)
-  (define val (car stack))
-  (define insn (VfInsn 'store-local (list val index) '() #f))
-  (define cfg^ (cfg-block-append-insn cfg block-id insn))
-  (values cfg^ block-id (cdr stack)))
+  ;; 处理空栈情况（例如异常处理器入口）
+  (if (null? stack)
+      (let-values ([(vid cfg^) (cfg-alloc-var-id cfg)])
+        ;; 创建一个占位变量表示异常处理器的隐式参数
+        (define insn (VfInsn 'store-local (list vid index) '() #f))
+        (define cfg^^ (cfg-block-append-insn cfg^ block-id insn))
+        (values cfg^^ block-id '()))
+      (let ()
+        (define val (car stack))
+        (define insn (VfInsn 'store-local (list val index) '() #f))
+        (define cfg^ (cfg-block-append-insn cfg block-id insn))
+        (values cfg^ block-id (cdr stack)))))
 
 (define (binary-op cfg block-id stack op)
   (define-values (vid cfg^) (cfg-alloc-var-id cfg))
@@ -583,7 +599,12 @@
 (define (type-descriptor-length str)
   (case (string-ref str 0)
     [(#\B #\C #\D #\F #\I #\J #\S #\Z) 1]
-    [(#\L) (+ 1 (string-length (car (regexp-match #rx"[^;]*;" str))))]
+    [(#\L)
+     ;; L...;  格式，找到 ; 的位置
+     (define semi-pos (for/first ([i (in-range (string-length str))]
+                                   #:when (char=? (string-ref str i) #\;))
+                        i))
+     (+ 1 semi-pos)]
     [(#\[) (+ 1 (type-descriptor-length (substring str 1)))]
     [else 1]))
 

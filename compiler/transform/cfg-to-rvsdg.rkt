@@ -186,29 +186,29 @@
 ;; 处理单个基本块
 (define (process-block cfg block-id region var-map dom-info loops)
   (define block (cfg-get-block cfg block-id))
-  (unless block
-    (values region var-map))
+  (if (not block)
+      (values region var-map)
+      (let ()
+        ;; 处理 φ 节点
+        (define-values (region1 var-map1)
+          (for/fold ([region region]
+                     [var-map var-map])
+                    ([phi (CfgBlock-phis block)])
+            (process-phi phi region var-map)))
 
-  ;; 处理 φ 节点
-  (define-values (region1 var-map1)
-    (for/fold ([region region]
-               [var-map var-map])
-              ([phi (CfgBlock-phis block)])
-      (process-phi phi region var-map)))
+        ;; 处理指令
+        (define-values (region2 var-map2)
+          (for/fold ([region region1]
+                     [var-map var-map1])
+                    ([insn (CfgBlock-insns block)])
+            (process-vf-insn insn region var-map)))
 
-  ;; 处理指令
-  (define-values (region2 var-map2)
-    (for/fold ([region region1]
-               [var-map var-map1])
-              ([insn (CfgBlock-insns block)])
-      (process-vf-insn insn region var-map)))
+        ;; 处理终结器
+        (define-values (region3 var-map3)
+          (process-terminator cfg block-id (CfgBlock-terminator block)
+                              region2 var-map2 dom-info loops))
 
-  ;; 处理终结器
-  (define-values (region3 var-map3)
-    (process-terminator cfg block-id (CfgBlock-terminator block)
-                        region2 var-map2 dom-info loops))
-
-  (values region3 var-map3))
+        (values region3 var-map3))))
 
 ;; 处理 φ 节点 → Gamma 节点的输出
 (define (process-phi phi region var-map)
@@ -278,7 +278,7 @@
      ;; Switch：创建多路 Gamma
      (values region var-map)]  ; 暂时简化
 
-    [(TermReturn values)
+    [(TermReturn ret-vals)
      ;; 返回：连接到 Region 输出
      (values region var-map)]
 
@@ -328,18 +328,18 @@
                          [_ #f]))
       (match loop [(list _ body _) body])))
 
-  (unless loop-body
-    (values region var-map))
+  (if (not loop-body)
+      (values region var-map)
+      (let ()
+        ;; 创建循环体的子 region
+        (define body-region
+          (structurize-loop-body cfg header loop-body dom-info loops))
 
-  ;; 创建循环体的子 region
-  (define body-region
-    (structurize-loop-body cfg header loop-body dom-info loops))
+        ;; 创建 Theta 节点
+        (define-values (node-id in-id out-id region^)
+          (rvsdg/create-theta region 0 0 body-region))
 
-  ;; 创建 Theta 节点
-  (define-values (node-id in-id out-id region^)
-    (rvsdg/create-theta region 0 0 body-region))
-
-  (values region^ var-map))
+        (values region^ var-map))))
 
 ;; 结构化子图
 (define (structurize-subgraph cfg entry exit dom-info loops)
