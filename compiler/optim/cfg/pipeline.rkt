@@ -28,6 +28,8 @@
 (require "phi-prop.rkt")
 (require "pre.rkt")
 (require "loop-distrib.rkt")
+(require "loop-interchange.rkt")
+(require "inline.rkt")
 (require "../../cfg/raw.rkt")
 (require "../../core/cfg.rkt")
 
@@ -37,7 +39,8 @@
 
 ;; 标准优化流水线
 (define (cfg-optimize cfg)
-  (define cfg1 (cfg-gvn cfg))              ; 消除冗余计算
+  (define cfg0 (cfg-inline cfg))           ; 函数内联（启用更多优化机会）
+  (define cfg1 (cfg-gvn cfg0))             ; 消除冗余计算
   (define cfg2 (cfg-pre cfg1))             ; 部分冗余消除
   (define cfg3 (cfg-copy-prop cfg2))       ; 传播复写
   (define cfg4 (cfg-phi-opt cfg3))         ; 简化 PHI 节点
@@ -50,17 +53,18 @@
   (define cfg11 (cfg-algebraic-simplify cfg10)) ; 代数简化
   (define cfg12 (cfg-loop-normalize cfg11)) ; 循环规范化
   (define cfg13 (cfg-loop-distrib cfg12))  ; 循环分布
-  (define cfg14 (cfg-ivopts cfg13))        ; 归纳变量优化
-  (define cfg15 (cfg-loop-unroll cfg14))   ; 循环展开（完全展开小循环）
-  (define cfg16 (cfg-licm cfg15))          ; 循环不变代码外提
-  (define cfg17 (cfg-jump-thread cfg16))   ; 跳转线程化
-  (define cfg18 (cfg-if-combine cfg17))    ; If 表达式合并
-  (define cfg19 (cfg-tail-merge cfg18))    ; 尾部合并
-  (define cfg20 (cfg-dom-opt cfg19))       ; 支配树优化
-  (define cfg21 (cfg-phi-opt cfg20))       ; 再次简化 PHI (LICM 可能创建新的)
-  (define cfg22 (cfg-dse cfg21))           ; 死存储消除
-  (define cfg23 (cfg-dce cfg22))           ; 删除死代码
-  cfg23)
+  (define cfg14 (cfg-loop-interchange cfg13)) ; 循环交换
+  (define cfg15 (cfg-ivopts cfg14))        ; 归纳变量优化
+  (define cfg16 (cfg-loop-unroll cfg15))   ; 循环展开（完全展开小循环）
+  (define cfg17 (cfg-licm cfg16))          ; 循环不变代码外提
+  (define cfg18 (cfg-jump-thread cfg17))   ; 跳转线程化
+  (define cfg19 (cfg-if-combine cfg18))    ; If 表达式合并
+  (define cfg20 (cfg-tail-merge cfg19))    ; 尾部合并
+  (define cfg21 (cfg-dom-opt cfg20))       ; 支配树优化
+  (define cfg22 (cfg-phi-opt cfg21))       ; 再次简化 PHI (LICM 可能创建新的)
+  (define cfg23 (cfg-dse cfg22))           ; 死存储消除
+  (define cfg24 (cfg-dce cfg23))           ; 删除死代码
+  cfg24)
 
 ;; 迭代优化直到不动点
 (define (cfg-optimize-fixpoint cfg [max-iterations 10])
@@ -105,7 +109,9 @@
 
   (define before (count-insns cfg))
   (define before-phis (count-phis cfg))
-  (define cfg0 (cfg-gvn cfg))
+  (define cfg-inlined (cfg-inline cfg))
+  (define after-inline (count-insns cfg-inlined))
+  (define cfg0 (cfg-gvn cfg-inlined))
   (define after-gvn (count-insns cfg0))
   (define cfg1 (cfg-pre cfg0))
   (define after-pre (count-insns cfg1))
@@ -152,6 +158,7 @@
 
   (values cfg21
           `((before . ,before)
+            (after-inline . ,after-inline)
             (after-gvn . ,after-gvn)
             (after-pre . ,after-pre)
             (after-copy-prop . ,after-copy-prop)
