@@ -1,13 +1,15 @@
 #lang racket/base
 
 ;; ============================================================
-;; Compatibility Shim: graph-core.rkt
+;; IR Layer: JVM Module
 ;; ============================================================
 ;;
-;; Forwards to new location: lib/graph.rkt
-;; This file exists for backward compatibility during migration.
+;; Unified entry point for JVM IR types.
+;;
+;; Usage:
+;;   (require "ir/jvm/main.rkt")
 ;; ============================================================
 
-(require "lib/graph.rkt")
+(require "types.rkt")
 
-(provide (all-from-out "lib/graph.rkt"))
+(provide (all-from-out "types.rkt"))

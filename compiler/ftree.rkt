@@ -1,16 +1,13 @@
 #lang racket/base
 
 ;; ============================================================
-;; 转发模块：cutie-ftree
+;; Compatibility Shim: ftree.rkt
 ;; ============================================================
 ;;
-;; 统一的依赖入口，避免不同深度模块使用不同的相对路径
-;; 用法：
-;;   - compiler/*.rkt:       (require "ftree.rkt")
-;;   - compiler/*/*.rkt:     (require "../ftree.rkt")
-;;   - compiler/*/*/*.rkt:   (require "../../ftree.rkt")
+;; Forwards to new location: lib/ftree.rkt
+;; This file exists for backward compatibility during migration.
 ;; ============================================================
 
-(require "../cutie-ftree/main.rkt")
+(require "lib/ftree.rkt")
 
-(provide (all-from-out "../cutie-ftree/main.rkt"))
+(provide (all-from-out "lib/ftree.rkt"))
