@@ -28,8 +28,10 @@
 | 别名分析 | `alias-analysis.rkt` | tree-ssa-alias.cc | 12 |
 | 死存储消除 | `dse.rkt` | tree-ssa-dse.cc | 10 |
 | PHI 传播 | `phi-prop.rkt` | tree-ssa-phiprop.cc | 10 |
+| 部分冗余消除 | `pre.rkt` | tree-ssa-pre.cc | 12 |
+| 循环分布 | `loop-distrib.rkt` | tree-loop-distribution.cc | 10 |
 
-**总计: 21 个优化 Pass, 207 个测试用例**
+**总计: 23 个优化 Pass, 229 个测试用例**
 
 ---
 
@@ -252,9 +254,9 @@
 2. ~~DSE~~ ✅
 3. ~~PHI 传播~~ ✅
 
-### Phase 5: 高级
-1. PRE (部分冗余消除)
-2. 循环分布
+### Phase 5: 高级 (进行中)
+1. ~~PRE (部分冗余消除)~~ ✅
+2. ~~循环分布~~ ✅
 3. 循环交换
 4. 内联
 
