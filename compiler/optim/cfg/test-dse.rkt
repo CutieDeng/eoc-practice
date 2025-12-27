@@ -26,6 +26,7 @@
        100        ; var-cnt
        100        ; insn-cnt
        (BlockId (caar blocks-spec))  ; entry
+       #f         ; exit
        blocks     ; blocks
        (hash)))   ; info
 

@@ -47,7 +47,8 @@
   block-cnt       ; 下一个可分配的 BlockId (整数)
   var-cnt         ; 下一个可分配的 VarId (整数)
   insn-cnt        ; 下一个可分配的 InsnId (整数)
-  entry           ; BlockId - 入口块
+  entry           ; BlockId - 入口块（唯一入口，可为空伪块）
+  exit            ; BlockId or #f - 统一出口（可选，用于反向分析）
   blocks          ; ordl: BlockId → CfgBlock
   info            ; ordl: symbol → any
 ) #:prefab)

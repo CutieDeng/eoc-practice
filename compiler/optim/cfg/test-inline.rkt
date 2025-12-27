@@ -23,6 +23,7 @@
        0
        (for/sum ([block blocks]) (length (CfgBlock-insns block)))
        entry
+       #f
        block-table
        (hash)))
 

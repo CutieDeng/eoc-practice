@@ -18,7 +18,7 @@
         [(list bid phis insns term)
          (values (BlockId bid)
                  (CfgBlock (BlockId bid) phis insns term))])))
-  (Cfg 100 100 100 (BlockId entry-id) blocks (hash)))
+  (Cfg 100 100 100 (BlockId entry-id) #f blocks (hash)))
 
 ;; ============================================================
 ;; Test 1: Full redundancy - same expression computed twice

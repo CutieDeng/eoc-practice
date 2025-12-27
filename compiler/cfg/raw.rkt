@@ -29,6 +29,7 @@
     0                                      ; var-cnt
     0                                      ; insn-cnt
     #f                                     ; entry (未设置)
+    #f                                     ; exit (未设置)
     (ordl-make-empty block-id-compare)    ; blocks
     (ordl-make-empty symbol-compare)))    ; info
 
@@ -88,7 +89,7 @@
 
 (provide cfg-get-block cfg-set-block cfg-remove-block cfg-has-block?)
 
-;; === 入口设置 ===
+;; === 入口/出口设置 ===
 
 (define (cfg-set-entry cfg block-id)
   (struct-copy Cfg cfg [entry block-id]))
@@ -96,7 +97,13 @@
 (define (cfg-get-entry cfg)
   (Cfg-entry cfg))
 
-(provide cfg-set-entry cfg-get-entry)
+(define (cfg-set-exit cfg block-id)
+  (struct-copy Cfg cfg [exit block-id]))
+
+(define (cfg-get-exit cfg)
+  (Cfg-exit cfg))
+
+(provide cfg-set-entry cfg-get-entry cfg-set-exit cfg-get-exit)
 
 ;; === info 操作 ===
 
