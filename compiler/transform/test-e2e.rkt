@@ -144,9 +144,16 @@
     [(TermJump target)
      (interp-block state target block-id)]
 
-    [(TermBranch cond then-target else-target)
-     (define cond-val (state-get state cond))
-     (if cond-val
+    [(TermBranch cond-var then-target else-target)
+     (define cond-val (state-get state cond-var))
+     ;; 处理 0/1 和 #f/#t 两种布尔表示
+     ;; 0 和 #f 视为 false，其他值视为 true
+     (define is-true?
+       (cond
+         [(boolean? cond-val) cond-val]
+         [(number? cond-val) (not (zero? cond-val))]
+         [#t cond-val]))  ; 其他值按 Racket 默认行为
+     (if is-true?
          (interp-block state then-target block-id)
          (interp-block state else-target block-id))]
 

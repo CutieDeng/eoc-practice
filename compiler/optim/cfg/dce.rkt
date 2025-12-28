@@ -67,6 +67,13 @@
     [(TermThrow exc) (if (VarId? exc) (list exc) '())]
     [(TermUnreachable) '()]))
 
+;; 从 PHI 节点提取输入变量
+(define (phi-input-vars phi)
+  (match phi
+    [(PhiInsn _out sources)
+     (filter VarId? (map cdr sources))]
+    [_ '()]))
+
 ;; 构建 VarId → 定义该变量的 (BlockId . InsnIdx) 映射
 (define (build-def-location-map cfg)
   (for*/fold ([def-map (ordl-make-empty var-id-compare)])
@@ -108,7 +115,23 @@
 
       ;; terminator 使用的变量
       (for ([v (terminator-input-vars (CfgBlock-terminator block))])
-        (set-add! worklist v))))
+        (set-add! worklist v))
+
+      ;; PHI 节点：如果 PHI 输出被使用，其所有输入都必须活跃
+      ;; 先收集所有 PHI 输出到输入的映射
+      (for ([phi (CfgBlock-phis block)])
+        (match phi
+          [(PhiInsn out sources)
+           ;; PHI 输出被使用时，将所有输入加入工作集
+           ;; 这里先标记：如果 out 在 worklist 或已被标记活跃，
+           ;; 则其输入也需要加入 worklist
+           (when (or (set-member? worklist out)
+                     ;; 检查是否有 terminator 使用这个 PHI 输出
+                     (member out (terminator-input-vars (CfgBlock-terminator block))))
+             (for ([src sources])
+               (when (VarId? (cdr src))
+                 (set-add! worklist (cdr src)))))]
+          [_ (void)]))))
 
   ;; 反向传播：标记所有被使用的定义
   (let loop ()

@@ -22,12 +22,14 @@
 (struct CompileCtx (
   cfg           ; Cfg - 正在构建的 CFG
   current-block ; BlockId - 当前块
-  env           ; ordl: Symbol -> VarId - 变量环境
+  env           ; ordl: Symbol -> VarId - 符号变量环境
+  id-env        ; ordl: Integer -> VarId - ID 变量映射
 ) #:transparent)
 
 (define (ctx-cfg ctx) (CompileCtx-cfg ctx))
 (define (ctx-block ctx) (CompileCtx-current-block ctx))
 (define (ctx-env ctx) (CompileCtx-env ctx))
+(define (ctx-id-env ctx) (CompileCtx-id-env ctx))
 
 (define (ctx-set-cfg ctx cfg)
   (struct-copy CompileCtx ctx [cfg cfg]))
@@ -35,12 +37,23 @@
 (define (ctx-set-block ctx block-id)
   (struct-copy CompileCtx ctx [current-block block-id]))
 
+;; 绑定符号名到 VarId
 (define (ctx-bind ctx name var-id)
   (struct-copy CompileCtx ctx
     [env (dict-set (ctx-env ctx) name var-id)]))
 
+;; 绑定整数 ID 到 VarId
+(define (ctx-bind-id ctx id var-id)
+  (struct-copy CompileCtx ctx
+    [id-env (dict-set (ctx-id-env ctx) id var-id)]))
+
+;; 查找符号名
 (define (ctx-lookup ctx name)
   (dict-ref (ctx-env ctx) name #f))
+
+;; 查找整数 ID
+(define (ctx-lookup-id ctx id)
+  (dict-ref (ctx-id-env ctx) id #f))
 
 ;; ============================================================
 ;; 主入口
@@ -57,7 +70,9 @@
      (define cfg2 (cfg-set-entry cfg1 entry-id))
 
      ;; 初始化上下文
-     (define ctx0 (CompileCtx cfg2 entry-id (ordl-make-empty symbol-compare)))
+     (define ctx0 (CompileCtx cfg2 entry-id
+                              (ordl-make-empty symbol-compare)
+                              (ordl-make-empty integer-compare)))
 
      ;; 编译表达式并生成返回
      (define-values (result-var ctx1) (compile-expr ctx0 body))
@@ -93,7 +108,9 @@
     ;; === 变量引用 ===
     [(Var id)
      ;; 整数 ID (来自编号后的程序)
-     (values (VarId id) ctx)]
+     ;; 首先查找 ID 映射，如果没有才直接使用 VarId
+     (define mapped-var (ctx-lookup-id ctx id))
+     (values (or mapped-var (VarId id)) ctx)]
 
     [(Var:r name)
      ;; 符号名 (编号前的程序)
@@ -103,27 +120,22 @@
          (error 'compile-expr "Unbound variable: ~a" name))]
 
     ;; === Let 绑定 ===
+    ;; 注意：不直接使用 Let 的 ID，因为中间临时变量可能已占用
+    ;; 使用 rhs-var 作为绑定变量，在环境中建立映射
     [(Let x rhs body)
      (define-values (rhs-var ctx1) (compile-expr ctx rhs))
-     (define bound-var
-       (cond
-         [(integer? x) (VarId x)]
-         [(symbol? x)
-          ;; 如果 rhs-var 是 #f，创建新变量
-          (or rhs-var
-              (let-values ([(vid cfg^) (cfg-alloc-var-id (ctx-cfg ctx1))])
-                (set! ctx1 (ctx-set-cfg ctx1 cfg^))
-                vid))]
-         [else (error 'compile-expr "Invalid let binding: ~a" x)]))
-     ;; 如果需要复制
-     (define ctx2
-       (if (and rhs-var (not (equal? rhs-var bound-var)))
-           (emit-copy ctx1 rhs-var bound-var)
-           ctx1))
+     ;; 如果 rhs 是 void，分配新变量
+     (define-values (bound-var ctx2)
+       (if rhs-var
+           (values rhs-var ctx1)
+           (let-values ([(vid cfg^) (cfg-alloc-var-id (ctx-cfg ctx1))])
+             (values vid (ctx-set-cfg ctx1 cfg^)))))
+     ;; 在环境中建立映射（用于符号名）或 ID 映射
      (define ctx3
-       (if (symbol? x)
-           (ctx-bind ctx2 x bound-var)
-           ctx2))
+       (cond
+         [(symbol? x) (ctx-bind ctx2 x bound-var)]
+         [(integer? x) (ctx-bind-id ctx2 x bound-var)]
+         [else ctx2]))
      (compile-expr ctx3 body)]
 
     ;; === If 条件 ===
@@ -336,7 +348,9 @@
      (emit-const ctx b)]
 
     [(Var id)
-     (values (VarId id) ctx)]
+     ;; 首先查找 ID 映射
+     (define mapped-var (ctx-lookup-id ctx id))
+     (values (or mapped-var (VarId id)) ctx)]
 
     [(Var:r name)
      (define var-id (ctx-lookup ctx name))
