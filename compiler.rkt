@@ -3,7 +3,8 @@
 (require racket/set)
 (require racket/fixnum)
 (require "interp.rkt")
-(require "compiler/core/core-types.rkt")
+(require "utilities.rkt")
+(require (prefix-in c: "compiler/core/core-types.rkt"))
 
 (require "interp-Lvec-prime.rkt")
 (require "type-check-Lvec.rkt")
@@ -84,9 +85,31 @@
 
 (define dominance (λ (x) ((compose-pass pass-dominance pass-dominance-tree pass-dominance-dj-graph) x)))
 
-(define init-program (match-lambda 
-  ([Program info x] [Program (for/fold ([info (ordl-make-empty symbol-compare)]) ([(k v) (in-dict info)])
-    (ordl-insert info k v #f)) x])))
+;; Convert utilities.rkt AST to core-types.rkt AST
+(define (convert-exp e)
+  (match e
+    [(Int n) (c:Int n)]
+    [(Bool b) (c:Bool b)]
+    [(Void) (c:Void)]
+    [(Var x) (c:Var:r x)]  ; utilities.rkt Var has symbol name, convert to Var:r
+    [(Prim op args) (c:Prim op (map convert-exp args))]
+    [(Let x rhs body) (c:Let x (convert-exp rhs) (convert-exp body))]
+    [(If cnd thn els) (c:If (convert-exp cnd) (convert-exp thn) (convert-exp els))]
+    [(WhileLoop cnd body) (c:WhileLoop (convert-exp cnd) (convert-exp body))]
+    [(SetBang x rhs) (c:SetBang x (convert-exp rhs))]
+    [(GetBang x) (c:GetBang x)]
+    [(Begin es body) (c:Begin (list->ral (map convert-exp es)) (convert-exp body))]
+    [(HasType e t) (c:HasType (convert-exp e) t)]
+    [(Lambda ps rt body) (c:Lambda ps rt (convert-exp body))]
+    [(Apply f args) (c:Apply (convert-exp f) (convert-exp args))]
+    [_ e]))
+
+(define (init-program p)
+  (match p
+    [(Program info body)
+     (c:Program (for/fold ([info (ordl-make-empty symbol-compare)]) ([(k v) (in-dict info)])
+                  (ordl-insert info k v #f))
+                (convert-exp body))]))
 
 (define compiler-passes
   `(

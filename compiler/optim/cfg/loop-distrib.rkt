@@ -127,13 +127,13 @@
 
 ;; 指令顺序比较
 (define (insn-order<? a b)
-  ;; 简化：使用输出变量名比较
+  ;; 简化：使用输出变量 ID 比较 (VarId-id 是整数)
   (cond
     [(and (VfInsn? a) (VfInsn? b)
           (pair? (VfInsn-outputs a))
           (pair? (VfInsn-outputs b)))
-     (symbol<? (VarId-id (car (VfInsn-outputs a)))
-               (VarId-id (car (VfInsn-outputs b))))]
+     (< (VarId-id (car (VfInsn-outputs a)))
+        (VarId-id (car (VfInsn-outputs b))))]
     [else #f]))
 
 ;; ============================================================

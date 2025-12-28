@@ -100,7 +100,7 @@
 (define (operand<? a b)
   (cond
     [(and (VarId? a) (VarId? b))
-     (symbol<? (VarId-id a) (VarId-id b))]
+     (< (VarId-id a) (VarId-id b))]  ; VarId-id 是整数
     [(and (number? a) (number? b))
      (< a b)]
     [(VarId? a) #t]  ; VarId 在数字前
