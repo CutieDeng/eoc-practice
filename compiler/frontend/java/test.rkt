@@ -16,9 +16,11 @@
 
 ;; === 测试数据路径 ===
 
-;; 使用绝对路径或相对于项目根目录的路径
+;; 使用相对于当前文件的路径
 (define test-dat-file
-  (build-path (current-directory) "compiler/test/ClassTransform.dat"))
+  (let* ([this-file (syntax-source #'here)]
+         [this-dir (if this-file (path-only this-file) (current-directory))])
+    (simplify-path (build-path this-dir ".." ".." "test" "ClassTransform.dat"))))
 
 ;; === Reader 测试 ===
 

@@ -126,14 +126,19 @@
     (sort comp insn-order<? #:key identity)))
 
 ;; 指令顺序比较
+;; 支持 VarId-id 为整数或符号
 (define (insn-order<? a b)
-  ;; 简化：使用输出变量 ID 比较 (VarId-id 是整数)
   (cond
     [(and (VfInsn? a) (VfInsn? b)
           (pair? (VfInsn-outputs a))
           (pair? (VfInsn-outputs b)))
-     (< (VarId-id (car (VfInsn-outputs a)))
-        (VarId-id (car (VfInsn-outputs b))))]
+     (let ([id-a (VarId-id (car (VfInsn-outputs a)))]
+           [id-b (VarId-id (car (VfInsn-outputs b)))])
+       (cond
+         [(and (number? id-a) (number? id-b)) (< id-a id-b)]
+         [(and (symbol? id-a) (symbol? id-b)) (symbol<? id-a id-b)]
+         [(number? id-a) #t]  ; 数字在符号前
+         [else #f]))]
     [else #f]))
 
 ;; ============================================================

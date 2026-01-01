@@ -21,18 +21,11 @@
 (define output-compare (integer-compare-generator OutputId-id))
 (define node-compare (integer-compare-generator NodeId-id))
 
-;; Symbol 比较函数（用于 info 的 key）
-;; cutie-ftree 比较函数返回 '<, '>, '=
-(define (symbol-compare a b)
-  (define sa (symbol->string a))
-  (define sb (symbol->string b))
-  (cond
-    [(string<? sa sb) '<]
-    [(string>? sa sb) '>]
-    [else '=]))
+;; Symbol 比较函数: 使用 ftree.rkt 中的定义
+;; (symbol-compare 已从 ftree.rkt 导入)
 
 (provide wire-compare input-compare output-compare node-compare)
-(provide symbol-compare)
+(provide symbol-compare)  ; re-export from ftree.rkt
 (provide integer-compare-generator abstract-compare-generator)
 
 ;; === 保留的节点 ID ===

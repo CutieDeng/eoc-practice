@@ -97,10 +97,17 @@
   (and (memq op '(add mul and or xor eq ne)) #t))
 
 ;; 操作数比较（用于排序）
+;; 支持 VarId-id 为整数或符号
 (define (operand<? a b)
   (cond
     [(and (VarId? a) (VarId? b))
-     (< (VarId-id a) (VarId-id b))]  ; VarId-id 是整数
+     (let ([id-a (VarId-id a)]
+           [id-b (VarId-id b)])
+       (cond
+         [(and (number? id-a) (number? id-b)) (< id-a id-b)]
+         [(and (symbol? id-a) (symbol? id-b)) (symbol<? id-a id-b)]
+         [(number? id-a) #t]  ; 数字在符号前
+         [else #f]))]
     [(and (number? a) (number? b))
      (< a b)]
     [(VarId? a) #t]  ; VarId 在数字前
