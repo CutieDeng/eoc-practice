@@ -1,7 +1,7 @@
 #lang racket
 
 (require "core/core-types.rkt" "core/utilities.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 (require "x86abi.rkt")
 
 (define pass-allocate-registers
@@ -13,8 +13,8 @@
         (set-field! color-graph this (dict-ref info 'color-graph))
         (printf "color-traph: ~a~n" color-graph)
         (define slot-num (+ 1 (sequence-fold max -1 (in-dict-values color-graph))))
-        (define blocks^ 
-          (for/fold ([bbs (ordl-make-empty integer-compare)]) ([(bb-id bb) (in-dict blocks)]) 
+        (define blocks^
+          (for/fold ([bbs (ordl-make-empty integer-compare)]) ([(bb-id bb) (in-dict blocks)])
             (dict-set bbs bb-id (pass-block bb)))
         )
         (define stack-size (* (max 0 (- slot-num 16)) 8))
@@ -33,8 +33,8 @@
       [(Var id)
         (define order (dict-ref color-graph id 0)) ; maybe not in color-graph
         (match order
-          [_ #:when (< order 16) 
-            (Reg order)] 
+          [_ #:when (< order 16)
+            (Reg order)]
           [_ (Deref 'rbp (- (* 8 (- order 16)) 8))]
         )
       ]
@@ -42,8 +42,8 @@
     (define (pass-block block) (match block
       [(Block info instr*)
         (define instr*^
-          (for/fold ([instr*^ (ral-empty)]) ([insn (in-ral0 instr*)])
-            (ral-consr instr*^ (pass-insn insn))
+          (for/fold ([instr*^ (pvector-empty)]) ([insn (in-pvector instr*)])
+            (pvector-cons-right instr*^ (pass-insn insn))
           ))
         (Block info instr*^)
       ]

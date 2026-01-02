@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt")
 (require "core/integer-set.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (require "x86instr.rkt")
 
@@ -18,8 +18,8 @@
       (Block info^ instr*)
     ]))
     (define (pass-instr* instr* add-set drop-set) (match instr*
-      [(ral) (void)]
-      [(ral (rest unlength) (instr atom))
+      [(pvector) (void)]
+      [(pvector** (pvector _ rest) instr)
         (define r (send analysis read-from-instr instr))
         (define w (send analysis write-from-instr instr))
         (set-box! drop-set (bset-subtract (bset-union (unbox drop-set) w) r))

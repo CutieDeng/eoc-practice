@@ -11,7 +11,7 @@
 (require racket/vector)
 (require racket/file)
 
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 
 (define src-primitives 
   '(
@@ -40,8 +40,8 @@
   [`(while ,cnd ,body) (WhileLoop (parse-exp cnd) (parse-exp body))]
   [`(set! ,x ,rhs) (SetBang x (parse-exp rhs))]
   [`(begin ,es ... ,e)
-    (Begin (for/fold ([es^ (ral-empty)]) ([e0 es])
-      (ral-consr es^ (parse-exp e0))) (parse-exp e))
+    (Begin (for/fold ([es^ (pvector-empty)]) ([e0 es])
+      (pvector-cons-right es^ (parse-exp e0))) (parse-exp e))
   ]
   [`(has-type ,e ,t) (HasType (parse-exp e) t)]
   [`(unchecked-cast ,e ,t) (UncheckedCast (parse-exp e) t)]
@@ -79,8 +79,8 @@
     (Program (normalize-info info) (parse-exp body))]
   [`(program ,info ,def* ... ,body)
     (ProgramDefsExp (normalize-info info)
-      (for/fold ([def*^ (ral-empty)]) ([d def*])
-        (ral-consr def*^ (parse-def d)))
+      (for/fold ([def*^ (pvector-empty)]) ([d def*])
+        (pvector-cons-right def*^ (parse-def d)))
       (parse-exp body))]
 ))
 (provide parse-program)
@@ -230,7 +230,7 @@
     ))
     (define/public print-asm-block (match-lambda
       [(Block info ss)
-        (for ([s (in-ral0 ss)]) (printf "\t") (print-asm-instr s) (printf "~n"))
+        (for ([s (in-pvector ss)]) (printf "\t") (print-asm-instr s) (printf "~n"))
       ]
     ))
     (define/public print-asm (match-lambda

@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/contract/base)
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 
 (struct Value (val) #:transparent)
 (provide (struct-out Value))
@@ -139,5 +139,5 @@
     ValueOf? Closure? WhileLoop? SetBang?
     GetBang? Begin? Value? Inst?
   ))
-(define exps? ral?)
+(define exps? pvector?)
 (provide exp? exps?)

@@ -9,7 +9,7 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict)
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 (require "../core/cfg.rkt")
 (require "../core/p-types.rkt")
 (require "../cfg/raw.rkt")
@@ -150,7 +150,7 @@
     [(Begin es body)
      (define ctx1
        (for/fold ([ctx ctx])
-                 ([e (in-ral0 es)])
+                 ([e (in-pvector es)])
          (define-values (_var ctx^) (compile-expr ctx e))
          ctx^))
      (compile-expr ctx1 body)]
@@ -205,8 +205,8 @@
     ;; === 函数调用 ===
     [(Apply func arg-list)
      (define-values (func-var ctx1) (compile-expr ctx func))
-     ;; arg-list 可能是 ral 或 list
-     (define args (if (ral? arg-list) (ral->list arg-list) arg-list))
+     ;; arg-list 可能是 pvector 或 list
+     (define args (if (pvector? arg-list) (pvector->list arg-list) arg-list))
      (define-values (arg-vars ctx2)
        (for/fold ([vars '()] [ctx ctx1])
                  ([arg args])
@@ -449,8 +449,8 @@
     [(print) 'print]
     [else op]))
 
-;; 将 ral 转换为 list
-(define (ral->list x)
-  (if (ral? x)
-      (for/list ([elem (in-ral0 x)]) elem)
+;; 将 pvector 转换为 list
+(define (pvector->list x)
+  (if (pvector? x)
+      (for/list ([elem (in-pvector x)]) elem)
       (if (list? x) x (list x))))

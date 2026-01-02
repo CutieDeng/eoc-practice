@@ -22,7 +22,7 @@
 (require "interp-L.rkt")
 ;; Use old AST types for compatibility
 (require "../core/core-types.rkt")
-(require "../lib/main.rkt")
+(require "../lib/ftree.rkt")
 
 ;; ============================================================
 ;; C-Language Interpreter Class
@@ -65,9 +65,9 @@
       (ctx-trace context "interp-tail: ~a" tail)
 
       (match tail
-        ;; Handle ral (finger tree) sequences
-        [(? ral? seq)
-         (interp-ral-seq env seq)]
+        ;; Handle pvector (finger tree) sequences
+        [(? pvector? seq)
+         (interp-pvector-seq env seq)]
 
         ;; Old AST - list of statements
         [(list stmt ... (Return arg))
@@ -94,14 +94,14 @@
 
         [_ (error 'interp-tail "Unknown tail: ~a" tail)]))
 
-    ;; Interpret a ral sequence
-    (define/public (interp-ral-seq env seq)
+    ;; Interpret a pvector sequence
+    (define/public (interp-pvector-seq env seq)
       (match seq
         ;; Empty sequence - shouldn't happen
-        [(? ral-empty?) (error 'interp-ral-seq "Empty sequence")]
+        [(? pvector-empty?) (error 'interp-pvector-seq "Empty sequence")]
 
         ;; Single element
-        [(ral (x atom))
+        [(pvector x)
          (match x
            [(Return arg) (interp-expr env arg)]
            [(Goto label)
@@ -116,7 +116,7 @@
             (interp-stmt env stmt)])]
 
         ;; Multiple elements - process first, recurse on rest
-        [(ral (first atom) (rest unlength))
+        [(pvector** first (pvector _ rest))
          (match first
            [(Return arg) (interp-expr env arg)]
            [(Goto label)
@@ -129,7 +129,7 @@
             (interp-tail env block)]
            [stmt
             (define new-env (interp-stmt env stmt))
-            (interp-ral-seq new-env rest)])]))
+            (interp-pvector-seq new-env rest)])]))
 
     ;; Interpret a C program
     (define/override (interp-program prog)

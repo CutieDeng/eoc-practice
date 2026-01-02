@@ -9,7 +9,7 @@
 ;; ============================================================
 
 (require racket/match racket/format racket/dict)
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 (require "../core/cfg.rkt")
 (require "../core/core-types.rkt")
 (require "../core/p-types.rkt")
@@ -18,13 +18,13 @@
 (require "l-to-cfg.rkt")
 (require "c-to-cfg.rkt")
 
-;; ral 辅助函数
-(define (ral-single x)
-  (ral-consl (ral-empty) x))
+;; pvector 辅助函数
+(define (pvector-single x)
+  (pvector-cons-left (pvector-empty) x))
 
-(define (list->ral lst)
-  (for/fold ([r (ral-empty)]) ([x (reverse lst)])
-    (ral-consl r x)))
+(define (list->pvector lst)
+  (for/fold ([r (pvector-empty)]) ([x (reverse lst)])
+    (pvector-cons-left r x)))
 
 ;; ============================================================
 ;; 辅助函数
@@ -127,11 +127,11 @@
       (Let 0 (Int 0)  ; sum
         (Let 1 (Int 0)  ; i
           (Begin
-            (ral-consl (ral-empty)
+            (pvector-cons-left (pvector-empty)
               (WhileLoop
                 (Prim '< (list (GetBang 1) (Int 10)))
                 (Begin
-                  (ral-consl (ral-empty)
+                  (pvector-cons-left (pvector-empty)
                     (SetBang 0 (Prim '+ (list (GetBang 0) (GetBang 1)))))
                   (SetBang 1 (Prim '+ (list (GetBang 1) (Int 1)))))))
             (GetBang 0))))))
@@ -151,10 +151,10 @@
   (define blocks
     (let ([b (ordl-make-empty integer-compare)])
       (dict-set b 2
-        (ral-consl
-          (ral-consl
-            (ral-consl
-              (ral-single (Return (Var 2)))
+        (pvector-cons-left
+          (pvector-cons-left
+            (pvector-cons-left
+              (pvector-single (Return (Var 2)))
               (Assign (Var 2) (Prim '+ (list (Var 0) (Var 1)))))
             (Assign (Var 1) (Int 20)))
           (Assign (Var 0) (Int 10))))))

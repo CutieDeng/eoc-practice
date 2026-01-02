@@ -1,8 +1,8 @@
 #lang racket
 
-(require "../utilities.rkt")
+(require "core/utilities.rkt")
 (require "graph-core.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (define x86-control-flow-graph
   (class object%
@@ -13,9 +13,9 @@
     ; return list, 0, 1, 2 element
     (define (block-tail block)
       (match block
-        [(ral (_ unlength) ((JmpIf _ t1) atom) ((Jmp t2) atom)) `(,t1 ,t2)]
-        [(ral (_ unlength) ((Jmp t) atom)) `(,t)]
-        [(? ral?) '()]
+        [(pvector** (pvector _ _) (JmpIf _ t1) (Jmp t2)) `(,t1 ,t2)]
+        [(pvector** (pvector _ _) (Jmp t)) `(,t)]
+        [(? pvector?) '()]
       )
     )
     (define (init-graph blocks)

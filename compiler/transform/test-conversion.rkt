@@ -8,7 +8,7 @@
 ;; ============================================================
 
 (require racket/match racket/format racket/dict)
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 (require "../core/cfg.rkt")
 (require "../core/core-types.rkt")
 (require "../core/p-types.rkt")
@@ -16,13 +16,13 @@
 (require "l-to-cfg.rkt")
 (require "c-to-cfg.rkt")
 
-;; ral 辅助函数
-(define (ral-single x)
-  (ral-consl (ral-empty) x))
+;; pvector 辅助函数
+(define (pvector-single x)
+  (pvector-cons-left (pvector-empty) x))
 
-(define (list->ral lst)
-  (for/fold ([r (ral-empty)]) ([x (reverse lst)])
-    (ral-consl r x)))
+(define (list->pvector lst)
+  (for/fold ([r (pvector-empty)]) ([x (reverse lst)])
+    (pvector-cons-left r x)))
 
 ;; ============================================================
 ;; 辅助函数
@@ -122,7 +122,7 @@
       (ordl-make-empty symbol-compare)
       (Let 0 (Int 0)  ; i
         (Begin
-          (ral-single
+          (pvector-single
             (WhileLoop
               (Prim '< (list (GetBang 0) (Int 10)))
               (SetBang 0 (Prim '+ (list (GetBang 0) (Int 1))))))
@@ -143,7 +143,7 @@
   (define blocks
     (let ([b (ordl-make-empty integer-compare)])
       (dict-set b 2
-        (list->ral
+        (list->pvector
           (list
             (Assign (Var 0) (Int 10))
             (Assign (Var 1) (Int 20))

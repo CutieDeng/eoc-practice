@@ -2,7 +2,7 @@
 
 (require "core/core-types.rkt")
 (require "graph-core.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (require "x86abi.rkt")
 (require "interference.rkt")
@@ -10,14 +10,14 @@
 
 (define pass-build-interference
   (class object%
-    (super-new) 
+    (super-new)
     (field
       [analysis (new instr-analysis)]
       [interference-obj (new interference)])
     (define (writes-from-block block) (match block
       [(Block _ instr*)
-        (for/fold ([ws (ral-empty)]) ([i (in-ral0 instr*)])
-          (ral-consr ws (send analysis write-from-instr i))
+        (for/fold ([ws (pvector-empty)]) ([i (in-pvector instr*)])
+          (pvector-cons-right ws (send analysis write-from-instr i))
         )
       ]
     ))

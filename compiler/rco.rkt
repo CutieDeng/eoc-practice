@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "control-flow-graph/var-id-reassign.rkt")
 (require "program-default.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (define pass-rco
   (class (pass-var-id-reassign-mixin pass-program #f)
@@ -17,13 +17,13 @@
       (Program (dict-set (Program-info p^) 'var-cnt var-cnt) (Program-body p^))
     )
     (define (lets-append exp)
-      (for/fold ([exp^ exp]) ([i (in-ral0 (rco-env))])
+      (for/fold ([exp^ exp]) ([i (in-pvector (rco-env))])
         (match-define (cons v r) i)
         (Let v r exp^)
       )
     )
     (define/override (pass-exp p)
-      (parameterize ([rco-env (ral-empty)])
+      (parameterize ([rco-env (pvector-empty)])
         (lets-append
           (match p
             [(Prim o es) (Prim o (for/list ([e es]) (pass-atom e)))]
@@ -36,10 +36,10 @@
       (define p^ (pass-exp p))
       (cond
         [(atom? p^) p^]
-        [else (define tmp (gen-var-id)) (rco-env (ral-consr (rco-env) (cons tmp p^))) (Var tmp)]
+        [else (define tmp (gen-var-id)) (rco-env (pvector-cons-right (rco-env) (cons tmp p^))) (Var tmp)]
       )
     )
-    (define atom? (match-lambda 
+    (define atom? (match-lambda
       [(or (Bool _) (Int _) (Var _) (Void )) #t]
       [_ #f]
     ))

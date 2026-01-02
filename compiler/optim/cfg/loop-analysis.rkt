@@ -15,7 +15,7 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict racket/set)
-(require "../../ftree.rkt")
+(require "../../lib/ftree.rkt")
 (require "../../core/cfg.rkt")
 (require "../../cfg/raw.rkt")
 

@@ -19,11 +19,11 @@
 
 (provide debug-graph)
 
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (define (debug-con-seq s d)
   (printf "(\n")
-  (for ([si (in-ral0 s)])
+  (for ([si (in-pvector s)])
     (define n-display (for/list ([ki (in-dict-keys si)])
       (define node (dict-ref d ki))
       node
@@ -51,7 +51,7 @@
       ]
     )
   )
-  (for ([u (in-vertices dag)]) (for ([v (in-neighbors dag u)]) 
+  (for ([u (in-vertices dag)]) (for ([v (in-neighbors dag u)])
     (printf "\t~a -> ~a\n" (field-content u) (field-content v))
   ))
   (printf ")\n")

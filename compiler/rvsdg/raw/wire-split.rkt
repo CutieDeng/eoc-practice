@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/match racket/dict)
-(require "../../ftree.rkt")
+(require "../../lib/ftree.rkt")
 
 (require "../core-def.rkt")
 (require "region-ctor.rkt")
@@ -11,11 +11,11 @@
 (require "../node-ctor.rkt")
 
 (define (rvsdg-raw/split-wires-with-node region wires inputs outputs)
-  (define wires-length (ral-length wires))
+  (define wires-length (pvector-length wires))
   (define-values (node input output region^) (rvsdg/alloc-node region wires-length wires-length))
   (define-values (wires^ region^^) (rvsdg-raw/alloc-wire-ids region^ (* wires-length 2)))
   (define-values (wires-sections region^^^)
-    (for/fold ([wires-sections (ordl-make-empty wire-compare)] [region region^^]) ([w (in-ral0 wires)] [a (in-naturals)] [i (in-ral0 inputs)] [o (in-ral0 outputs)])
+    (for/fold ([wires-sections (ordl-make-empty wire-compare)] [region region^^]) ([w (in-pvector wires)] [a (in-naturals)] [i (in-pvector inputs)] [o (in-pvector outputs)])
       (define new-wire-input-section (rvsdg-raw/wire-offset wires^ (* a 2)))
       (define new-wire-output-section (rvsdg-raw/wire-offset wires^ (+ (* a 2) 1)))
       (define wires-sections^ (dict-set wires-sections 

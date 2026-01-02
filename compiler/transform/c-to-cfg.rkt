@@ -9,7 +9,7 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict)
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 (require "../core/cfg.rkt")
 (require "../core/core-types.rkt")
 (require "../core/p-types.rkt")
@@ -62,7 +62,7 @@
 
 ;; 转换语句列表，返回 (values insns terminator cfg)
 (define (convert-statements cfg stmts id-mapping)
-  (define stmt-list (ral->list stmts))
+  (define stmt-list (pvector->list stmts))
 
   (let loop ([stmts stmt-list]
              [insns '()]
@@ -268,13 +268,13 @@
 ;; 辅助函数
 ;; ============================================================
 
-;; 从 Goto 或 ral 中提取目标块
+;; 从 Goto 或 pvector 中提取目标块
 (define (extract-goto-target target id-mapping)
   (match target
     [(Goto label)
      (dict-ref id-mapping label (BlockId label))]
-    [(? ral?)
-     (match (ral->list target)
+    [(? pvector?)
+     (match (pvector->list target)
        [(list (Goto label)) (dict-ref id-mapping label (BlockId label))]
        [_ (BlockId 0)])]
     [(? integer?)
@@ -322,8 +322,8 @@
     [(print) 'print]
     [else op]))
 
-;; 将 ral 转换为 list (如果是 ral)
-(define (ral->list x)
-  (if (ral? x)
-      (for/list ([elem (in-ral0 x)]) elem)
+;; 将 pvector 转换为 list (如果是 pvector)
+(define (pvector->list x)
+  (if (pvector? x)
+      (for/list ([elem (in-pvector x)]) elem)
       (if (list? x) x (list x))))

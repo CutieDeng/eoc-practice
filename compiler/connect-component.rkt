@@ -3,7 +3,7 @@
 (require "core/core-types.rkt")
 (require "core/utilities.rkt")
 (require "graph-core.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (require "topology-sort.rkt")
 (require "connect-component-core-2.rkt")
@@ -19,9 +19,9 @@
         (send cc get-connect-component control-flow-graph)
         (define alist (topology-sort (get-field agraph cc)))
         (define group2id (get-field group2id cc))
-        (define alist-connect-component (for/fold ([c (ral-empty)]) ([a (in-ral0 alist)])
-          (ral-consr c (dict-ref group2id a))))
-        (define info^ (dict-set* info 
+        (define alist-connect-component (for/fold ([c (pvector-empty)]) ([a (in-pvector alist)])
+          (pvector-cons-right c (dict-ref group2id a))))
+        (define info^ (dict-set* info
           'graph control-flow-graph
           'agraph (get-field agraph cc)
           'topology-order alist

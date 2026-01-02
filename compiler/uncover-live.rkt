@@ -4,13 +4,13 @@
 (require "core/utilities.rkt")
 (require "graph-core.rkt")
 (require "core/integer-set.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (require "analyze-dataflow.rkt")
 (require "x86instr.rkt")
 
-(define (ral-rev seq)
-  (for/fold ([v (ral-empty)]) ([i (in-ral0 seq)]) (ral-consl v i))
+(define (pvector-rev seq)
+  (for/fold ([v (pvector-empty)]) ([i (in-pvector seq)]) (pvector-cons-left v i))
 )
 
 (define pass-uncover-live
@@ -18,21 +18,21 @@
     (super-new)
     (field [instr-ana (new instr-analysis)])
     (define (pass-instr* instr* end) (match instr*
-      [(ral) (ral-consl (ral-empty) end)]
-      [(ral (rest unlength) (last atom))
+      [(pvector) (pvector-cons-left (pvector-empty) end)]
+      [(pvector** (pvector _ rest) last)
         (match last
           [(or (? Jmp?) (? JmpIf?)) (pass-instr* rest end)]
-          [_ (pass-instr instr* end (ral-empty))]
+          [_ (pass-instr instr* end (pvector-empty))]
         )
       ]
     ))
     (define (pass-instr instr* current cont) (match instr*
-      [(ral) (ral-consl cont current)]
-      [(ral (rest unlength) (instr atom))
+      [(pvector) (pvector-cons-left cont current)]
+      [(pvector** (pvector _ rest) instr)
         (define r (send instr-ana read-from-instr instr))
         (define w (send instr-ana write-from-instr instr))
         (define current^ (bset-union r (bset-subtract current w)))
-        (pass-instr rest current^ (ral-consl cont current))
+        (pass-instr rest current^ (pvector-cons-left cont current))
       ]
     ))
     (define/public (pass p) (match p [(X86Program info blocks)
@@ -49,12 +49,12 @@
       (define bottom 0)
       (define default-set (bset 0)) ; (Reg 'rax)
       (define join bset-union)
-      (send ana analyze-dataflow 
+      (send ana analyze-dataflow
         graph-t
         transfer
         bottom
         join
-        (ral-rev components)
+        (pvector-rev components)
         (lambda (i) i)
         default-set
       )

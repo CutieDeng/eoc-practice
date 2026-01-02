@@ -3,15 +3,15 @@
 (require "core/core-types.rkt")
 (require "program-default.rkt")
 (require "control-flow-graph/var-id-reassign.rkt")
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 
 (define pass-expose-allocation
   (class (pass-var-id-reassign-mixin pass-program #f)
     (super-new)
     (inherit-field var-cnt)
     (inherit gen-var-id)
-    (define/private (expand-envs body env) 
-      (for/fold ([body body]) ([e (in-ral0 env)])
+    (define/private (expand-envs body env)
+      (for/fold ([body body]) ([e (in-pvector env)])
         (match-define (cons x v) e)
         (Let x v body)
       ))
@@ -20,17 +20,17 @@
     )
     (define/override pass-exp (match-lambda
       [(HasType (Prim 'vector es) types)
-        (define-values (es^ env^) (for/fold ([es^ (ral-empty)] [env^ (ral-empty)]) ([e es])
+        (define-values (es^ env^) (for/fold ([es^ (pvector-empty)] [env^ (pvector-empty)]) ([e es])
           (define tmp (gen-var-id))
-          (values (ral-consl es^ tmp) (ral-consl env^ (cons tmp (pass-exp e))))
+          (values (pvector-cons-left es^ tmp) (pvector-cons-left env^ (cons tmp (pass-exp e))))
         ))
-        (define bytes (prepare-alloc-bytes (ral-length es^)))
-        (define pre-collect (λ (b) (Let (gen-var-id) (If 
-          (Prim '< (list 
+        (define bytes (prepare-alloc-bytes (pvector-length es^)))
+        (define pre-collect (λ (b) (Let (gen-var-id) (If
+          (Prim '< (list
             (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes)))
             (GlobalValue 'fromspace_end))) (Void) (Collect bytes)) b)))
         (define v (gen-var-id))
-        (define inner (for/fold ([b (Var v)]) ([e (in-ral0 es^)] [idx (in-range (length es))])
+        (define inner (for/fold ([b (Var v)]) ([e (in-pvector es^)] [idx (in-range (length es))])
           (Let (gen-var-id) (Prim 'vector-set! (list (Var v) (Int idx) (Var e))) b)
         ))
         (define inner^ (expand-envs inner env^))

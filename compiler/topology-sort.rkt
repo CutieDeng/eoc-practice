@@ -1,13 +1,13 @@
 #lang racket
 
-(require "ftree.rkt")
+(require "lib/ftree.rkt")
 (require "graph-core.rkt")
 (require "core/integer-set.rkt")
 
 (define topology
   (class object%
     (super-new)
-    (field [visit 0] [rst (ral-empty)] [graph #f])
+    (field [visit 0] [rst (pvector-empty)] [graph #f])
     (define/public (order graph)
       (set-field! graph this graph)
       (for ([i (in-vertices graph)])
@@ -16,7 +16,7 @@
       rst
     )
     (define/private (visit-add! i)
-      (set! visit (bset-add visit i)) 
+      (set! visit (bset-add visit i))
     )
     (define (find current-node)
       (cond
@@ -26,7 +26,7 @@
           (for ([t (in-neighbors graph current-node)])
             (find t)
           )
-          (set! rst (ral-consl rst current-node))
+          (set! rst (pvector-cons-left rst current-node))
         ]
       )
     )

@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require racket/match racket/dict)
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 
 (require "core-def.rkt")
 (require "raw/node-ctor.rkt")
@@ -11,7 +11,7 @@
 (require "raw/node-dtor.rkt")
 
 (define (rvsdg/free-nodes region node-ids)
-  (for/fold ([r region]) ([n (in-ral0 node-ids)])
+  (for/fold ([r region]) ([n (in-pvector node-ids)])
     (rvsdg/free-node r n))
 )
 (provide rvsdg/free-nodes)

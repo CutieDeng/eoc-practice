@@ -3,7 +3,7 @@
 (require racket/contract/base)
 (require "p-types.rkt")
 
-(require "../ftree.rkt")
+(require "../lib/ftree.rkt")
 
 (struct Assign (lhs rhs) #:transparent)
 (provide (struct-out Assign))
@@ -63,7 +63,7 @@
 (define Type? (or/c ))
 
 (struct IfStmt (cnd thn els) #:transparent)
-(provide (contract-out (struct IfStmt ([cnd exp?] [thn (or/c ral? integer?)] [els (or/c ral? integer?)]))))
+(provide (contract-out (struct IfStmt ([cnd exp?] [thn (or/c pvector? integer?)] [els (or/c pvector? integer?)]))))
 
 (struct CProgram (info blocks) #:transparent)
 
