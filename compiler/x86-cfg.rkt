@@ -1,5 +1,6 @@
 #lang racket
 
+(require "core/core-types.rkt")
 (require "core/utilities.rkt")
 (require "graph-core.rkt")
 (require "lib/ftree.rkt")
