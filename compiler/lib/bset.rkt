@@ -4,81 +4,50 @@
 ;; Foundation: Bit Set (Integer Set)
 ;; ============================================================
 ;;
-;; High-performance set operations using integers as bit vectors.
-;; Efficient for dense integer sets with small values.
+;; Compatibility layer over cutie-ftree/bitset.
+;; Provides bset-* aliases for backward compatibility.
 ;; ============================================================
 
-(require racket/sequence)
+(require "../../cutie-ftree/bitset.rkt")
 
-;; === Set Operations ===
+;; Re-export all from bitset
+(provide (all-from-out "../../cutie-ftree/bitset.rkt"))
 
-(define bset-union bitwise-ior)
-(define bset-and bitwise-and)
+;; ============================================================
+;; Compatibility Aliases: bset → bitset
+;; ============================================================
 
-(define bset-member? bitwise-bit-set?)
+(define bset-union bitset-union)
+(define bset-and bitset-intersection)
+(define bset-member? bitset-member?)
+(define bset-add bitset-add)
+(define bset-remove bitset-remove)
+(define bset-subtract bitset-subtract)
 
-(define (bset-add s m)
-  (bitwise-ior s (arithmetic-shift 1 m)))
+(define in-bset in-bitset)
+(define in-bset/rev in-bitset/rev)
 
-(define (bset-remove s m)
-  (bitwise-and s (bitwise-not (arithmetic-shift 1 m))))
+(define seq->bset seq->bitset)
+(define bset->list bitset->list)
+(define bset->vector bitset->vector)
 
-(define (bset-subtract s s2)
-  (bitwise-and s (bitwise-not s2)))
+;; bset constructor (variadic)
+(define (bset . elements)
+  (apply bitset elements))
 
-;; === Iteration ===
+;; bset* constructor (list)
+(define bset* list->bitset*)
 
-;; Get leftmost (highest) set bit index
-;; Precondition: s != 0
-(define (integer-leftmost s)
-  (- (integer-length s) 1))
+;; Legacy names for min/max
+(define integer-leftmost bitset-max)
+(define integer-rightmost bitset-min)
 
-;; Get rightmost (lowest) set bit index
-;; Precondition: s != 0
-(define (integer-rightmost s)
-  (- (integer-length (bitwise-and (- s) s)) 1))
+;; ============================================================
+;; Exports
+;; ============================================================
 
-;; Iterate from highest to lowest bit
-(define (in-bset/rev s)
-  (make-do-sequence (lambda () (initiate-sequence
-    #:init-pos s
-    #:pos->element integer-leftmost
-    #:continue-with-pos? (compose not zero?)
-    #:next-pos (lambda (s) (bitwise-xor s (arithmetic-shift 1 (integer-leftmost s))))))))
-
-;; Iterate from lowest to highest bit
-(define (in-bset s)
-  (make-do-sequence (lambda () (initiate-sequence
-    #:init-pos s
-    #:pos->element integer-rightmost
-    #:continue-with-pos? (compose not zero?)
-    #:next-pos (lambda (s) (bitwise-xor s (arithmetic-shift 1 (integer-rightmost s))))))))
-
-;; === Conversions ===
-
-(define (seq->bset s)
-  (for/fold ([s^ 0]) ([i s])
-    (bset-add s^ i)))
-
-(define (bset->list s)
-  (for/list ([i (in-bset s)]) i))
-
-(define (bset->vector s)
-  (list->vector (bset->list s)))
-
-;; === Constructors ===
-
-(define (bset . b*)
-  (bset* b*))
-
-(define (bset* ls)
-  (for/fold ([s 0]) ([i ls]) (bset-add s i)))
-
-;; === Exports ===
-
-(provide integer-leftmost integer-rightmost)
-(provide bset-add bset-remove bset-member? bset-union bset-subtract)
+(provide bset-union bset-and bset-member? bset-add bset-remove bset-subtract)
 (provide in-bset in-bset/rev)
 (provide seq->bset bset->list bset->vector)
 (provide bset bset*)
-(provide bset-and)
+(provide integer-leftmost integer-rightmost)

@@ -55,8 +55,7 @@
 ))
 (provide parse-exp)
 
-(define list->ral (compose vector->ral list->vector))
-(provide list->ral)
+;; list->ral is now provided by ftree.rkt
 
 (define parse-def (match-lambda
   [`(define (,f ,ps ...) : ,rty ,body)
