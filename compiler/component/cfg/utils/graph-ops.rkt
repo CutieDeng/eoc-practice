@@ -26,6 +26,16 @@
   cfg-get-entry
   cfg-get-exit
 
+  ;; Info operations
+  cfg-get-info
+  cfg-set-info
+  cfg-update-info
+
+  ;; Block modification
+  cfg-set-block
+  cfg-block-append-insn
+  cfg-block-update-insns
+
   ;; Terminator helpers
   terminator-successors
   terminator-uses
@@ -89,6 +99,74 @@
 ;; Get exit block ID (may be #f)
 (define (cfg-get-exit cfg)
   (Cfg-exit cfg))
+
+;; ============================================================
+;; Info Map Operations
+;; ============================================================
+
+;; Get a value from the info map
+(define (cfg-get-info cfg key [default #f])
+  (define info (Cfg-info cfg))
+  (if info
+      (ordered-map-ref info key default)
+      default))
+
+;; Set a value in the info map (functional update)
+(define (cfg-set-info cfg key value)
+  (define old-info (or (Cfg-info cfg) (ordered-map-empty symbol-compare)))
+  (define new-info (ordered-map-set old-info key value))
+  (struct-copy Cfg cfg [info new-info]))
+
+;; Update a value in the info map with a function
+(define (cfg-update-info cfg key fn [default #f])
+  (define old-value (cfg-get-info cfg key default))
+  (define new-value (fn old-value))
+  (cfg-set-info cfg key new-value))
+
+;; Symbol comparison for info map
+(define (symbol-compare a b)
+  (cond
+    [(symbol<? a b) '<]
+    [(symbol<? b a) '>]
+    [else '=]))
+
+;; ============================================================
+;; Block Modification Operations
+;; ============================================================
+
+;; Set/replace a block in the CFG
+(define (cfg-set-block cfg block)
+  (define bid (CfgBlock-id block))
+  (define blocks (or (Cfg-blocks cfg) (ordered-map-empty block-id-compare)))
+  (define new-blocks (ordered-map-set blocks bid block))
+  (struct-copy Cfg cfg [blocks new-blocks]))
+
+;; BlockId comparison for block map
+(define (block-id-compare a b)
+  (define a-id (BlockId-id a))
+  (define b-id (BlockId-id b))
+  (cond
+    [(< a-id b-id) '<]
+    [(> a-id b-id) '>]
+    [else '=]))
+
+;; Append an instruction to a block
+(define (cfg-block-append-insn cfg block-id insn)
+  (define block (cfg-get-block cfg block-id))
+  (when (not block)
+    (error 'cfg-block-append-insn "block not found: ~a" block-id))
+  (define new-insns (append (CfgBlock-insns block) (list insn)))
+  (define new-block (struct-copy CfgBlock block [insns new-insns]))
+  (cfg-set-block cfg new-block))
+
+;; Update instructions of a block
+(define (cfg-block-update-insns cfg block-id fn)
+  (define block (cfg-get-block cfg block-id))
+  (when (not block)
+    (error 'cfg-block-update-insns "block not found: ~a" block-id))
+  (define new-insns (fn (CfgBlock-insns block)))
+  (define new-block (struct-copy CfgBlock block [insns new-insns]))
+  (cfg-set-block cfg new-block))
 
 ;; Convert blocks ordered-map to list
 (define (cfg-blocks->list cfg)

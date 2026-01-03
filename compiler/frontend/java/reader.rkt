@@ -10,7 +10,7 @@
 (require racket/match)
 (require racket/list)
 (require racket/file)
-(require "../../core/jvm.rkt")
+(require "../../kernel/ir/jvm/types.rkt")
 
 ;; === Java 工具输出的 prefab 结构 ===
 ;; 这些结构必须与 Java 端输出格式完全匹配

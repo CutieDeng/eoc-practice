@@ -1,4 +1,3 @@
-
 # DrRacket autosave files
 *.rkt~
 *.rkt.bak
@@ -23,3 +22,6 @@ tests/*.dSYM
 .vscode/
 
 out/
+
+*.MD
+*.md

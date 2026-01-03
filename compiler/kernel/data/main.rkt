@@ -18,3 +18,15 @@
 
 ;; Re-export everything from cutie-ftree
 (provide (all-from-out "../../../cutie-ftree/main.rkt"))
+
+;; ============================================================
+;; Additional pvector utilities
+;; ============================================================
+
+;; Reverse a pvector
+;; Uses in-pvector-reverse for efficient iteration
+(define (pvector-reverse pv)
+  (for/pvector ([x (in-pvector-reverse pv)])
+    x))
+
+(provide pvector-reverse)

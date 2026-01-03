@@ -35,7 +35,12 @@
   ;; Predicates
   terminator?
   cfg-id?
-  instruction?)
+  instruction?
+
+  ;; Comparison functions
+  block-id-compare
+  var-id-compare
+  insn-id-compare)
 
 ;; ============================================================
 ;; ID Types
@@ -180,3 +185,22 @@
 (define (instruction? x)
   (or (VfInsn? x)
       (PhiInsn? x)))
+
+;; ============================================================
+;; Comparison Functions (for ordered-map)
+;; ============================================================
+
+(define (integer-compare a b)
+  (cond
+    [(< a b) '<]
+    [(> a b) '>]
+    [else '=]))
+
+(define (block-id-compare a b)
+  (integer-compare (BlockId-id a) (BlockId-id b)))
+
+(define (var-id-compare a b)
+  (integer-compare (VarId-id a) (VarId-id b)))
+
+(define (insn-id-compare a b)
+  (integer-compare (InsnId-id a) (InsnId-id b)))

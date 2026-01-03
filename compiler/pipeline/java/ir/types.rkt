@@ -9,6 +9,6 @@
 ;;
 ;; ============================================================
 
-(require "../../../ir/jvm/types.rkt")
+(require "../../../kernel/ir/jvm/types.rkt")
 
-(provide (all-from-out "../../../ir/jvm/types.rkt"))
+(provide (all-from-out "../../../kernel/ir/jvm/types.rkt"))

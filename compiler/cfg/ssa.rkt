@@ -9,9 +9,9 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict racket/set)
-(require (except-in "../ftree.rkt" symbol-compare))
-(require "../core/cfg.rkt")
-(require "raw.rkt")  ; provides block-id-compare, var-id-compare, insn-id-compare
+(require (except-in "../kernel/data/main.rkt" symbol-compare))
+(require "../kernel/ir/cfg/types.rkt")
+(require "../component/cfg/utils/graph-ops.rkt")
 
 ;; === 辅助函数：提取嵌套结构中的所有 VarId ===
 
@@ -67,10 +67,10 @@
 ;; 返回更新后的 CFG（链存储在 info 中）
 ;; 同时构建 insn->block 和 block->insns 双向映射（如果指令有 InsnId）
 (define (cfg-build-use-def cfg)
-  (define var->def (ordl-make-empty var-id-compare))
-  (define var->uses (ordl-make-empty var-id-compare))
-  (define insn->block (ordl-make-empty insn-id-compare))
-  (define block->insns (ordl-make-empty block-id-compare))
+  (define var->def (ordered-map-empty var-id-compare))
+  (define var->uses (ordered-map-empty var-id-compare))
+  (define insn->block (ordered-map-empty insn-id-compare))
+  (define block->insns (ordered-map-empty block-id-compare))
 
   ;; 遍历所有块和指令
   (define-values (v->d v->u i->b b->i)
@@ -188,7 +188,7 @@
                #:when (VarId? out))
       (cfg-update-info c 'var->def
         (λ (d) (dict-set d out dloc))
-        (ordl-make-empty var-id-compare))))
+        (ordered-map-empty var-id-compare))))
 
   ;; 更新 use 链（使用 extract-var-ids 处理嵌套）
   (define input-vars (extract-var-ids (VfInsn-inputs insn)))
@@ -197,7 +197,7 @@
     (define uloc (UseLoc block-id insn-idx idx))
     (cfg-update-info c 'var->uses
       (λ (u) (dict-update u inp (λ (lst) (cons uloc lst)) '()))
-      (ordl-make-empty var-id-compare))))
+      (ordered-map-empty var-id-compare))))
 
 ;; 删除指令时更新 use-def 链
 (define (cfg-update-chains-remove-insn cfg block-id insn-idx insn)
@@ -213,7 +213,7 @@
                #:when (VarId? out))
       (cfg-update-info c 'var->def
         (λ (d) (dict-remove d out))
-        (ordl-make-empty var-id-compare))))
+        (ordered-map-empty var-id-compare))))
 
   ;; 移除 uses（使用 extract-var-ids 处理嵌套）
   (define input-vars (extract-var-ids (VfInsn-inputs insn)))
@@ -224,7 +224,7 @@
       (λ (u) (dict-update u inp
                (λ (lst) (remove uloc lst))
                '()))
-      (ordl-make-empty var-id-compare))))
+      (ordered-map-empty var-id-compare))))
 
 (provide cfg-update-chains-add-insn cfg-update-chains-remove-insn)
 

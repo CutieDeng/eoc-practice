@@ -6,11 +6,10 @@
 ;;
 ;; Parameterized dataflow analysis that works with any IR.
 ;; All graph operations are passed as parameters.
+;; Uses pvector and ordered-map for all data structures.
 ;;
 ;; ============================================================
 
-(require racket/list)
-(require racket/set)
 (require "../../kernel/data/main.rkt")
 
 (provide
@@ -30,7 +29,7 @@
   lattice-leq?
 
   ;; Common lattices
-  set-lattice
+  make-set-lattice
   bitvector-lattice)
 
 ;; ============================================================
@@ -65,12 +64,31 @@
 ;; Common Lattices
 ;; ============================================================
 
-;; Set lattice (powerset lattice)
-;; Bottom: empty set, Join: union, Meet: intersection
+;; Set lattice using ordered-map (as set)
+;; Bottom: empty map, Join: union, Meet: intersection
+;; Takes a comparator for set elements
 ;;
-(define (set-lattice)
+(define (make-set-lattice element-compare)
+  (define empty-set (ordered-map-empty element-compare))
+
+  (define (set-union a b)
+    (for/fold ([result a])
+              ([k (ordered-map-keys b)])
+      (ordered-map-set result k #t)))
+
+  (define (set-intersect a b)
+    (for/fold ([result (ordered-map-empty element-compare)])
+              ([k (ordered-map-keys a)])
+      (if (ordered-map-has-key? b k)
+          (ordered-map-set result k #t)
+          result)))
+
+  (define (subset? a b)
+    (for/and ([k (ordered-map-keys a)])
+      (ordered-map-has-key? b k)))
+
   (make-lattice
-    #:bottom (set)
+    #:bottom empty-set
     #:join set-union
     #:meet set-intersect
     #:leq? subset?))
@@ -93,48 +111,51 @@
 
 ;; Forward dataflow analysis
 ;; Parameters:
-;;   nodes            : (listof node) - all nodes in RPO
-;;   get-predecessors : node -> (listof node)
+;;   node-compare     : comparator for nodes
+;;   nodes            : pvector of nodes - all nodes in RPO
+;;   get-predecessors : node -> pvector of nodes
 ;;   lattice          : Lattice
 ;;   transfer         : node value -> value  (transfer function)
-;;   init             : hash (optional initial values)
-;; Returns: hash node -> value (IN values for each node)
+;;   init             : ordered-map (optional initial values)
+;; Returns: ordered-map node -> value (IN values for each node)
 ;;
-(define (dataflow-forward nodes get-predecessors lattice transfer
-                          #:init [init (make-hash)])
+(define (dataflow-forward node-compare nodes get-predecessors lattice transfer
+                          #:init [init (ordered-map-empty node-compare)])
   (define bottom (lattice-bottom lattice))
 
   ;; Initialize IN values
-  (define in-values (make-hash))
-  (for ([node nodes])
-    (hash-set! in-values node
-      (hash-ref init node bottom)))
+  (define in-values
+    (for/fold ([m (ordered-map-empty node-compare)])
+              ([node (in-pvector nodes)])
+      (ordered-map-set m node (ordered-map-ref init node bottom))))
 
   ;; Compute OUT values
-  (define (compute-out node)
-    (transfer node (hash-ref in-values node)))
+  (define (compute-out node in-vals)
+    (transfer node (ordered-map-ref in-vals node bottom)))
 
   ;; Iterate until fixed point
-  (define (iterate)
-    (define changed #f)
-    (for ([node nodes])
-      (define preds (get-predecessors node))
-      (define new-in
-        (if (null? preds)
-            (hash-ref in-values node)  ; Keep initial value for entry
-            (for/fold ([acc bottom]) ([pred preds])
-              (lattice-join lattice acc (compute-out pred)))))
-      (unless (equal? new-in (hash-ref in-values node))
-        (hash-set! in-values node new-in)
-        (set! changed #t)))
-    changed)
+  (define (iterate in-vals)
+    (define-values (new-in-vals changed)
+      (for/fold ([vals in-vals] [ch #f])
+                ([node (in-pvector nodes)])
+        (define preds (get-predecessors node))
+        (define new-in
+          (if (pvector-empty? preds)
+              (ordered-map-ref vals node bottom)  ; Keep initial value for entry
+              (for/fold ([acc bottom])
+                        ([pred (in-pvector preds)])
+                (lattice-join lattice acc (compute-out pred vals)))))
+        (if (equal? new-in (ordered-map-ref vals node bottom))
+            (values vals ch)
+            (values (ordered-map-set vals node new-in) #t))))
+    (values new-in-vals changed))
 
   ;; Run until fixed point
-  (let loop ()
-    (when (iterate)
-      (loop)))
-
-  in-values)
+  (let loop ([vals in-values])
+    (define-values (new-vals changed) (iterate vals))
+    (if changed
+        (loop new-vals)
+        new-vals)))
 
 ;; ============================================================
 ;; Backward Dataflow Analysis
@@ -142,49 +163,52 @@
 
 ;; Backward dataflow analysis
 ;; Parameters:
-;;   nodes          : (listof node) - all nodes in RPO
-;;   get-successors : node -> (listof node)
+;;   node-compare   : comparator for nodes
+;;   nodes          : pvector of nodes - all nodes in RPO
+;;   get-successors : node -> pvector of nodes
 ;;   lattice        : Lattice
 ;;   transfer       : node value -> value
-;;   init           : hash (optional initial values)
-;; Returns: hash node -> value (OUT values for each node)
+;;   init           : ordered-map (optional initial values)
+;; Returns: ordered-map node -> value (OUT values for each node)
 ;;
-(define (dataflow-backward nodes get-successors lattice transfer
-                           #:init [init (make-hash)])
+(define (dataflow-backward node-compare nodes get-successors lattice transfer
+                           #:init [init (ordered-map-empty node-compare)])
   (define bottom (lattice-bottom lattice))
-  (define rpo-nodes (reverse nodes))  ; Process in reverse order
+  (define rpo-nodes (pvector-reverse nodes))  ; Process in reverse order
 
   ;; Initialize OUT values
-  (define out-values (make-hash))
-  (for ([node nodes])
-    (hash-set! out-values node
-      (hash-ref init node bottom)))
+  (define out-values
+    (for/fold ([m (ordered-map-empty node-compare)])
+              ([node (in-pvector nodes)])
+      (ordered-map-set m node (ordered-map-ref init node bottom))))
 
   ;; Compute IN values
-  (define (compute-in node)
-    (transfer node (hash-ref out-values node)))
+  (define (compute-in node out-vals)
+    (transfer node (ordered-map-ref out-vals node bottom)))
 
   ;; Iterate until fixed point
-  (define (iterate)
-    (define changed #f)
-    (for ([node rpo-nodes])
-      (define succs (get-successors node))
-      (define new-out
-        (if (null? succs)
-            (hash-ref out-values node)  ; Keep initial value for exit
-            (for/fold ([acc bottom]) ([succ succs])
-              (lattice-join lattice acc (compute-in succ)))))
-      (unless (equal? new-out (hash-ref out-values node))
-        (hash-set! out-values node new-out)
-        (set! changed #t)))
-    changed)
+  (define (iterate out-vals)
+    (define-values (new-out-vals changed)
+      (for/fold ([vals out-vals] [ch #f])
+                ([node (in-pvector rpo-nodes)])
+        (define succs (get-successors node))
+        (define new-out
+          (if (pvector-empty? succs)
+              (ordered-map-ref vals node bottom)  ; Keep initial value for exit
+              (for/fold ([acc bottom])
+                        ([succ (in-pvector succs)])
+                (lattice-join lattice acc (compute-in succ vals)))))
+        (if (equal? new-out (ordered-map-ref vals node bottom))
+            (values vals ch)
+            (values (ordered-map-set vals node new-out) #t))))
+    (values new-out-vals changed))
 
   ;; Run until fixed point
-  (let loop ()
-    (when (iterate)
-      (loop)))
-
-  out-values)
+  (let loop ([vals out-values])
+    (define-values (new-vals changed) (iterate vals))
+    (if changed
+        (loop new-vals)
+        new-vals)))
 
 ;; ============================================================
 ;; Generic Iterative Solver
@@ -192,35 +216,33 @@
 
 ;; Generic worklist-based iterative solver
 ;; Parameters:
-;;   nodes          : (listof node) - initial worklist
-;;   get-dependents : node -> (listof node) - nodes to update when node changes
+;;   node-compare   : comparator for nodes
+;;   nodes          : pvector of nodes - initial worklist
+;;   get-dependents : node -> pvector of nodes - nodes to update when node changes
 ;;   update         : node state -> (values new-state changed?)
 ;;   init-state     : initial state
 ;; Returns: final state
 ;;
-(define (dataflow-iterate nodes get-dependents update init-state)
-  (define worklist (list->mutable-set nodes))
-  (define state init-state)
+(define (dataflow-iterate node-compare nodes get-dependents update init-state)
+  ;; Use ordered-map as a set for the worklist
+  (define (pvector->set pv)
+    (for/fold ([s (ordered-map-empty node-compare)])
+              ([x (in-pvector pv)])
+      (ordered-map-set s x #t)))
 
-  (let loop ()
-    (unless (set-empty? worklist)
-      (define node (set-first worklist))
-      (set-remove! worklist node)
-
-      (define-values (new-state changed?) (update node state))
-      (set! state new-state)
-
-      (when changed?
-        (for ([dep (get-dependents node)])
-          (set-add! worklist dep)))
-
-      (loop)))
-
-  state)
-
-;; Helper: create mutable set from list
-(define (list->mutable-set lst)
-  (define s (mutable-set))
-  (for ([x lst])
-    (set-add! s x))
-  s)
+  (let loop ([worklist (pvector->set nodes)]
+             [state init-state])
+    (if (ordered-map-empty? worklist)
+        state
+        ;; Get and remove first element from worklist
+        (let* ([node (car (ordered-map-min worklist))]
+               [worklist* (let-values ([(m _) (ordered-map-delete worklist node)]) m)])
+          (define-values (new-state changed?) (update node state))
+          (if changed?
+              ;; Add dependents to worklist
+              (let ([deps (get-dependents node)])
+                (loop (for/fold ([w worklist*])
+                                ([dep (in-pvector deps)])
+                        (ordered-map-set w dep #t))
+                      new-state))
+              (loop worklist* new-state))))))
