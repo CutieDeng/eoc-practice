@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; ============================================================
-;; Pass: Uniquify
+;; Component: L-var Uniquify Transform
 ;; ============================================================
 ;;
 ;; Make all variable names unique by using integer IDs.

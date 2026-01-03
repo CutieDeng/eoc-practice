@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; ============================================================
-;; Pass: Remove Complex Operands (ANF Transformation)
+;; Component: L-var Remove Complex Operands (ANF Transformation)
 ;; ============================================================
 ;;
 ;; Ensure all primitive operations only have atomic operands.

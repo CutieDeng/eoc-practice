@@ -35,7 +35,11 @@
 (require "common/main.rkt")
 (require "cfg/main.rkt")
 (require "rvsdg/main.rkt")
+(require "lvar/main.rkt")
+(require "x86var/main.rkt")
 
 (provide (all-from-out "common/main.rkt"))
 (provide (all-from-out "cfg/main.rkt"))
 (provide (all-from-out "rvsdg/main.rkt"))
+(provide (all-from-out "lvar/main.rkt"))
+(provide (all-from-out "x86var/main.rkt"))

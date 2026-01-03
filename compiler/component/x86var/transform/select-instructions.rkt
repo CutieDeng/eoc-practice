@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; ============================================================
-;; Pass: Select Instructions
+;; Component: X86-var Select Instructions
 ;; ============================================================
 ;;
 ;; Convert C-var to x86-var instructions.
@@ -17,8 +17,8 @@
 
 (require racket/match
          "../../../kernel/data/main.rkt"
-         "../ir/cvar.rkt"
-         "../ir/x86var.rkt")
+         "../../../pipeline/x86/ir/cvar.rkt"
+         "../../../pipeline/x86/ir/x86var.rkt")
 
 (provide select-instructions)
 

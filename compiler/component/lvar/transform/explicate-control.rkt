@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; ============================================================
-;; Pass: Explicate Control
+;; Component: L-var Explicate Control Transform
 ;; ============================================================
 ;;
 ;; Convert high-level AST to C-var with explicit control flow.
@@ -18,7 +18,7 @@
 (require racket/match
          "../../../kernel/ir/ast/types.rkt"
          "../../../kernel/data/main.rkt"
-         "../ir/cvar.rkt")
+         "../../../pipeline/x86/ir/cvar.rkt")
 
 (provide explicate-control)
 
