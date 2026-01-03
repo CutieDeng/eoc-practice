@@ -132,10 +132,26 @@
 ;; Register Parsing
 ;; ============================================================================
 
-;; Parse register name
+;; Parse register name (physical or virtual)
 (define (parse-reg sym)
   (define s (symbol->string sym))
   (cond
+    ;; Virtual registers: %name, %name.32, %z.name, %p.name
+    [(regexp-match #rx"^%(.+)\\.32$" s)
+     => (λ (m) (VReg:gpr (string->symbol (cadr m)) 32))]
+
+    [(regexp-match #rx"^%z\\.(.+)$" s)
+     => (λ (m) (VReg:sve (string->symbol (cadr m))))]
+
+    [(regexp-match #rx"^%p\\.(.+)$" s)
+     => (λ (m) (VReg:pred (string->symbol (cadr m))))]
+
+    [(regexp-match #rx"^%v\\.(.+)$" s)
+     => (λ (m) (VReg:vec (string->symbol (cadr m))))]
+
+    [(regexp-match #rx"^%(.+)$" s)
+     => (λ (m) (VReg:gpr (string->symbol (cadr m)) 64))]
+
     ;; x-registers (64-bit)
     [(regexp-match #rx"^x([0-9]+)$" s)
      => (λ (m) (Reg:x (string->number (cadr m))))]
@@ -194,6 +210,7 @@
 (define (register-symbol? sym)
   (define s (symbol->string sym))
   (or (regexp-match? #rx"^[xwzpv][0-9]+" s)
+      (regexp-match? #rx"^%" s)  ; Virtual registers start with %
       (memq sym '(sp xzr wzr))))
 
 ;; Parse complex operand (memory addressing, shifted immediate)

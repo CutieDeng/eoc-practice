@@ -28,8 +28,15 @@
  Reg:p Reg:p? Reg:p-id
  Reg:ffr Reg:ffr?
 
+ ;; Virtual registers (for register allocation)
+ VReg:gpr VReg:gpr? VReg:gpr-id VReg:gpr-width
+ VReg:vec VReg:vec? VReg:vec-id
+ VReg:sve VReg:sve? VReg:sve-id
+ VReg:pred VReg:pred? VReg:pred-id
+ vreg? vreg-id vreg-class
+
  ;; Register predicates
- gpr? simd-reg? sve-reg? pred-reg? any-reg?
+ gpr? simd-reg? sve-reg? pred-reg? any-reg? physical-reg?
 
  ;; Immediate values
  Imm Imm? Imm-value
@@ -145,6 +152,46 @@
 (struct Reg:ffr () #:prefab)
 
 ;; ============================================================================
+;; Virtual Registers (for register allocation)
+;; ============================================================================
+
+;; Virtual GPR (will be allocated to x0-x30 or w0-w30)
+;; id: unique identifier (symbol or number)
+;; width: 32 or 64
+(struct VReg:gpr (id width) #:prefab)
+
+;; Virtual vector register (will be allocated to v0-v31)
+(struct VReg:vec (id) #:prefab)
+
+;; Virtual SVE register (will be allocated to z0-z31)
+(struct VReg:sve (id) #:prefab)
+
+;; Virtual predicate register (will be allocated to p0-p15)
+(struct VReg:pred (id) #:prefab)
+
+;; Virtual register predicates
+(define (vreg? x)
+  (or (VReg:gpr? x) (VReg:vec? x) (VReg:sve? x) (VReg:pred? x)))
+
+;; Get virtual register id
+(define (vreg-id v)
+  (cond
+    [(VReg:gpr? v) (VReg:gpr-id v)]
+    [(VReg:vec? v) (VReg:vec-id v)]
+    [(VReg:sve? v) (VReg:sve-id v)]
+    [(VReg:pred? v) (VReg:pred-id v)]
+    [else (error 'vreg-id "not a virtual register: ~a" v)]))
+
+;; Get virtual register class
+(define (vreg-class v)
+  (cond
+    [(VReg:gpr? v) 'gpr]
+    [(VReg:vec? v) 'vec]
+    [(VReg:sve? v) 'sve]
+    [(VReg:pred? v) 'pred]
+    [else (error 'vreg-class "not a virtual register: ~a" v)]))
+
+;; ============================================================================
 ;; Register Predicates
 ;; ============================================================================
 
@@ -160,8 +207,13 @@
 (define (pred-reg? x)
   (Reg:p? x))
 
-(define (any-reg? x)
+;; Physical register predicate
+(define (physical-reg? x)
   (or (gpr? x) (simd-reg? x) (sve-reg? x) (pred-reg? x)))
+
+;; Any register (physical or virtual)
+(define (any-reg? x)
+  (or (physical-reg? x) (vreg? x)))
 
 ;; ============================================================================
 ;; Immediate Values
