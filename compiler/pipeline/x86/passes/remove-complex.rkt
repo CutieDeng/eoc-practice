@@ -7,35 +7,47 @@
 ;; Ensure all primitive operations only have atomic operands.
 ;; Complex operands are bound to temporary variables.
 ;;
-;; Input:  AST (Lvar with unique names)
+;; Input:  AST with unique variable IDs (Var) from uniquify
 ;; Output: AST in A-normal form
+;;
+;; Design: Functional style - counter is threaded through all
+;; recursive calls as state. No global mutable state.
+;; Counter is stored in Program's info under 'counter key.
 ;;
 ;; ============================================================
 
 (require racket/match
-         "../../../kernel/ir/ast/types.rkt")
+         "../../../kernel/ir/ast/types.rkt"
+         "../../../kernel/data/main.rkt")
 
 (provide remove-complex-opera*)
 
-;; Counter for temporary names
-(define temp-counter 0)
+;; ============================================================
+;; State Management
+;; ============================================================
 
-(define (fresh-temp)
-  (set! temp-counter (add1 temp-counter))
-  (string->symbol (format "tmp.~a" temp-counter)))
+;; Get counter from info (default 0)
+(define (info-counter info)
+  (ordered-map-ref info 'counter 0))
 
-(define (reset-temp-counter!)
-  (set! temp-counter 0))
+;; Set counter in info
+(define (info-set-counter info counter)
+  (ordered-map-set info 'counter counter))
+
+;; Generate fresh temporary variable, returns (values new-var new-counter)
+(define (fresh-temp counter)
+  (values (Var counter) (add1 counter)))
 
 ;; ============================================================
 ;; Main Pass
 ;; ============================================================
 
 (define (remove-complex-opera* prog)
-  (reset-temp-counter!)
   (match prog
     [(Program info body)
-     (Program info (rco-exp body))]))
+     (define counter (info-counter info))
+     (define-values (new-body new-counter) (rco-exp counter body))
+     (Program (info-set-counter info new-counter) new-body)]))
 
 ;; Is expression atomic?
 (define (atomic-exp? e)
@@ -43,86 +55,98 @@
     [(Int _) #t]
     [(Bool _) #t]
     [(Void) #t]
-    [(Var:named _) #t]
+    [(Var _) #t]
     [_ #f]))
 
 ;; rco-atom: ensure expression is atomic
-;; Returns (values atom bindings) where bindings is list of (var . rhs)
-(define (rco-atom exp)
+;; Returns (values atom bindings counter)
+;; bindings is list of (var . rhs)
+(define (rco-atom counter exp)
   (if (atomic-exp? exp)
-      (values exp '())
-      (let ([tmp (fresh-temp)])
-        (define-values (new-exp bindings) (rco-exp/bindings exp))
-        (values (Var:named tmp)
-                (append bindings (list (cons tmp new-exp)))))))
+      (values exp '() counter)
+      (let ()
+        (define-values (new-exp bindings counter1) (rco-exp/bindings counter exp))
+        (define-values (tmp counter2) (fresh-temp counter1))
+        (values tmp
+                (append bindings (list (cons tmp new-exp)))
+                counter2))))
 
-;; rco-exp/bindings: returns (values exp bindings)
-(define (rco-exp/bindings exp)
+;; rco-exp/bindings: returns (values exp bindings counter)
+(define (rco-exp/bindings counter exp)
   (match exp
     ;; Atomic - no bindings needed
-    [(Int n) (values (Int n) '())]
-    [(Bool b) (values (Bool b) '())]
-    [(Void) (values (Void) '())]
-    [(Var:named name) (values (Var:named name) '())]
+    [(Int n) (values (Int n) '() counter)]
+    [(Bool b) (values (Bool b) '() counter)]
+    [(Void) (values (Void) '() counter)]
+    [(Var id) (values (Var id) '() counter)]
 
     ;; Primitive operations - make arguments atomic
     [(Prim op args)
-     (define-values (new-args all-bindings)
-       (for/fold ([atoms '()] [bindings '()])
+     (define-values (new-args all-bindings counter1)
+       (for/fold ([atoms '()] [bindings '()] [c counter])
                  ([arg args])
-         (define-values (atom bs) (rco-atom arg))
+         (define-values (atom bs new-c) (rco-atom c arg))
          (values (append atoms (list atom))
-                 (append bindings bs))))
-     (values (Prim op new-args) all-bindings)]
+                 (append bindings bs)
+                 new-c)))
+     (values (Prim op new-args) all-bindings counter1)]
 
     ;; Let binding
     [(Let var rhs body)
-     (define-values (new-rhs rhs-bindings) (rco-exp/bindings rhs))
-     (define-values (new-body body-bindings) (rco-exp/bindings body))
+     (define-values (new-rhs rhs-bindings counter1) (rco-exp/bindings counter rhs))
+     (define-values (new-body body-bindings counter2) (rco-exp/bindings counter1 body))
      (values (Let var new-rhs new-body)
-             (append rhs-bindings body-bindings))]
+             (append rhs-bindings body-bindings)
+             counter2)]
 
     ;; Conditional
     [(If cond then else)
-     (define-values (cond-atom cond-bindings) (rco-atom cond))
-     (define new-then (rco-exp then))
-     (define new-else (rco-exp else))
-     (values (If cond-atom new-then new-else) cond-bindings)]
+     (define-values (cond-atom cond-bindings counter1) (rco-atom counter cond))
+     (define-values (new-then counter2) (rco-exp counter1 then))
+     (define-values (new-else counter3) (rco-exp counter2 else))
+     (values (If cond-atom new-then new-else) cond-bindings counter3)]
 
     ;; Sequence
     [(Begin exprs body)
-     (define new-exprs (map rco-exp exprs))
-     (define new-body (rco-exp body))
-     (values (Begin new-exprs new-body) '())]
+     (define-values (new-exprs counter1) (rco-exp-list counter exprs))
+     (define-values (new-body counter2) (rco-exp counter1 body))
+     (values (Begin new-exprs new-body) '() counter2)]
 
     ;; Mutation
     [(SetBang var rhs)
-     (define-values (new-rhs bindings) (rco-exp/bindings rhs))
-     (values (SetBang var new-rhs) bindings)]
+     (define-values (new-rhs bindings counter1) (rco-exp/bindings counter rhs))
+     (values (SetBang var new-rhs) bindings counter1)]
     [(GetBang var)
-     (values (GetBang var) '())]
+     (values (GetBang var) '() counter)]
 
     ;; While loop
     [(WhileLoop cond body)
-     (define new-cond (rco-exp cond))
-     (define new-body (rco-exp body))
-     (values (WhileLoop new-cond new-body) '())]
+     (define-values (new-cond counter1) (rco-exp counter cond))
+     (define-values (new-body counter2) (rco-exp counter1 body))
+     (values (WhileLoop new-cond new-body) '() counter2)]
 
     ;; Type annotations
     [(HasType exp type)
-     (define-values (new-exp bindings) (rco-exp/bindings exp))
-     (values (HasType new-exp type) bindings)]
+     (define-values (new-exp bindings counter1) (rco-exp/bindings counter exp))
+     (values (HasType new-exp type) bindings counter1)]
 
     [_ (error 'rco-exp/bindings "unhandled expression: ~a" exp)]))
 
 ;; Wrap expression with bindings
 (define (wrap-bindings bindings exp)
   (foldr (lambda (binding body)
-           (Let (Var:named (car binding)) (cdr binding) body))
+           (Let (car binding) (cdr binding) body))
          exp
          bindings))
 
-;; rco-exp: main entry point
-(define (rco-exp exp)
-  (define-values (new-exp bindings) (rco-exp/bindings exp))
-  (wrap-bindings bindings new-exp))
+;; rco-exp: main entry point, returns (values new-exp counter)
+(define (rco-exp counter exp)
+  (define-values (new-exp bindings new-counter) (rco-exp/bindings counter exp))
+  (values (wrap-bindings bindings new-exp) new-counter))
+
+;; rco-exp-list: process list of expressions
+(define (rco-exp-list counter exprs)
+  (for/fold ([acc '()] [c counter])
+            ([e exprs])
+    (define-values (new-e new-c) (rco-exp c e))
+    (values (append acc (list new-e)) new-c)))

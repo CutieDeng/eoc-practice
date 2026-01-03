@@ -7,88 +7,131 @@
 ;; Convert high-level AST to C-var with explicit control flow.
 ;; Creates basic blocks and explicit jumps.
 ;;
-;; Input:  AST in A-normal form
+;; Input:  AST in A-normal form with Program info containing 'counter
 ;; Output: CProgram with explicit control flow
+;;
+;; Design: Functional style - counter and blocks are threaded
+;; through all recursive calls as state. No global mutable state.
 ;;
 ;; ============================================================
 
 (require racket/match
          "../../../kernel/ir/ast/types.rkt"
+         "../../../kernel/data/main.rkt"
          "../ir/cvar.rkt")
 
 (provide explicate-control)
 
-;; Mutable state for collecting blocks
-(define blocks (make-hash))
-(define block-counter 0)
+;; ============================================================
+;; State Management
+;; ============================================================
 
-(define (fresh-label base)
-  (set! block-counter (add1 block-counter))
-  (string->symbol (format "~a.~a" base block-counter)))
+;; State: (counter . blocks)
+;; counter: integer for generating unique label IDs
+;; blocks: ordered-map from label (symbol) to CBlock
 
-(define (reset-blocks!)
-  (set! blocks (make-hash))
-  (set! block-counter 0))
+(define (make-state counter)
+  (cons counter (ordered-map-empty symbol-compare)))
 
-(define (add-block! label tail)
-  (hash-set! blocks label (CBlock '() tail)))
+(define (state-counter st) (car st))
+(define (state-blocks st) (cdr st))
+
+(define (state-set-counter st counter)
+  (cons counter (state-blocks st)))
+
+(define (state-set-blocks st blocks)
+  (cons (state-counter st) blocks))
+
+;; Get counter from info (default 0)
+(define (info-counter info)
+  (ordered-map-ref info 'counter 0))
+
+;; Set counter in info
+(define (info-set-counter info counter)
+  (ordered-map-set info 'counter counter))
+
+;; Generate fresh label, returns (values label new-state)
+(define (fresh-label st base)
+  (define counter (state-counter st))
+  (define label (string->symbol (format "~a.~a" base counter)))
+  (values label (state-set-counter st (add1 counter))))
+
+;; Generate fresh variable ID, returns (values var-id new-state)
+(define (fresh-var-id st)
+  (define counter (state-counter st))
+  (values counter (state-set-counter st (add1 counter))))
+
+;; Add block to state, returns new-state
+(define (add-block st label tail)
+  (state-set-blocks st
+    (ordered-map-set (state-blocks st) label (CBlock '() tail))))
 
 ;; ============================================================
 ;; Main Pass
 ;; ============================================================
 
 (define (explicate-control prog)
-  (reset-blocks!)
   (match prog
     [(Program info body)
-     (define start-tail (explicate-tail body))
-     (add-block! 'start start-tail)
-     (CProgram info (hash-copy blocks))]))
+     (define counter (info-counter info))
+     (define init-state (make-state counter))
+     (define-values (start-tail final-state) (explicate-tail init-state body))
+     (define final-state* (add-block final-state 'start start-tail))
+     ;; Convert ordered-map blocks to hash for compatibility with later passes
+     (define blocks-hash
+       (for/hash ([kv (in-ordered-map (state-blocks final-state*))])
+         (values (car kv) (cdr kv))))
+     (CProgram (info-set-counter info (state-counter final-state*))
+               blocks-hash)]))
 
 ;; Convert AST expression to atomic C-var expression
 (define (ast->catom exp)
   (match exp
     [(Int n) (CInt n)]
     [(Bool b) (CBool b)]
-    [(Var:named name) (CVar name)]
+    [(Var id) (CVar id)]
     [_ (error 'ast->catom "not atomic: ~a" exp)]))
 
 ;; ============================================================
 ;; Explicate Tail (expression in tail position)
 ;; ============================================================
 
-(define (explicate-tail exp)
+;; explicate-tail: state exp -> (values tail new-state)
+(define (explicate-tail st exp)
   (match exp
     ;; Atomic expressions - return directly
-    [(Int n) (CReturn (CInt n))]
-    [(Bool b) (CReturn (CBool b))]
-    [(Void) (CReturn (CBool #f))]  ; Void -> #f
-    [(Var:named name) (CReturn (CVar name))]
+    [(Int n) (values (CReturn (CInt n)) st)]
+    [(Bool b) (values (CReturn (CBool b)) st)]
+    [(Void) (values (CReturn (CBool #f)) st)]  ; Void -> #f
+    [(Var id) (values (CReturn (CVar id)) st)]
 
     ;; Primitive operations
     [(Prim op args)
-     (CReturn (CPrim op (map ast->catom args)))]
+     (values (CReturn (CPrim op (map ast->catom args))) st)]
 
     ;; Let binding
-    [(Let (Var:named name) rhs body)
-     (explicate-assign name rhs (explicate-tail body))]
+    [(Let (Var id) rhs body)
+     (define-values (body-tail st1) (explicate-tail st body))
+     (explicate-assign st1 id rhs body-tail)]
 
     ;; Conditional
     [(If cond then else)
-     (define then-label (fresh-label 'then))
-     (define else-label (fresh-label 'else))
-     (add-block! then-label (explicate-tail then))
-     (add-block! else-label (explicate-tail else))
-     (explicate-pred cond then-label else-label)]
+     (define-values (then-label st1) (fresh-label st 'then))
+     (define-values (else-label st2) (fresh-label st1 'else))
+     (define-values (then-tail st3) (explicate-tail st2 then))
+     (define-values (else-tail st4) (explicate-tail st3 else))
+     (define st5 (add-block st4 then-label then-tail))
+     (define st6 (add-block st5 else-label else-tail))
+     (explicate-pred st6 cond then-label else-label)]
 
     ;; Sequence
     [(Begin exprs body)
-     (define tail (explicate-tail body))
-     (foldr (lambda (e t) (explicate-effect e t)) tail exprs)]
+     (define-values (body-tail st1) (explicate-tail st body))
+     (explicate-effect-list st1 exprs body-tail)]
 
     ;; Type annotation
     [(HasType exp _)
-     (explicate-tail exp)]
+     (explicate-tail st exp)]
 
     [_ (error 'explicate-tail "unhandled expression: ~a" exp)]))
 
@@ -96,47 +139,48 @@
 ;; Explicate Assign (assignment context)
 ;; ============================================================
 
-(define (explicate-assign name rhs cont)
+;; explicate-assign: state var-id rhs cont -> (values tail new-state)
+(define (explicate-assign st name rhs cont)
   (match rhs
     ;; Atomic expressions
     [(Int n)
-     (CSeq (CAssign (CVar name) (CInt n)) cont)]
+     (values (CSeq (CAssign (CVar name) (CInt n)) cont) st)]
     [(Bool b)
-     (CSeq (CAssign (CVar name) (CBool b)) cont)]
+     (values (CSeq (CAssign (CVar name) (CBool b)) cont) st)]
     [(Void)
-     (CSeq (CAssign (CVar name) (CBool #f)) cont)]
-    [(Var:named var)
-     (CSeq (CAssign (CVar name) (CVar var)) cont)]
+     (values (CSeq (CAssign (CVar name) (CBool #f)) cont) st)]
+    [(Var id)
+     (values (CSeq (CAssign (CVar name) (CVar id)) cont) st)]
 
     ;; Primitive operations
     [(Prim op args)
-     (CSeq (CAssign (CVar name) (CPrim op (map ast->catom args))) cont)]
+     (values (CSeq (CAssign (CVar name) (CPrim op (map ast->catom args))) cont) st)]
 
     ;; Let binding
-    [(Let (Var:named inner-name) inner-rhs inner-body)
-     (explicate-assign inner-name inner-rhs
-                       (explicate-assign name inner-body cont))]
+    [(Let (Var inner-id) inner-rhs inner-body)
+     (define-values (inner-cont st1) (explicate-assign st name inner-body cont))
+     (explicate-assign st1 inner-id inner-rhs inner-cont)]
 
     ;; Conditional - create continuation block
     [(If cond then else)
-     (define cont-label (fresh-label 'cont))
-     (add-block! cont-label cont)
-     (define then-label (fresh-label 'then))
-     (define else-label (fresh-label 'else))
-     (add-block! then-label
-                 (explicate-assign name then (CGoto cont-label)))
-     (add-block! else-label
-                 (explicate-assign name else (CGoto cont-label)))
-     (explicate-pred cond then-label else-label)]
+     (define-values (cont-label st1) (fresh-label st 'cont))
+     (define st2 (add-block st1 cont-label cont))
+     (define-values (then-label st3) (fresh-label st2 'then))
+     (define-values (else-label st4) (fresh-label st3 'else))
+     (define-values (then-tail st5) (explicate-assign st4 name then (CGoto cont-label)))
+     (define-values (else-tail st6) (explicate-assign st5 name else (CGoto cont-label)))
+     (define st7 (add-block st6 then-label then-tail))
+     (define st8 (add-block st7 else-label else-tail))
+     (explicate-pred st8 cond then-label else-label)]
 
     ;; Sequence
     [(Begin exprs body)
-     (define assign-tail (explicate-assign name body cont))
-     (foldr (lambda (e t) (explicate-effect e t)) assign-tail exprs)]
+     (define-values (assign-tail st1) (explicate-assign st name body cont))
+     (explicate-effect-list st1 exprs assign-tail)]
 
     ;; Type annotation
     [(HasType exp _)
-     (explicate-assign name exp cont)]
+     (explicate-assign st name exp cont)]
 
     [_ (error 'explicate-assign "unhandled expression: ~a" rhs)]))
 
@@ -144,93 +188,110 @@
 ;; Explicate Effect (expression for side effects only)
 ;; ============================================================
 
-(define (explicate-effect exp cont)
+;; explicate-effect: state exp cont -> (values tail new-state)
+(define (explicate-effect st exp cont)
   (match exp
     ;; Atomic - no effect, continue
-    [(Int _) cont]
-    [(Bool _) cont]
-    [(Void) cont]
-    [(Var:named _) cont]
+    [(Int _) (values cont st)]
+    [(Bool _) (values cont st)]
+    [(Void) (values cont st)]
+    [(Var _) (values cont st)]
 
     ;; Primitive with side effects
     [(Prim 'read '())
-     ;; Discard result
-     (define tmp (fresh-label 'tmp))
-     (CSeq (CAssign (CVar tmp) (CPrim 'read '())) cont)]
-    [(Prim _ _) cont]  ; Other prims have no side effects
+     ;; Discard result - use fresh variable ID
+     (define-values (tmp-id st1) (fresh-var-id st))
+     (values (CSeq (CAssign (CVar tmp-id) (CPrim 'read '())) cont) st1)]
+    [(Prim _ _) (values cont st)]  ; Other prims have no side effects
 
     ;; Let binding
-    [(Let (Var:named name) rhs body)
-     (explicate-assign name rhs (explicate-effect body cont))]
+    [(Let (Var id) rhs body)
+     (define-values (body-cont st1) (explicate-effect st body cont))
+     (explicate-assign st1 id rhs body-cont)]
 
     ;; Conditional
     [(If cond then else)
-     (define cont-label (fresh-label 'cont))
-     (add-block! cont-label cont)
-     (define then-label (fresh-label 'then))
-     (define else-label (fresh-label 'else))
-     (add-block! then-label (explicate-effect then (CGoto cont-label)))
-     (add-block! else-label (explicate-effect else (CGoto cont-label)))
-     (explicate-pred cond then-label else-label)]
+     (define-values (cont-label st1) (fresh-label st 'cont))
+     (define st2 (add-block st1 cont-label cont))
+     (define-values (then-label st3) (fresh-label st2 'then))
+     (define-values (else-label st4) (fresh-label st3 'else))
+     (define-values (then-tail st5) (explicate-effect st4 then (CGoto cont-label)))
+     (define-values (else-tail st6) (explicate-effect st5 else (CGoto cont-label)))
+     (define st7 (add-block st6 then-label then-tail))
+     (define st8 (add-block st7 else-label else-tail))
+     (explicate-pred st8 cond then-label else-label)]
 
     ;; Sequence
     [(Begin exprs body)
-     (define effect-tail (explicate-effect body cont))
-     (foldr (lambda (e t) (explicate-effect e t)) effect-tail exprs)]
+     (define-values (effect-tail st1) (explicate-effect st body cont))
+     (explicate-effect-list st1 exprs effect-tail)]
 
     ;; Mutation
-    [(SetBang (Var:named name) rhs)
-     (explicate-assign name rhs cont)]
+    [(SetBang (Var id) rhs)
+     (explicate-assign st id rhs cont)]
 
     ;; Type annotation
     [(HasType exp _)
-     (explicate-effect exp cont)]
+     (explicate-effect st exp cont)]
 
     [_ (error 'explicate-effect "unhandled expression: ~a" exp)]))
+
+;; explicate-effect-list: state exprs cont -> (values tail new-state)
+;; Process effects from right to left (foldr pattern)
+(define (explicate-effect-list st exprs cont)
+  (foldr (lambda (exp acc)
+           (define-values (tail state) acc)
+           (explicate-effect state exp tail))
+         (values cont st)
+         exprs))
 
 ;; ============================================================
 ;; Explicate Predicate (conditional context)
 ;; ============================================================
 
-(define (explicate-pred exp then-label else-label)
+;; explicate-pred: state exp then-label else-label -> (values tail new-state)
+(define (explicate-pred st exp then-label else-label)
   (match exp
     ;; Boolean constant
-    [(Bool #t) (CGoto then-label)]
-    [(Bool #f) (CGoto else-label)]
+    [(Bool #t) (values (CGoto then-label) st)]
+    [(Bool #f) (values (CGoto else-label) st)]
 
     ;; Variable - compare to #f
-    [(Var:named name)
-     (CIf (CPrim 'eq? (list (CVar name) (CBool #f)))
-          else-label then-label)]
+    [(Var id)
+     (values (CIf (CPrim 'eq? (list (CVar id) (CBool #f)))
+                  else-label then-label)
+             st)]
 
     ;; Comparison primitives
     [(Prim (and op (or 'eq? '< '<= '> '>= 'not)) args)
-     (CIf (CPrim op (map ast->catom args)) then-label else-label)]
+     (values (CIf (CPrim op (map ast->catom args)) then-label else-label) st)]
 
     ;; not
     [(Prim 'not (list arg))
-     (explicate-pred arg else-label then-label)]
+     (explicate-pred st arg else-label then-label)]
 
     ;; Let binding
-    [(Let (Var:named name) rhs body)
-     (explicate-assign name rhs
-                       (explicate-pred body then-label else-label))]
+    [(Let (Var id) rhs body)
+     (define-values (body-pred st1) (explicate-pred st body then-label else-label))
+     (explicate-assign st1 id rhs body-pred)]
 
     ;; Nested conditional
     [(If cond then else)
-     (define then-pred-label (fresh-label 'then))
-     (define else-pred-label (fresh-label 'else))
-     (add-block! then-pred-label (explicate-pred then then-label else-label))
-     (add-block! else-pred-label (explicate-pred else then-label else-label))
-     (explicate-pred cond then-pred-label else-pred-label)]
+     (define-values (then-pred-label st1) (fresh-label st 'then))
+     (define-values (else-pred-label st2) (fresh-label st1 'else))
+     (define-values (then-pred st3) (explicate-pred st2 then then-label else-label))
+     (define-values (else-pred st4) (explicate-pred st3 else then-label else-label))
+     (define st5 (add-block st4 then-pred-label then-pred))
+     (define st6 (add-block st5 else-pred-label else-pred))
+     (explicate-pred st6 cond then-pred-label else-pred-label)]
 
     ;; Type annotation
     [(HasType exp _)
-     (explicate-pred exp then-label else-label)]
+     (explicate-pred st exp then-label else-label)]
 
     ;; Other expressions - evaluate and compare to #f
     [_
-     (define tmp (fresh-label 'pred))
-     (explicate-assign tmp exp
-                       (CIf (CPrim 'eq? (list (CVar tmp) (CBool #f)))
+     (define-values (tmp-id st1) (fresh-var-id st))
+     (explicate-assign st1 tmp-id exp
+                       (CIf (CPrim 'eq? (list (CVar tmp-id) (CBool #f)))
                             else-label then-label))]))

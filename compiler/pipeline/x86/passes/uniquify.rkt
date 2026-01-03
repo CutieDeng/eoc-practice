@@ -4,98 +4,126 @@
 ;; Pass: Uniquify
 ;; ============================================================
 ;;
-;; Make all variable names unique by appending a counter.
+;; Make all variable names unique by using integer IDs.
 ;; This simplifies later passes by ensuring no shadowing.
 ;;
-;; Input:  AST (Lvar)
-;; Output: AST with unique variable names
+;; Input:  AST (Lvar) with Program info containing 'counter key
+;; Output: AST with unique variable IDs (Var instead of Var:named)
+;;
+;; Design: Functional style - counter is threaded through all
+;; recursive calls as state. No global mutable state.
 ;;
 ;; ============================================================
 
 (require racket/match
-         "../../../kernel/ir/ast/types.rkt")
+         "../../../kernel/ir/ast/types.rkt"
+         "../../../kernel/data/main.rkt")
 
 (provide uniquify)
 
-;; Counter for generating unique names
-(define counter 0)
+;; ============================================================
+;; State Management
+;; ============================================================
 
-(define (fresh-name name)
-  (set! counter (add1 counter))
-  (string->symbol (format "~a.~a" name counter)))
+;; Get counter from info (default 0)
+(define (info-counter info)
+  (ordered-map-ref info 'counter 0))
 
-(define (reset-counter!)
-  (set! counter 0))
+;; Set counter in info
+(define (info-set-counter info counter)
+  (ordered-map-set info 'counter counter))
 
-;; Environment: maps original names to unique names
-(define (empty-env) '())
+;; Generate fresh variable ID, returns (values new-var new-counter)
+(define (fresh-var counter)
+  (values (Var counter) (add1 counter)))
 
-(define (extend-env env name new-name)
-  (cons (cons name new-name) env))
+;; Environment: ordered-map from original name to Var
+(define (empty-env)
+  (ordered-map-empty symbol-compare))
+
+(define (extend-env env name var)
+  (ordered-map-set env name var))
 
 (define (lookup-env env name)
-  (cond
-    [(assq name env) => cdr]
-    [else (error 'uniquify "unbound variable: ~a" name)]))
+  (define result (ordered-map-ref env name #f))
+  (unless result
+    (error 'uniquify "unbound variable: ~a" name))
+  result)
 
 ;; ============================================================
 ;; Main Pass
 ;; ============================================================
 
 (define (uniquify prog)
-  (reset-counter!)
   (match prog
     [(Program info body)
-     (Program info (uniquify-exp (empty-env) body))]))
+     (define counter (info-counter info))
+     (define-values (new-body new-counter)
+       (uniquify-exp (empty-env) counter body))
+     (Program (info-set-counter info new-counter) new-body)]))
 
-(define (uniquify-exp env exp)
+;; uniquify-exp: env counter exp -> (values new-exp new-counter)
+(define (uniquify-exp env counter exp)
   (match exp
     ;; Literals - unchanged
-    [(Int n) (Int n)]
-    [(Bool b) (Bool b)]
-    [(Void) (Void)]
+    [(Int n) (values (Int n) counter)]
+    [(Bool b) (values (Bool b) counter)]
+    [(Void) (values (Void) counter)]
 
     ;; Variable reference
     [(Var:named name)
-     (Var:named (lookup-env env name))]
+     (values (lookup-env env name) counter)]
 
     ;; Let binding
     [(Let (Var:named name) rhs body)
-     (define new-name (fresh-name name))
-     (define new-env (extend-env env name new-name))
-     (Let (Var:named new-name)
-          (uniquify-exp env rhs)
-          (uniquify-exp new-env body))]
+     (define-values (new-var counter1) (fresh-var counter))
+     (define new-env (extend-env env name new-var))
+     (define-values (new-rhs counter2) (uniquify-exp env counter1 rhs))
+     (define-values (new-body counter3) (uniquify-exp new-env counter2 body))
+     (values (Let new-var new-rhs new-body) counter3)]
 
     ;; Conditional
     [(If cond then else)
-     (If (uniquify-exp env cond)
-         (uniquify-exp env then)
-         (uniquify-exp env else))]
+     (define-values (new-cond counter1) (uniquify-exp env counter cond))
+     (define-values (new-then counter2) (uniquify-exp env counter1 then))
+     (define-values (new-else counter3) (uniquify-exp env counter2 else))
+     (values (If new-cond new-then new-else) counter3)]
 
     ;; Sequence
     [(Begin exprs body)
-     (Begin (map (lambda (e) (uniquify-exp env e)) exprs)
-            (uniquify-exp env body))]
+     (define-values (new-exprs counter1)
+       (uniquify-exp-list env counter exprs))
+     (define-values (new-body counter2) (uniquify-exp env counter1 body))
+     (values (Begin new-exprs new-body) counter2)]
 
     ;; Mutation
     [(SetBang (Var:named name) rhs)
-     (SetBang (Var:named (lookup-env env name))
-              (uniquify-exp env rhs))]
+     (define-values (new-rhs counter1) (uniquify-exp env counter rhs))
+     (values (SetBang (lookup-env env name) new-rhs) counter1)]
     [(GetBang (Var:named name))
-     (GetBang (Var:named (lookup-env env name)))]
+     (values (GetBang (lookup-env env name)) counter)]
 
     ;; While loop
     [(WhileLoop cond body)
-     (WhileLoop (uniquify-exp env cond)
-                (uniquify-exp env body))]
+     (define-values (new-cond counter1) (uniquify-exp env counter cond))
+     (define-values (new-body counter2) (uniquify-exp env counter1 body))
+     (values (WhileLoop new-cond new-body) counter2)]
 
     ;; Primitive operations
     [(Prim op args)
-     (Prim op (map (lambda (a) (uniquify-exp env a)) args))]
+     (define-values (new-args counter1) (uniquify-exp-list env counter args))
+     (values (Prim op new-args) counter1)]
 
     ;; Type annotations
     [(HasType exp type)
-     (HasType (uniquify-exp env exp) type)]
+     (define-values (new-exp counter1) (uniquify-exp env counter exp))
+     (values (HasType new-exp type) counter1)]
 
     [_ (error 'uniquify-exp "unhandled expression: ~a" exp)]))
+
+;; uniquify-exp-list: env counter list -> (values new-list new-counter)
+(define (uniquify-exp-list env counter exprs)
+  (for/fold ([acc '()] [c counter])
+            ([e exprs])
+    (define-values (new-e new-c) (uniquify-exp env c e))
+    (values (append acc (list new-e)) new-c)))

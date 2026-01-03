@@ -7,16 +7,36 @@
 ;; Convert C-var to x86-var instructions.
 ;; Chooses appropriate x86 instructions for each operation.
 ;;
-;; Input:  CProgram
+;; Input:  CProgram with info containing 'counter
 ;; Output: X86Program (with pseudo-registers)
+;;
+;; Design: Functional style - counter is threaded through for
+;; generating fresh temp variables. No global mutable state.
 ;;
 ;; ============================================================
 
 (require racket/match
+         "../../../kernel/data/main.rkt"
          "../ir/cvar.rkt"
          "../ir/x86var.rkt")
 
 (provide select-instructions)
+
+;; ============================================================
+;; State Management
+;; ============================================================
+
+;; Get counter from info (default 0)
+(define (info-counter info)
+  (ordered-map-ref info 'counter 0))
+
+;; Set counter in info
+(define (info-set-counter info counter)
+  (ordered-map-set info 'counter counter))
+
+;; Generate fresh variable ID
+(define (fresh-var-id counter)
+  (values counter (add1 counter)))
 
 ;; ============================================================
 ;; Main Pass
@@ -25,39 +45,47 @@
 (define (select-instructions prog)
   (match prog
     [(CProgram info blocks)
-     (define x86-blocks
-       (for/hash ([(label block) (in-hash blocks)])
-         (values label (select-block block))))
-     (X86Program info x86-blocks)]))
+     (define counter (info-counter info))
+     (define-values (x86-blocks new-counter)
+       (for/fold ([result (hash)] [c counter])
+                 ([(label block) (in-hash blocks)])
+         (define-values (new-block c*) (select-block c block))
+         (values (hash-set result label new-block) c*)))
+     (X86Program (info-set-counter info new-counter) x86-blocks)]))
 
-(define (select-block block)
+;; select-block: counter block -> (values x86-block new-counter)
+(define (select-block counter block)
   (match block
     [(CBlock info tail)
-     (X86Block info (select-tail tail))]))
+     (define-values (instrs new-counter) (select-tail counter tail))
+     (values (X86Block info instrs) new-counter)]))
 
 ;; ============================================================
 ;; Select Tail
 ;; ============================================================
 
-(define (select-tail tail)
+;; select-tail: counter tail -> (values instrs new-counter)
+(define (select-tail counter tail)
   (match tail
     ;; Return
     [(CReturn exp)
-     (append (select-exp (Reg 'rax) exp)
-             (list (Jmp 'conclusion)))]
+     (values (append (select-exp (Reg 'rax) exp)
+                     (list (Jmp 'conclusion)))
+             counter)]
 
     ;; Sequence
     [(CSeq stmt tail)
-     (append (select-stmt stmt)
-             (select-tail tail))]
+     (define-values (tail-instrs new-counter) (select-tail counter tail))
+     (values (append (select-stmt stmt) tail-instrs)
+             new-counter)]
 
     ;; Goto
     [(CGoto label)
-     (list (Jmp label))]
+     (values (list (Jmp label)) counter)]
 
     ;; Conditional
     [(CIf cond then-label else-label)
-     (select-pred cond then-label else-label)]
+     (select-pred counter cond then-label else-label)]
 
     [_ (error 'select-tail "unhandled tail: ~a" tail)]))
 
@@ -129,27 +157,31 @@
 ;; Select Predicate (for conditional jumps)
 ;; ============================================================
 
-(define (select-pred cond then-label else-label)
+;; select-pred: counter cond then-label else-label -> (values instrs new-counter)
+(define (select-pred counter cond then-label else-label)
   (match cond
     [(CPrim (and op (or 'eq? '< '<= '> '>=)) (list arg1 arg2))
      (define src1 (select-atom arg1))
      (define src2 (select-atom arg2))
      (define cc (prim->cc op))
-     (list (Instr 'cmpq (list src2 src1))
-           (JmpIf cc then-label)
-           (Jmp else-label))]
+     (values (list (Instr 'cmpq (list src2 src1))
+                   (JmpIf cc then-label)
+                   (Jmp else-label))
+             counter)]
 
     [(CPrim 'not (list arg))
      ;; Flip branches
-     (select-pred arg else-label then-label)]
+     (select-pred counter arg else-label then-label)]
 
     [_
      ;; General case: evaluate to temp and compare
-     (define temp (Var 'tmp.pred))
-     (append (select-exp temp cond)
-             (list (Instr 'cmpq (list (Imm 0) temp))
-                   (JmpIf 'ne then-label)
-                   (Jmp else-label)))]))
+     (define-values (tmp-id new-counter) (fresh-var-id counter))
+     (define temp (Var tmp-id))
+     (values (append (select-exp temp cond)
+                     (list (Instr 'cmpq (list (Imm 0) temp))
+                           (JmpIf 'ne then-label)
+                           (Jmp else-label)))
+             new-counter)]))
 
 ;; ============================================================
 ;; Helpers
