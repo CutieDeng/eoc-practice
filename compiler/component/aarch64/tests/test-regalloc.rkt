@@ -14,6 +14,7 @@
          "../backend/regalloc.rkt"
          "../../../../cutie-ftree/pvector.rkt"
          "../../../../cutie-ftree/ordered-map.rkt"
+         "../../../../cutie-ftree/bitset.rkt"
          "../../../../cutie-ftree/comparator.rkt")
 
 ;; ============================================================================
@@ -93,15 +94,21 @@
      ;; a = b + c
      ;; d = a + e
      ;; ret
+     (define vregs
+       (list (VReg:gpr 'a 64) (VReg:gpr 'b 64) (VReg:gpr 'c 64)
+             (VReg:gpr 'd 64) (VReg:gpr 'e 64)))
+     (define vreg-index (build-vreg-index vregs))
+
      (define insns
        (list->pvector
         (list (Insn:arith 'add (VReg:gpr 'a 64) (VReg:gpr 'b 64) (VReg:gpr 'c 64))
               (Insn:arith 'add (VReg:gpr 'd 64) (VReg:gpr 'a 64) (VReg:gpr 'e 64))
               (Insn:ret))))
 
-     (define live-out (set (VReg:gpr 'd 64)))  ; d is live at exit
+     ;; d is live at exit (d has index 3 in vreg-index)
+     (define live-out (bitset-add bitset-empty 3))
 
-     (define-values (liveness live-in) (compute-block-liveness insns live-out))
+     (define-values (liveness live-in) (compute-block-liveness insns live-out vreg-index))
 
      ;; After first instruction: a, e should be live (a used in insn 2, e used in insn 2)
      ;; Before first instruction: b, c, e should be live
@@ -164,7 +171,7 @@
 
      (check-true (AllocationResult? result))
      (check-true (AllocationResult-success? result))
-     (check-true (hash-has-key? (AllocationResult-assignment result) 'a)))
+     (check-true (ordered-map-has-key? (AllocationResult-assignment result) 'a)))
 
    (test-case "allocation with SVE virtual registers"
      (define vz (VReg:sve 'vec0))
@@ -189,11 +196,11 @@
 
      (check-true (AllocationResult-success? result))
      ;; Check that vz gets a z register
-     (define z-assign (hash-ref (AllocationResult-assignment result) 'vec0 #f))
-     (check-true (Reg:z? z-assign))
+     (define z-query (ordered-map-query (AllocationResult-assignment result) 'vec0))
+     (check-true (and z-query (Reg:z? (cdr z-query))))
      ;; Check that vp gets a p register
-     (define p-assign (hash-ref (AllocationResult-assignment result) 'mask #f))
-     (check-true (Reg:p? p-assign)))))
+     (define p-query (ordered-map-query (AllocationResult-assignment result) 'mask))
+     (check-true (and p-query (Reg:p? (cdr p-query)))))))
 
 ;; ============================================================================
 ;; Run All Tests

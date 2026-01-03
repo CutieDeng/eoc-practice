@@ -7,7 +7,7 @@
 (require racket/format
          racket/pretty
          racket/match
-         racket/set
+         racket/list
          racket/string
          "../ir/types.rkt"
          "../ir/cfg.rkt"
@@ -16,6 +16,7 @@
          "../backend/regalloc.rkt"
          "../../../../cutie-ftree/pvector.rkt"
          "../../../../cutie-ftree/ordered-map.rkt"
+         "../../../../cutie-ftree/bitset.rkt"
          "../../../../cutie-ftree/comparator.rkt")
 
 ;; ============================================================================
@@ -145,6 +146,26 @@
     (print-block block)
     (newline)))
 
+;; Helper: ordered-map-ref with default
+(define (omap-ref m k default)
+  (define result (ordered-map-query m k))
+  (if result (cdr result) default))
+
+;; ============================================================================
+;; Collect Virtual Registers
+;; ============================================================================
+
+(define (collect-all-vregs cfg)
+  (remove-duplicates
+    (for*/list ([bid (in-cfg-block-ids cfg)]
+                [block (in-value (cfg-get-block cfg bid))]
+                #:when block
+                [insn (in-pvector (AsmBlock-insns block))]
+                [r (in-list (append (insn-defs insn) (insn-uses insn)))]
+                #:when (vreg? r))
+      r)
+    #:key vreg-id))
+
 ;; ============================================================================
 ;; Main Test
 ;; ============================================================================
@@ -161,22 +182,33 @@
   ;; Print original CFG
   (print-cfg cfg "Original CFG (with virtual registers)")
 
+  ;; Collect vregs and build index
+  (define all-vregs (collect-all-vregs cfg))
+  (define vreg-index (build-vreg-index all-vregs))
+
   ;; Run liveness analysis
   (displayln "Running liveness analysis...")
-  (define liveness (compute-liveness cfg))
+  (define liveness (compute-liveness cfg vreg-index))
   (displayln "  Liveness analysis complete.")
 
   ;; Print live-in/live-out for each block
   (displayln "\nLiveness Information:")
   (displayln "---------------------")
   (for ([bid (in-cfg-block-ids cfg)])
-    (define live-in (hash-ref (LivenessInfo-live-in liveness) bid (set)))
-    (define live-out (hash-ref (LivenessInfo-live-out liveness) bid (set)))
+    (define live-in (omap-ref (LivenessInfo-live-in liveness) bid bitset-empty))
+    (define live-out (omap-ref (LivenessInfo-live-out liveness) bid bitset-empty))
     (printf "Block ~a:\n" (BlockId-id bid))
+    ;; Convert bitset indices back to vreg names for display
     (printf "  live-in:  {~a}\n"
-            (string-join (for/list ([r (in-set live-in)]) (print-reg r)) ", "))
+            (string-join
+             (for/list ([idx (in-bitset live-in)])
+               (symbol->string (idx->vreg-id vreg-index idx)))
+             ", "))
     (printf "  live-out: {~a}\n"
-            (string-join (for/list ([r (in-set live-out)]) (print-reg r)) ", ")))
+            (string-join
+             (for/list ([idx (in-bitset live-out)])
+               (symbol->string (idx->vreg-id vreg-index idx)))
+             ", ")))
 
   ;; Run register allocation
   (displayln "\nRunning register allocation...")
@@ -185,16 +217,18 @@
   (displayln "\nAllocation Result:")
   (displayln "------------------")
   (printf "  Success: ~a\n" (AllocationResult-success? alloc-result))
-  (printf "  Spilled: ~a\n" (set-count (AllocationResult-spilled alloc-result)))
+  (printf "  Spilled: ~a\n" (bitset-count (AllocationResult-spilled alloc-result)))
 
   (displayln "\nRegister Assignment:")
-  (for ([(vid phys) (in-hash (AllocationResult-assignment alloc-result))])
+  (for ([kv (in-ordered-map (AllocationResult-assignment alloc-result))])
+    (define vid (car kv))
+    (define phys (cdr kv))
     (printf "  ~a -> ~a\n" vid (print-reg phys)))
 
-  (when (not (set-empty? (AllocationResult-callee-saved-used alloc-result)))
+  (when (not (bitset-empty? (AllocationResult-callee-saved-used alloc-result)))
     (displayln "\nCallee-saved registers used:")
-    (for ([r (in-set (AllocationResult-callee-saved-used alloc-result))])
-      (printf "  ~a\n" (print-reg r))))
+    (for ([idx (in-bitset (AllocationResult-callee-saved-used alloc-result))])
+      (printf "  color ~a\n" idx)))
 
   ;; Apply allocation to CFG
   (displayln "\nApplying register allocation...")

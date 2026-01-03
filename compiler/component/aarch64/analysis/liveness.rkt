@@ -5,17 +5,19 @@
 ;; ============================================================================
 ;;
 ;; Computes variable liveness for aarch64 instruction sequences.
+;; Uses bitset for all set operations (variables normalized to integers).
 ;; This is used by the register allocator to build interference graphs.
 ;;
 ;; ============================================================================
 
 (require racket/match
-         racket/set
          racket/list
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../../../../cutie-ftree/pvector.rkt"
-         "../../../../cutie-ftree/ordered-map.rkt")
+         "../../../../cutie-ftree/ordered-map.rkt"
+         "../../../../cutie-ftree/bitset.rkt"
+         "../../../../cutie-ftree/comparator.rkt")
 
 (provide
  ;; Main analysis
@@ -37,15 +39,15 @@
 
 ;; Liveness info for entire function
 (struct LivenessInfo (
-  block-info     ; Hash[BlockId -> BlockLivenessInfo]
-  live-in        ; Hash[BlockId -> Set[Reg/VReg]]
-  live-out       ; Hash[BlockId -> Set[Reg/VReg]]
+  block-info     ; ordered-map[BlockId -> pvector[InsnLiveness]]
+  live-in        ; ordered-map[BlockId -> bitset]
+  live-out       ; ordered-map[BlockId -> bitset]
 ) #:prefab)
 
 ;; Liveness at each instruction point
 (struct InsnLiveness (
-  live-before    ; Set of live registers before this instruction
-  live-after     ; Set of live registers after this instruction
+  live-before    ; bitset of live variable indices
+  live-after     ; bitset of live variable indices
 ) #:prefab)
 
 ;; ============================================================================
@@ -138,100 +140,143 @@
     [_ '()]))
 
 ;; ============================================================================
-;; Block Liveness Analysis
+;; Helper: ordered-map-ref with default value
+;; ============================================================================
+
+(define (omap-ref m k default)
+  (define result (ordered-map-query m k))
+  (if result (cdr result) default))
+
+;; ============================================================================
+;; Convert registers to bitset using vreg-index
+;; ============================================================================
+
+;; Convert list of registers to bitset indices
+(define (regs->bitset regs vreg-index)
+  (define id->idx (vreg-index-id->idx vreg-index))
+  (for/fold ([bs bitset-empty])
+            ([r regs]
+             #:when (vreg? r))
+    (define idx (omap-ref id->idx (vreg-id r) #f))
+    (if idx
+        (bitset-add bs idx)
+        bs)))
+
+;; VReg-index accessor (matches structure from regalloc.rkt)
+(define (vreg-index-id->idx index)
+  (vector-ref (struct->vector index) 1))
+
+;; ============================================================================
+;; Block Liveness Analysis (using bitset)
 ;; ============================================================================
 
 ;; Compute liveness for a single basic block
-;; Returns: pvector of InsnLiveness, one per instruction
-(define (compute-block-liveness insns live-out)
-  ;; Process instructions in reverse order
-  (define insn-list (pvector->list insns))
-  (define n (length insn-list))
+;; Returns: (values pvector[InsnLiveness] live-in-bitset)
+(define (compute-block-liveness insns live-out vreg-index)
+  (define n (pvector-length insns))
 
-  ;; Build live-after for each instruction (reverse order)
-  (define-values (liveness-list final-live-in)
-    (for/fold ([result '()]
+  ;; Build liveness: iterate in reverse, use cons-left to build correct order
+  (define-values (liveness final-live-in)
+    (for/fold ([result (pvector-empty)]
                [live live-out])
-              ([insn (in-list (reverse insn-list))])
-      (define uses (list->set (insn-uses insn)))
-      (define defs (list->set (insn-defs insn)))
-      (define live-before (set-union uses (set-subtract live defs)))
-      (values (cons (InsnLiveness live-before live) result)
+              ([i (in-range (sub1 n) -1 -1)])
+      (define insn (pvector-ref insns i))
+      (define uses (regs->bitset (insn-uses insn) vreg-index))
+      (define defs (regs->bitset (insn-defs insn) vreg-index))
+      (define live-before (bitset-union uses (bitset-subtract live defs)))
+      (values (pvector-cons-left result (InsnLiveness live-before live))
               live-before)))
 
-  (values (list->pvector liveness-list) final-live-in))
+  (values liveness final-live-in))
 
 ;; ============================================================================
-;; CFG Liveness Analysis
+;; CFG Liveness Analysis (using bitset)
 ;; ============================================================================
 
-;; Compute liveness for entire CFG
-(define (compute-liveness cfg)
+;; Compute liveness for entire CFG (pure functional)
+;; vreg-index: VRegIndex struct with id->idx and idx->id mappings
+(define (compute-liveness cfg vreg-index)
   (define block-ids (for/list ([bid (in-cfg-block-ids cfg)]) bid))
 
-  ;; Initialize
-  (define live-out (make-hash))
-  (define live-in (make-hash))
-  (define block-liveness (make-hash))
+  ;; Initialize live-in and live-out as ordered-maps with empty bitsets
+  (define init-live
+    (for/fold ([m (ordered-map-empty block-id-compare)])
+              ([bid block-ids])
+      (ordered-map-set m bid bitset-empty)))
 
-  (for ([bid (in-list block-ids)])
-    (hash-set! live-out bid (set))
-    (hash-set! live-in bid (set)))
-
-  ;; Build successor/predecessor maps
-  (define succs (make-hash))
-  (define preds (make-hash))
-
-  (for ([bid (in-list block-ids)])
-    (hash-set! succs bid '())
-    (hash-set! preds bid '()))
-
-  (for ([bid (in-list block-ids)])
-    (define block (cfg-get-block cfg bid))
-    (when block
-      (define term (AsmBlock-terminator block))
-      (define targets (terminator-targets term))
-      (for ([target targets])
-        (hash-update! succs bid (lambda (s) (cons target s)) '())
-        (hash-update! preds target (lambda (p) (cons bid p)) '()))))
-
-  ;; Worklist algorithm (backward dataflow)
-  (define worklist (reverse block-ids))
-  (define in-worklist (list->set block-ids))
-
-  (let loop ()
-    (unless (null? worklist)
-      (define bid (car worklist))
-      (set! worklist (cdr worklist))
-      (set! in-worklist (set-remove in-worklist bid))
-
+  ;; Build successor/predecessor maps (pure functional)
+  (define-values (succs preds)
+    (for/fold ([s (for/fold ([m (ordered-map-empty block-id-compare)])
+                            ([bid block-ids])
+                    (ordered-map-set m bid '()))]
+               [p (for/fold ([m (ordered-map-empty block-id-compare)])
+                            ([bid block-ids])
+                    (ordered-map-set m bid '()))])
+              ([bid block-ids])
       (define block (cfg-get-block cfg bid))
-      (when block
-        ;; live-out[B] = ∪ live-in[S] for all successors S
-        (define new-out
-          (for/fold ([out (set)])
-                    ([s (hash-ref succs bid '())])
-            (set-union out (hash-ref live-in s (set)))))
+      (if (not block)
+          (values s p)
+          (let ([targets (terminator-targets (AsmBlock-terminator block))])
+            (for/fold ([s2 s] [p2 p])
+                      ([target targets])
+              (values (ordered-map-set s2 bid (cons target (omap-ref s2 bid '())))
+                      (ordered-map-set p2 target (cons bid (omap-ref p2 target '())))))))))
 
-        (hash-set! live-out bid new-out)
+  ;; Block ID set for worklist membership tracking (using ordered-map as set)
+  (define (bid-set-empty) (ordered-map-empty block-id-compare))
+  (define (bid-set-add s bid) (ordered-map-set s bid #t))
+  (define (bid-set-remove s bid)
+    (if (ordered-map-has-key? s bid)
+        (let-values ([(m _) (ordered-map-delete s bid)]) m)
+        s))
+  (define (bid-set-member? s bid) (ordered-map-has-key? s bid))
 
-        ;; Compute liveness for instructions in block
-        (define-values (insn-liveness new-in)
-          (compute-block-liveness (AsmBlock-insns block) new-out))
+  ;; Worklist algorithm (backward dataflow) - pure functional
+  (define (worklist-loop worklist in-worklist live-in live-out block-liveness)
+    (if (pvector-empty? worklist)
+        (values live-in live-out block-liveness)
+        (let* ([bid (pvector-ref worklist 0)]
+               [rest-worklist (pvector-drop worklist 1)]
+               [new-in-worklist (bid-set-remove in-worklist bid)]
+               [block (cfg-get-block cfg bid)])
+          (if (not block)
+              (worklist-loop rest-worklist new-in-worklist live-in live-out block-liveness)
+              ;; live-out[B] = ∪ live-in[S] for all successors S
+              (let ([new-out
+                     (for/fold ([out bitset-empty])
+                               ([s (omap-ref succs bid '())])
+                       (bitset-union out (omap-ref live-in s bitset-empty)))])
+                (define new-live-out (ordered-map-set live-out bid new-out))
+                ;; Compute liveness for instructions in block
+                (define-values (insn-liveness new-in)
+                  (compute-block-liveness (AsmBlock-insns block) new-out vreg-index))
+                (define new-block-liveness (ordered-map-set block-liveness bid insn-liveness))
+                ;; If live-in changed, add predecessors to worklist
+                (if (bitset-equal? new-in (omap-ref live-in bid bitset-empty))
+                    (worklist-loop rest-worklist new-in-worklist live-in new-live-out new-block-liveness)
+                    (let ([new-live-in (ordered-map-set live-in bid new-in)]
+                          [preds-list (omap-ref preds bid '())])
+                      (define-values (updated-worklist updated-in-worklist)
+                        (for/fold ([wl rest-worklist] [iw new-in-worklist])
+                                  ([p preds-list])
+                          (if (bid-set-member? iw p)
+                              (values wl iw)
+                              (values (pvector-cons-right wl p) (bid-set-add iw p)))))
+                      (worklist-loop updated-worklist updated-in-worklist
+                                     new-live-in new-live-out new-block-liveness))))))))
 
-        (hash-set! block-liveness bid insn-liveness)
+  ;; Initial worklist (reverse order for backward analysis)
+  (define init-worklist (list->pvector (reverse block-ids)))
+  (define init-in-worklist
+    (for/fold ([s (bid-set-empty)])
+              ([bid block-ids])
+      (bid-set-add s bid)))
+  (define init-block-liveness (ordered-map-empty block-id-compare))
 
-        ;; If live-in changed, add predecessors to worklist
-        (unless (equal? new-in (hash-ref live-in bid (set)))
-          (hash-set! live-in bid new-in)
-          (for ([p (hash-ref preds bid '())])
-            (unless (set-member? in-worklist p)
-              (set! worklist (cons p worklist))
-              (set! in-worklist (set-add in-worklist p))))))
+  (define-values (final-live-in final-live-out final-block-liveness)
+    (worklist-loop init-worklist init-in-worklist init-live init-live init-block-liveness))
 
-      (loop)))
-
-  (LivenessInfo block-liveness live-in live-out))
+  (LivenessInfo final-block-liveness final-live-in final-live-out))
 
 ;; ============================================================================
 ;; Helper: Get terminator targets
@@ -251,9 +296,10 @@
 ;; Utilities
 ;; ============================================================================
 
-;; Get live registers after a specific instruction
+;; Get live bitset after a specific instruction
 (define (get-live-after liveness-info block-id insn-index)
-  (define block-info (hash-ref (LivenessInfo-block-info liveness-info) block-id #f))
+  (define block-query (ordered-map-query (LivenessInfo-block-info liveness-info) block-id))
+  (define block-info (and block-query (cdr block-query)))
   (if (and block-info (< insn-index (pvector-length block-info)))
       (InsnLiveness-live-after (pvector-ref block-info insn-index))
-      (set)))
+      bitset-empty))
