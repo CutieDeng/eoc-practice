@@ -20,8 +20,8 @@
          "types.rkt")
 
 (provide
- ;; Block ID type (re-export from graph)
- vertex-id vertex-id? vertex-id-val
+ ;; Block ID type (re-export from graph) - NO constructor!
+ vertex-id? vertex-id-val
 
  ;; Block ID comparator
  block-id-compare
@@ -227,14 +227,11 @@
                [block-data new-block-data]
                [entry (if set-entry? bid (AsmCfg-entry cfg))]))
 
-;; Get a block by ID
+;; Get a block by ID (only accepts vertex-id)
 (define (cfg-get-block cfg block-id)
-  (define vid-val
-    (cond
-      [(vertex-id? block-id) (vertex-id-val block-id)]
-      [(integer? block-id) block-id]
-      [else (error 'cfg-get-block "invalid block-id: ~a" block-id)]))
-  (ordered-map-ref (AsmCfg-block-data cfg) vid-val #f))
+  (unless (vertex-id? block-id)
+    (raise-argument-error 'cfg-get-block "vertex-id?" 1 cfg block-id))
+  (ordered-map-ref (AsmCfg-block-data cfg) (vertex-id-val block-id) #f))
 
 ;; Update a block in the CFG
 (define (cfg-update-block cfg block-id updater)
@@ -287,10 +284,11 @@
 (define (in-cfg-blocks cfg)
   (in-ordered-map-values (AsmCfg-block-data cfg)))
 
+;; Iterate over block IDs - extract from block structs (safe API, no vertex-id constructor)
 (define (in-cfg-block-ids cfg)
   (in-generator
-    (for ([vid-val (in-ordered-map-keys (AsmCfg-block-data cfg))])
-      (yield (vertex-id vid-val)))))
+    (for ([block (in-cfg-blocks cfg)])
+      (yield (AsmBlock-id block)))))
 
 (require racket/generator)
 
@@ -320,23 +318,19 @@
 
 ;; Get successors of a block (returns list of vertex-ids)
 (define (cfg-successors cfg block-id)
-  (define vid
-    (if (vertex-id? block-id)
-        block-id
-        (vertex-id block-id)))
-  (define succ-bitset (graph-successors (AsmCfg-graph cfg) vid))
-  (for/list ([v (in-bitset succ-bitset)])
-    (vertex-id v)))
+  (unless (vertex-id? block-id)
+    (raise-argument-error 'cfg-successors "vertex-id?" 1 cfg block-id))
+  ;; graph-successors now returns (pvector vertex-id)
+  (define succs (graph-successors (AsmCfg-graph cfg) block-id))
+  (pvector->list succs))
 
 ;; Get predecessors of a block (returns list of vertex-ids)
 (define (cfg-predecessors cfg block-id)
-  (define vid
-    (if (vertex-id? block-id)
-        block-id
-        (vertex-id block-id)))
-  (define pred-bitset (graph-predecessors (AsmCfg-graph cfg) vid))
-  (for/list ([v (in-bitset pred-bitset)])
-    (vertex-id v)))
+  (unless (vertex-id? block-id)
+    (raise-argument-error 'cfg-predecessors "vertex-id?" 1 cfg block-id))
+  ;; graph-predecessors now returns (pvector vertex-id)
+  (define preds (graph-predecessors (AsmCfg-graph cfg) block-id))
+  (pvector->list preds))
 
 ;; Find all reachable blocks from entry (returns bitset of vertex-id vals)
 (define (cfg-reachable-blocks cfg)
@@ -370,9 +364,9 @@
 ;; Backward Compatibility: BlockId alias
 ;; ============================================================================
 
-;; For code that still uses BlockId
-(define BlockId vertex-id)
+;; For code that still uses BlockId - NO constructor!
+;; BlockId is just an alias for vertex-id? predicate
 (define BlockId? vertex-id?)
 (define BlockId-id vertex-id-val)
 
-(provide BlockId BlockId? BlockId-id)
+(provide BlockId? BlockId-id)

@@ -132,9 +132,9 @@
  operand?
 
  ;; === CFG ===
- ;; Block ID (vertex-id from graph)
- vertex-id vertex-id? vertex-id-val
- BlockId BlockId? BlockId-id
+ ;; Block ID (vertex-id from graph) - NO constructors!
+ vertex-id? vertex-id-val
+ BlockId? BlockId-id
  block-id-compare
 
  ;; Blocks

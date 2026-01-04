@@ -524,7 +524,7 @@
           [_
            (interp-error (format "unknown terminator: ~a" term) state)])))
 
-    ;; Resolve target to BlockId
+    ;; Resolve target to BlockId (vertex-id)
     (define/private (resolve-target target cfg)
       (match target
         [(? BlockId?) target]
@@ -536,7 +536,12 @@
                 (eq? (Label:named-name label) name)
                 (AsmBlock-id block)))]
         [(Label:id id)
-         (BlockId id)]
+         ;; Search for block with matching Label:id
+         (for/or ([block (in-cfg-blocks cfg)])
+           (define label (AsmBlock-label block))
+           (and (Label:id? label)
+                (= (Label:id-id label) id)
+                (AsmBlock-id block)))]
         [_ target]))
 
     ;; ========================================================================

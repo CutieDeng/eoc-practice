@@ -6,7 +6,7 @@
          racket/string
          "../main.rkt"
          "../../../../cutie-ftree/pvector.rkt"
-         (only-in "../../../../cutie-ftree/graph.rkt" vertex-id vertex-id-val))
+         (only-in "../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
 
 ;; Test 1: CFG construction with cutie-ftree/graph
 (define (test-cfg-construction)
