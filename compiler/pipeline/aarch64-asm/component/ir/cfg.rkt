@@ -12,11 +12,11 @@
 
 (require racket/match
          racket/dict
-         "../../../../cutie-ftree/pvector.rkt"
-         "../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../cutie-ftree/bitset.rkt"
-         "../../../../cutie-ftree/comparator.rkt"
-         "../../../../cutie-ftree/graph.rkt"
+         "../../../../../cutie-ftree/pvector.rkt"
+         "../../../../../cutie-ftree/ordered-map.rkt"
+         "../../../../../cutie-ftree/bitset.rkt"
+         "../../../../../cutie-ftree/comparator.rkt"
+         "../../../../../cutie-ftree/graph.rkt"
          "types.rkt")
 
 (provide

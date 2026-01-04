@@ -15,7 +15,7 @@
          racket/dict
          "../ir/types.rkt"
          "../ir/cfg.rkt"
-         (only-in "../../../../compiler/driver/dataflow/liveness.rkt"
+         (only-in "../../../../driver/dataflow/liveness.rkt"
                   liveness-interface<%>
                   [compute-liveness driver:compute-liveness]
                   LivenessResult LivenessResult?
@@ -24,11 +24,11 @@
                   BlockLiveness-insn-liveness BlockLiveness-gen BlockLiveness-kill
                   InsnLiveness InsnLiveness?
                   InsnLiveness-live-before InsnLiveness-live-after)
-         "../../../../cutie-ftree/pvector.rkt"
-         "../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../cutie-ftree/bitset.rkt"
-         "../../../../cutie-ftree/comparator.rkt"
-         (only-in "../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
+         "../../../../../cutie-ftree/pvector.rkt"
+         "../../../../../cutie-ftree/ordered-map.rkt"
+         "../../../../../cutie-ftree/bitset.rkt"
+         "../../../../../cutie-ftree/comparator.rkt"
+         (only-in "../../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
 
 (provide
  ;; Main analysis (uses driver framework)

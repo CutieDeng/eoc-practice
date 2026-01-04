@@ -8,7 +8,7 @@
 
 (require racket/match
          racket/string
-         "../../../../cutie-ftree/pvector.rkt"
+         "../../../../../cutie-ftree/pvector.rkt"
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../ir/config.rkt"
