@@ -16,7 +16,7 @@
 ;; ============================================================
 
 (require racket/match
-         "../../../kernel/data/main.rkt"
+         "../../../kernel/data/data.rkt"
          "../ir/cvar.rkt"
          "../ir/x86var.rkt")
 

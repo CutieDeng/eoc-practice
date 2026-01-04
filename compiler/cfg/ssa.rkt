@@ -9,7 +9,7 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict racket/set)
-(require (except-in "../kernel/data/main.rkt" symbol-compare))
+(require (except-in "../kernel/data/data.rkt" symbol-compare))
 (require "../kernel/ir/cfg/types.rkt")
 (require "../component/cfg/utils/graph-ops.rkt")
 

@@ -10,9 +10,9 @@
 ;; ============================================================
 
 (require racket/list racket/set)
-(require "../../../kernel/ir/cfg/main.rkt")
-(require "../../../kernel/data/main.rkt")
-(require "../../../driver/graph/main.rkt")
+(require "../../../kernel/ir/cfg/cfg.rkt")
+(require "../../../kernel/data/data.rkt")
+(require "../../../driver/graph/graph.rkt")
 (require "../utils/graph-ops.rkt")
 
 (provide

@@ -10,7 +10,7 @@
 ;;
 ;; ============================================================
 
-(require "../../kernel/data/main.rkt")
+(require "../../kernel/data/data.rkt")
 (require "../graph/traversal.rkt")
 (require "../dominance/dominator.rkt")
 

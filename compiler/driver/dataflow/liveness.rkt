@@ -16,7 +16,7 @@
 (require racket/class
          racket/contract
          racket/dict
-         "../../kernel/data/main.rkt"
+         "../../kernel/data/data.rkt"
          "../graph/scc.rkt")
 
 (provide

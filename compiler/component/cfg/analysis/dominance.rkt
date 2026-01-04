@@ -10,11 +10,11 @@
 ;; ============================================================
 
 (require racket/list racket/set)
-(require "../../../kernel/ir/cfg/main.rkt")
-(require "../../../driver/dominance/main.rkt")
-(require "../../../driver/graph/main.rkt")
+(require "../../../kernel/ir/cfg/cfg.rkt")
+(require "../../../driver/dominance/dominance.rkt")
+(require "../../../driver/graph/graph.rkt")
 (require "../utils/graph-ops.rkt")
-(require "../../common/main.rkt")
+(require "../../common/common.rkt")
 
 (provide
   ;; Analysis

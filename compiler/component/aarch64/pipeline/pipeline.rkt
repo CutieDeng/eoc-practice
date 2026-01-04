@@ -9,7 +9,7 @@
 ;; and interpreting aarch64 assembly code.
 ;;
 ;; Usage:
-;;   (require "compiler/component/aarch64/pipeline/main.rkt")
+;;   (require "compiler/component/aarch64/pipeline/pipeline.rkt")
 ;;   (define result (compile-and-run my-fn #:args '(1 2 3)))
 ;;
 ;; ============================================================================

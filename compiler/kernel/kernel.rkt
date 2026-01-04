@@ -25,15 +25,15 @@
 ;;    - Maximal stability (changes rarely)
 ;;
 ;; Usage:
-;;    (require "kernel/main.rkt")
+;;    (require "kernel/kernel.rkt")
 ;;    ; or for fine-grained imports:
-;;    (require "kernel/data/main.rkt")
-;;    (require "kernel/ir/cfg/main.rkt")
+;;    (require "kernel/data/data.rkt")
+;;    (require "kernel/ir/cfg/cfg.rkt")
 ;;
 ;; ============================================================
 
-(require "data/main.rkt")
-(require "ir/main.rkt")
+(require "data/data.rkt")
+(require "ir/ir.rkt")
 
-(provide (all-from-out "data/main.rkt"))
-(provide (all-from-out "ir/main.rkt"))
+(provide (all-from-out "data/data.rkt"))
+(provide (all-from-out "ir/ir.rkt"))

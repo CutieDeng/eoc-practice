@@ -20,7 +20,7 @@
 (require racket/format
          racket/list
          racket/pretty
-         "../pipeline/main.rkt"
+         "../pipeline/pipeline.rkt"
          "../ir/config.rkt")
 
 ;; ============================================================================

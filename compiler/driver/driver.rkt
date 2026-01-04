@@ -21,21 +21,21 @@
 ;;   - Composable (algorithms build on each other)
 ;;
 ;; Usage:
-;;   (require "driver/main.rkt")
+;;   (require "driver/driver.rkt")
 ;;   ; or for fine-grained imports:
-;;   (require "driver/graph/main.rkt")
-;;   (require "driver/dominance/main.rkt")
+;;   (require "driver/graph/graph.rkt")
+;;   (require "driver/dominance/dominance.rkt")
 ;;
 ;; ============================================================
 
-(require "graph/main.rkt")
-(require "dataflow/main.rkt")
-(require "dominance/main.rkt")
-(require "loop/main.rkt")
-(require "worklist/main.rkt")
+(require "graph/graph.rkt")
+(require "dataflow/dataflow.rkt")
+(require "dominance/dominance.rkt")
+(require "loop/loop.rkt")
+(require "worklist/worklist.rkt")
 
-(provide (all-from-out "graph/main.rkt"))
-(provide (all-from-out "dataflow/main.rkt"))
-(provide (all-from-out "dominance/main.rkt"))
-(provide (all-from-out "loop/main.rkt"))
-(provide (all-from-out "worklist/main.rkt"))
+(provide (all-from-out "graph/graph.rkt"))
+(provide (all-from-out "dataflow/dataflow.rkt"))
+(provide (all-from-out "dominance/dominance.rkt"))
+(provide (all-from-out "loop/loop.rkt"))
+(provide (all-from-out "worklist/worklist.rkt"))

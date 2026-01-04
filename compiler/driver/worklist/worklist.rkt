@@ -11,7 +11,7 @@
 ;;
 ;; ============================================================
 
-(require "../../kernel/data/main.rkt")
+(require "../../kernel/data/data.rkt")
 
 (provide
   ;; Worklist types

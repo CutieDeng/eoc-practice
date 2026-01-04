@@ -25,21 +25,21 @@
 ;;   - Provides concrete analysis interfaces
 ;;
 ;; Usage:
-;;   (require "component/main.rkt")
+;;   (require "component/component.rkt")
 ;;   ; or for fine-grained imports:
-;;   (require "component/cfg/main.rkt")
-;;   (require "component/rvsdg/main.rkt")
+;;   (require "component/cfg/cfg.rkt")
+;;   (require "component/rvsdg/rvsdg.rkt")
 ;;
 ;; ============================================================
 
-(require "common/main.rkt")
-(require "cfg/main.rkt")
-(require "rvsdg/main.rkt")
-(require "lvar/main.rkt")
-(require "x86var/main.rkt")
+(require "common/common.rkt")
+(require "cfg/cfg.rkt")
+(require "rvsdg/rvsdg.rkt")
+(require "lvar/lvar.rkt")
+(require "x86var/x86var.rkt")
 
-(provide (all-from-out "common/main.rkt"))
-(provide (all-from-out "cfg/main.rkt"))
-(provide (all-from-out "rvsdg/main.rkt"))
-(provide (all-from-out "lvar/main.rkt"))
-(provide (all-from-out "x86var/main.rkt"))
+(provide (all-from-out "common/common.rkt"))
+(provide (all-from-out "cfg/cfg.rkt"))
+(provide (all-from-out "rvsdg/rvsdg.rkt"))
+(provide (all-from-out "lvar/lvar.rkt"))
+(provide (all-from-out "x86var/x86var.rkt"))

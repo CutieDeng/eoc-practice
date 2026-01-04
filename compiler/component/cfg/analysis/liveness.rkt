@@ -10,10 +10,10 @@
 ;; ============================================================
 
 (require racket/list racket/set racket/match)
-(require "../../../kernel/ir/cfg/main.rkt")
-(require "../../../driver/dataflow/main.rkt")
+(require "../../../kernel/ir/cfg/cfg.rkt")
+(require "../../../driver/dataflow/dataflow.rkt")
 (require "../utils/graph-ops.rkt")
-(require "../../common/main.rkt")
+(require "../../common/common.rkt")
 
 (provide
   ;; Analysis

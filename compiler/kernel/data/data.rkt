@@ -14,10 +14,10 @@
 ;; These are the foundational data structures for all IRs.
 ;; ============================================================
 
-(require "../../../cutie-ftree/main.rkt")
+(require "../../../cutie-ftree/cutie-ftree.rkt")
 
 ;; Re-export everything from cutie-ftree
-(provide (all-from-out "../../../cutie-ftree/main.rkt"))
+(provide (all-from-out "../../../cutie-ftree/cutie-ftree.rkt"))
 
 ;; ============================================================
 ;; Additional pvector utilities

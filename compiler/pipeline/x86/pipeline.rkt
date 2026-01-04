@@ -23,8 +23,8 @@
 ;; ============================================================
 
 (require "../common/pass.rkt"
-         "../../component/lvar/main.rkt"
-         "../../component/x86var/main.rkt")
+         "../../component/lvar/lvar.rkt"
+         "../../component/x86var/x86var.rkt")
 
 (provide
   ;; Pipeline

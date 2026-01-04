@@ -19,15 +19,15 @@
 ;;
 ;; ============================================================
 
-(require "common/main.rkt")
+(require "common/common.rkt")
 (require "x86/pipeline.rkt")
-(require "java/main.rkt")
+(require "java/java.rkt")
 
 ;; Common utilities
-(provide (all-from-out "common/main.rkt"))
+(provide (all-from-out "common/common.rkt"))
 
 ;; X86 pipeline (EoC)
 (provide (all-from-out "x86/pipeline.rkt"))
 
 ;; Java pipeline (stub)
-(provide (all-from-out "java/main.rkt"))
+(provide (all-from-out "java/java.rkt"))

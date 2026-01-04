@@ -13,7 +13,7 @@
          racket/list
          racket/pretty
          racket/class
-         "../pipeline/main.rkt"
+         "../pipeline/pipeline.rkt"
          "../ir/config.rkt"
          "../ir/types.rkt"
          "../interp/state.rkt"

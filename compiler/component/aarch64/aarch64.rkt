@@ -7,7 +7,7 @@
 ;; Simple API for compiling aarch64-asm S-expressions to assembly files.
 ;;
 ;; Usage:
-;;   (require "compiler/component/aarch64/main.rkt")
+;;   (require "compiler/component/aarch64/aarch64.rkt")
 ;;
 ;;   ;; Compile S-expr to .s file
 ;;   (compile my-fn "output.s")

@@ -12,8 +12,8 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/set)
-(require "../../../kernel/ir/rvsdg/main.rkt")
-(require "../../../kernel/data/main.rkt")
+(require "../../../kernel/ir/rvsdg/rvsdg.rkt")
+(require "../../../kernel/data/data.rkt")
 
 (provide
   ;; Graph operation closures

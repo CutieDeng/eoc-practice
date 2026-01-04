@@ -14,7 +14,7 @@
 ;; ============================================================
 
 (require racket/match racket/list)
-(require "../common/main.rkt")
+(require "../common/common.rkt")
 (require "ir/types.rkt")
 
 (provide

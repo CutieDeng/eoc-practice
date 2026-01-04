@@ -12,6 +12,6 @@
 ;;
 ;; ============================================================
 
-(require "transform/main.rkt")
+(require "transform/transform.rkt")
 
-(provide (all-from-out "transform/main.rkt"))
+(provide (all-from-out "transform/transform.rkt"))

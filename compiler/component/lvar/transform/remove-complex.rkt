@@ -18,7 +18,7 @@
 
 (require racket/match
          "../../../kernel/ir/ast/types.rkt"
-         "../../../kernel/data/main.rkt")
+         "../../../kernel/data/data.rkt")
 
 (provide remove-complex-opera*)
 

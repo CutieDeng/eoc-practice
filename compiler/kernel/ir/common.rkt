@@ -23,7 +23,7 @@
   empty-info
   info?)
 
-(require "../data/main.rkt")
+(require "../data/data.rkt")
 
 ;; ============================================================
 ;; Type Representations

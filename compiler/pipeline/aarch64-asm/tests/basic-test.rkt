@@ -4,7 +4,7 @@
 
 (require rackunit
          racket/string
-         "../main.rkt"
+         "../aarch64-asm.rkt"
          "../../../../cutie-ftree/pvector.rkt"
          (only-in "../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
 

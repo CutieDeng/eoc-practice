@@ -9,21 +9,21 @@
 ;;   - cfg: Control Flow Graph types
 ;;
 ;; For AST and RVSDG, use direct imports to avoid conflicts:
-;;   (require "kernel/ir/ast/main.rkt")
-;;   (require "kernel/ir/rvsdg/main.rkt")
+;;   (require "kernel/ir/ast/ast.rkt")
+;;   (require "kernel/ir/rvsdg/rvsdg.rkt")
 ;;
 ;; Or use prefixes:
-;;   (require (prefix-in ast: "kernel/ir/ast/main.rkt"))
-;;   (require (prefix-in rvsdg: "kernel/ir/rvsdg/main.rkt"))
+;;   (require (prefix-in ast: "kernel/ir/ast/ast.rkt"))
+;;   (require (prefix-in rvsdg: "kernel/ir/rvsdg/rvsdg.rkt"))
 ;;
 ;; ============================================================
 
 (require "common.rkt")
-(require "cfg/main.rkt")
+(require "cfg/cfg.rkt")
 
 ;; Export common and CFG (primary IR, no conflicts)
 (provide (all-from-out "common.rkt"))
-(provide (all-from-out "cfg/main.rkt"))
+(provide (all-from-out "cfg/cfg.rkt"))
 
 ;; For AST and RVSDG, users should import directly
 ;; to choose their own prefixing strategy

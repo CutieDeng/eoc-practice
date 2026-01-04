@@ -11,10 +11,10 @@
 ;;
 ;; ============================================================
 
-(require "utils/main.rkt")
-(require "analysis/main.rkt")
-(require "transform/main.rkt")
+(require "utils/utils.rkt")
+(require "analysis/analysis.rkt")
+(require "transform/transform.rkt")
 
-(provide (all-from-out "utils/main.rkt"))
-(provide (all-from-out "analysis/main.rkt"))
-(provide (all-from-out "transform/main.rkt"))
+(provide (all-from-out "utils/utils.rkt"))
+(provide (all-from-out "analysis/analysis.rkt"))
+(provide (all-from-out "transform/transform.rkt"))

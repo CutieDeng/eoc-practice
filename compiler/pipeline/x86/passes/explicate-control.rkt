@@ -17,7 +17,7 @@
 
 (require racket/match
          "../../../kernel/ir/ast/types.rkt"
-         "../../../kernel/data/main.rkt"
+         "../../../kernel/data/data.rkt"
          "../ir/cvar.rkt")
 
 (provide explicate-control)
