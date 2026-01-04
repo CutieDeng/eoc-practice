@@ -15,6 +15,7 @@
 
 (require racket/class
          racket/contract
+         racket/dict
          "../../kernel/data/main.rkt"
          "../graph/scc.rkt")
 
@@ -56,7 +57,7 @@
     [insn-uses-bitset (->m any/c bitset?)]               ; Instruction -> bitset of used vars
 
     ;; === Block ID comparison ===
-    [block-id-compare (->m any/c any/c (or/c -1 0 1))]))  ; Comparator for block IDs
+    [block-id-compare (->m (-> any/c any/c (or/c '< '= '>)))]))  ; Returns comparator for block IDs
 
 ;; ============================================================
 ;; Result Structures
@@ -182,7 +183,7 @@
       (define exit-live
         (for/fold ([live bitset-empty])
                   ([succ-scc (in-pvector succ-sccs)])
-          (bitset-union live (ordered-map-ref scc-out succ-scc bitset-empty))))
+          (bitset-union live (dict-ref scc-out succ-scc bitset-empty))))
 
       ;; Compute fixed point within this SCC
       (define scc-blocks (pvector-ref scc-nodes scc-id))
@@ -194,7 +195,7 @@
       (define scc-live-in
         (for/fold ([live bitset-empty])
                   ([bid (in-pvector scc-blocks)])
-          (bitset-union live (ordered-map-ref scc-result bid bitset-empty))))
+          (bitset-union live (dict-ref scc-result bid bitset-empty))))
 
       (ordered-map-set scc-out scc-id scc-live-in)))
 
@@ -211,7 +212,7 @@
       (if (not block)
           m
           (let* ([insns (send interface block-insns block)]
-                 [out (ordered-map-ref live-out bid bitset-empty)]
+                 [out (dict-ref live-out bid bitset-empty)]
                  [insn-lv (compute-insn-liveness interface insns out)]
                  [gen (block-gen bid)]
                  [kill (block-kill bid)])
@@ -259,14 +260,14 @@
                     ([succ (in-pvector succs)])
             (define succ-out
               (if (in-scc? succ)
-                  (ordered-map-ref m succ bitset-empty)
+                  (dict-ref m succ bitset-empty)
                   exit-live))  ; External successor uses exit-live
             (define succ-in
               (bitset-union (block-gen succ)
                            (bitset-subtract succ-out (block-kill succ))))
             (bitset-union live succ-in)))
 
-        (define old-out (ordered-map-ref m bid bitset-empty))
+        (define old-out (dict-ref m bid bitset-empty))
         (if (bitset-equal? old-out new-live-out)
             (values m ch)
             (values (ordered-map-set m bid new-live-out) #t))))
@@ -304,7 +305,7 @@
         (let ([live-in
                (for/fold ([m (ordered-map-empty bid-compare)])
                          ([bid (in-pvector block-ids)])
-                 (define out-val (ordered-map-ref out bid bitset-empty))
+                 (define out-val (dict-ref out bid bitset-empty))
                  (define in-val (bitset-union (block-gen bid)
                                               (bitset-subtract out-val (block-kill bid))))
                  (ordered-map-set m bid in-val))])
@@ -318,12 +319,12 @@
           (define new-out
             (for/fold ([live bitset-empty])
                       ([succ (in-pvector succs)])
-              (define succ-out (ordered-map-ref out succ bitset-empty))
+              (define succ-out (dict-ref out succ bitset-empty))
               (define succ-in (bitset-union (block-gen succ)
                                             (bitset-subtract succ-out (block-kill succ))))
               (bitset-union live succ-in)))
 
-          (define old-out (ordered-map-ref out bid bitset-empty))
+          (define old-out (dict-ref out bid bitset-empty))
           (if (bitset-equal? old-out new-out)
               (loop out rest-wl new-in-wl)
               ;; Add predecessors to worklist
@@ -343,8 +344,3 @@
   (if (ordered-map-has-key? om key)
       (let-values ([(m _) (ordered-map-delete om key)]) m)
       om))
-
-;; Helper: ordered-map-ref with default
-(define (ordered-map-ref m k default)
-  (define result (ordered-map-query m k))
-  (if result (cdr result) default))

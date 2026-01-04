@@ -90,29 +90,9 @@
      (check-equal? (length uses) 1)
      (check-equal? (VReg:gpr-id (car uses)) 'src))
 
-   (test-case "compute-block-liveness simple sequence"
-     ;; a = b + c
-     ;; d = a + e
-     ;; ret
-     (define vregs
-       (list (VReg:gpr 'a 64) (VReg:gpr 'b 64) (VReg:gpr 'c 64)
-             (VReg:gpr 'd 64) (VReg:gpr 'e 64)))
-     (define vreg-index (build-vreg-index vregs))
-
-     (define insns
-       (list->pvector
-        (list (Insn:arith 'add (VReg:gpr 'a 64) (VReg:gpr 'b 64) (VReg:gpr 'c 64))
-              (Insn:arith 'add (VReg:gpr 'd 64) (VReg:gpr 'a 64) (VReg:gpr 'e 64))
-              (Insn:ret))))
-
-     ;; d is live at exit (d has index 3 in vreg-index)
-     (define live-out (bitset-add bitset-empty 3))
-
-     (define-values (liveness live-in) (compute-block-liveness insns live-out vreg-index))
-
-     ;; After first instruction: a, e should be live (a used in insn 2, e used in insn 2)
-     ;; Before first instruction: b, c, e should be live
-     (check-equal? (pvector-length liveness) 3))))
+   ;; Note: compute-block-liveness is now internal to driver framework
+   ;; Testing through full CFG liveness in allocation tests
+   ))
 
 ;; ============================================================================
 ;; Interference Graph Tests

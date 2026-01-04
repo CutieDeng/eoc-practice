@@ -6,11 +6,13 @@
 ;;
 ;; Graph coloring register allocator for AArch64.
 ;; Uses bitset for all set operations (variables normalized to integers).
+;; Integrates with driver/dataflow/liveness framework.
 ;;
 ;; ============================================================================
 
 (require racket/match
          racket/list
+         racket/dict
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../analysis/liveness.rkt"
@@ -130,14 +132,6 @@
   (bitset-count (igraph-neighbors g v)))
 
 ;; ============================================================================
-;; Helper: ordered-map-ref with default
-;; ============================================================================
-
-(define (omap-ref m k default)
-  (define result (ordered-map-query m k))
-  (if result (cdr result) default))
-
-;; ============================================================================
 ;; Collect Virtual Registers
 ;; ============================================================================
 
@@ -156,7 +150,7 @@
 ;; Build Interference Graph
 ;; ============================================================================
 
-(define (build-interference-graph cfg liveness-info vreg-index)
+(define (build-interference-graph cfg liveness-result vreg-index)
   (define n (VRegIndex-count vreg-index))
   (define id->idx (VRegIndex-id->idx vreg-index))
 
@@ -166,26 +160,27 @@
     (define block (cfg-get-block cfg bid))
     (if (not block)
         graph
-        (let ([block-liveness (omap-ref (LivenessInfo-block-info liveness-info) bid #f)])
+        (let ([block-liveness (dict-ref (LivenessResult-block-info liveness-result) bid #f)])
           (if (not block-liveness)
               graph
-              (for/fold ([g graph])
-                        ([i (in-range (pvector-length (AsmBlock-insns block)))])
-                (define insn (pvector-ref (AsmBlock-insns block) i))
-                (define liveness (pvector-ref block-liveness i))
-                (define live-after (InsnLiveness-live-after liveness))
-                (define defs (insn-defs insn))
+              (let ([insn-liveness (BlockLiveness-insn-liveness block-liveness)])
+                (for/fold ([g graph])
+                          ([i (in-range (pvector-length (AsmBlock-insns block)))])
+                  (define insn (pvector-ref (AsmBlock-insns block) i))
+                  (define liveness (pvector-ref insn-liveness i))
+                  (define live-after (InsnLiveness-live-after liveness))
+                  (define defs (insn-defs insn))
 
-                ;; For each defined vreg, add edge to all other live vregs
-                (for*/fold ([g2 g])
-                           ([d defs]
-                            #:when (vreg? d)
-                            [l (in-bitset live-after)])
-                  (define d-idx (omap-ref id->idx (vreg-id d) #f))
-                  (cond
-                    [(not d-idx) g2]
-                    [(= d-idx l) g2]  ; Skip self
-                    [else (igraph-add-edge g2 d-idx l)]))))))))
+                  ;; For each defined vreg, add edge to all other live vregs
+                  (for*/fold ([g2 g])
+                             ([d defs]
+                              #:when (vreg? d)
+                              [l (in-bitset live-after)])
+                    (define d-idx (dict-ref id->idx (vreg-id d) #f))
+                    (cond
+                      [(not d-idx) g2]
+                      [(= d-idx l) g2]  ; Skip self
+                      [else (igraph-add-edge g2 d-idx l)])))))))))
 
 ;; ============================================================================
 ;; Graph Coloring
@@ -236,7 +231,7 @@
           (let* ([neighbor-colors
                   (for/fold ([cs bitset-empty])
                             ([n (in-bitset (igraph-neighbors graph v))])
-                    (define c (omap-ref col n #f))
+                    (define c (dict-ref col n #f))
                     (if c (bitset-add cs c) cs))]
                  [available-color
                   (for/first ([c (in-range num-colors)]
@@ -369,7 +364,7 @@
 (define (rewrite-insn insn assignment)
   (define (rewrite-reg r)
     (if (vreg? r)
-        (omap-ref assignment (vreg-id r) r)
+        (dict-ref assignment (vreg-id r) r)
         r))
 
   (define (rewrite-mem m)

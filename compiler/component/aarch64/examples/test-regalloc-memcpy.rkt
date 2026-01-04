@@ -9,6 +9,7 @@
          racket/match
          racket/list
          racket/string
+         racket/dict
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../frontend/parser.rkt"
@@ -146,10 +147,6 @@
     (print-block block)
     (newline)))
 
-;; Helper: ordered-map-ref with default
-(define (omap-ref m k default)
-  (define result (ordered-map-query m k))
-  (if result (cdr result) default))
 
 ;; ============================================================================
 ;; Collect Virtual Registers
@@ -195,8 +192,8 @@
   (displayln "\nLiveness Information:")
   (displayln "---------------------")
   (for ([bid (in-cfg-block-ids cfg)])
-    (define live-in (omap-ref (LivenessInfo-live-in liveness) bid bitset-empty))
-    (define live-out (omap-ref (LivenessInfo-live-out liveness) bid bitset-empty))
+    (define live-in (dict-ref (LivenessResult-live-in liveness) bid bitset-empty))
+    (define live-out (dict-ref (LivenessResult-live-out liveness) bid bitset-empty))
     (printf "Block ~a:\n" (BlockId-id bid))
     ;; Convert bitset indices back to vreg names for display
     (printf "  live-in:  {~a}\n"
