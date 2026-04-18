@@ -9,17 +9,23 @@
 ;; ============================================================
 
 (require racket/match racket/list racket/dict racket/set)
-(require (except-in "../kernel/data/data.rkt" symbol-compare))
-(require "../kernel/ir/cfg/types.rkt")
-(require "../component/cfg/utils/graph-ops.rkt")
+(require (except-in "../../../kernel/data/data.rkt" symbol-compare integer-compare))
+(require "../../../kernel/ir/cfg/types.rkt")
+(require "../utils/graph-ops.rkt")
 
 ;; === 辅助函数：提取嵌套结构中的所有 VarId ===
 
-;; 递归提取列表中的所有 VarId（处理嵌套情况）
+;; 递归提取数据中的所有 VarId（处理嵌套 list / pvector）
+;; 返回 list，内部迭代配合 in-indexed 使用。
 (define (extract-var-ids datum)
   (cond
     [(VarId? datum) (list datum)]
     [(list? datum) (append-map extract-var-ids datum)]
+    [(pvector? datum)
+     ;; 收集每个元素的子列表再一次 concat，避免 O(n²) append。
+     (apply append
+            (for/list ([x (in-pvector datum)])
+              (extract-var-ids x)))]
     [else '()]))
 
 ;; === 位置类型 ===
@@ -87,7 +93,7 @@
                      [v->u v->u]
                      [i->b i->b]
                      [b->i b->i])
-                    ([(insn idx) (in-indexed (CfgBlock-insns block))])
+                    ([(insn idx) (in-indexed (in-pvector (CfgBlock-insns block)))])
             (cond
               [(VfInsn? insn)
                (define dloc (DefLoc bid idx))
@@ -95,7 +101,7 @@
                ;; 记录 defs
                (define v->d*
                  (for/fold ([acc v->d])
-                           ([out (VfInsn-outputs insn)]
+                           ([out (in-pvector (VfInsn-outputs insn))]
                             #:when (VarId? out))
                    (dict-set acc out dloc)))
                ;; 记录 uses（使用 extract-var-ids 处理嵌套）
@@ -110,8 +116,8 @@
                  (if insn-id
                      (values (dict-set i->b insn-id bid)
                              (dict-update b->i bid
-                               (λ (lst) (append lst (list insn-id)))
-                               '()))
+                               (λ (pv) (pvector-cons-right pv insn-id))
+                               (pvector-empty)))
                      (values i->b b->i)))
                (values v->d* v->u* i->b* b->i*)]
               [else (values v->d v->u i->b b->i)])))))
@@ -126,7 +132,7 @@
           (let ([term (CfgBlock-terminator block)])
             (define term-uses (terminator-uses term))
             (for/fold ([acc v->u])
-                      ([(var idx) (in-indexed term-uses)]
+                      ([(var idx) (in-indexed (in-pvector term-uses))]
                        #:when (VarId? var))
               ;; 使用 -1 作为 insn-idx 表示 terminator
               (define uloc (UseLoc bid -1 idx))
@@ -162,12 +168,12 @@
   (define insn->block (cfg-get-info cfg 'insn->block))
   (and insn->block (dict-ref insn->block insn-id #f)))
 
-;; 获取块内的所有指令 ID（按顺序）
+;; 获取块内的所有指令 ID（按顺序）。返回 pvector[InsnId]。
 (define (cfg-get-block-insns cfg block-id)
   (define block->insns (cfg-get-info cfg 'block->insns))
   (if block->insns
-      (dict-ref block->insns block-id '())
-      '()))
+      (dict-ref block->insns block-id (pvector-empty))
+      (pvector-empty)))
 
 (provide cfg-get-def cfg-get-uses cfg-has-use-def?)
 (provide cfg-get-insn-block cfg-get-block-insns)
@@ -184,7 +190,7 @@
   ;; 更新 def 链
   (define cfg*
     (for/fold ([c cfg])
-              ([out (VfInsn-outputs insn)]
+              ([out (in-pvector (VfInsn-outputs insn))]
                #:when (VarId? out))
       (cfg-update-info c 'var->def
         (λ (d) (dict-set d out dloc))
@@ -209,7 +215,7 @@
   ;; 移除 def
   (define cfg*
     (for/fold ([c cfg])
-              ([out (VfInsn-outputs insn)]
+              ([out (in-pvector (VfInsn-outputs insn))]
                #:when (VarId? out))
       (cfg-update-info c 'var->def
         (λ (d) (dict-remove d out))
@@ -242,7 +248,7 @@
   (unless block
     (error 'cfg/add-insn "Block not found: ~a" block-id))
 
-  (define insn-idx (length (CfgBlock-insns block)))
+  (define insn-idx (pvector-length (CfgBlock-insns block)))
   (define cfg* (cfg-block-append-insn cfg block-id insn))
 
   ;; 如果有 use-def 链，自动更新
@@ -257,11 +263,11 @@
     (error 'cfg/replace-insn "Block not found: ~a" block-id))
 
   (define insns (CfgBlock-insns block))
-  (unless (< insn-idx (length insns))
+  (unless (< insn-idx (pvector-length insns))
     (error 'cfg/replace-insn "Insn index out of range: ~a" insn-idx))
 
-  (define old-insn (list-ref insns insn-idx))
-  (define new-insns (list-set insns insn-idx new-insn))
+  (define old-insn (pvector-ref insns insn-idx))
+  (define new-insns (pvector-set insns insn-idx new-insn))
   (define new-block (struct-copy CfgBlock block [insns new-insns]))
   (define cfg* (cfg-set-block cfg new-block))
 
@@ -279,17 +285,17 @@
     (error 'cfg/remove-insn "Block not found: ~a" block-id))
 
   (define insns (CfgBlock-insns block))
-  (unless (< insn-idx (length insns))
+  (unless (< insn-idx (pvector-length insns))
     (error 'cfg/remove-insn "Insn index out of range: ~a" insn-idx))
 
-  (define old-insn (list-ref insns insn-idx))
+  (define old-insn (pvector-ref insns insn-idx))
 
   ;; 注意：删除指令后，后续指令的索引会改变
   ;; 这会导致 use-def 链中的 UseLoc 失效
   ;; 解决方案：重建链，或使用稳定的指令 ID
 
   ;; 简化实现：删除后标记链为需要重建
-  (define new-insns (append (take insns insn-idx) (drop insns (+ 1 insn-idx))))
+  (define new-insns (pvector-delete insns insn-idx))
   (define new-block (struct-copy CfgBlock block [insns new-insns]))
   (define cfg* (cfg-set-block cfg new-block))
 
@@ -352,19 +358,19 @@
 ;; 辅助分析
 ;; ============================================================
 
-;; 获取所有已定义的变量
+;; 获取所有已定义的变量。返回 pvector[VarId]。
 (define (cfg-defined-vars cfg)
   (define cfg* (cfg-ensure-use-def cfg))
   (define var->def (cfg-get-info cfg* 'var->def))
   (if var->def
-      (for/list ([(k v) (in-dict var->def)]) k)
-      '()))
+      (for/pvector ([(k v) (in-dict var->def)]) k)
+      (pvector-empty)))
 
-;; 获取死变量（定义了但从未使用）
+;; 获取死变量（定义了但从未使用）。返回 pvector[VarId]。
 (define (cfg-dead-vars cfg)
   (define cfg* (cfg-ensure-use-def cfg))
-  (for/list ([var (cfg-defined-vars cfg*)]
-             #:when (null? (cfg-get-uses cfg* var)))
+  (for/pvector ([var (in-pvector (cfg-defined-vars cfg*))]
+                #:when (null? (cfg-get-uses cfg* var)))
     var))
 
 ;; 获取变量的 def-use 链（定义位置 + 所有使用位置）

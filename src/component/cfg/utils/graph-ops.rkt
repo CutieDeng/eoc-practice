@@ -11,9 +11,9 @@
 ;; by providing the function signatures that driver algorithms expect.
 ;; ============================================================
 
-(require racket/match racket/list)
+(require racket/match)
 (require "../../../kernel/ir/cfg/cfg.rkt")
-(require "../../../kernel/data/data.rkt")
+(require (except-in "../../../kernel/data/data.rkt" integer-compare))
 
 (provide
   ;; Graph operation closures
@@ -40,41 +40,49 @@
   terminator-successors
   terminator-uses
 
-  ;; Block list accessor
-  cfg-blocks->list)
+  ;; Block sequence accessors
+  in-cfg-blocks
+  in-cfg-block-ids)
 
 ;; ============================================================
 ;; Graph Operations (Closures for Driver)
 ;; ============================================================
 
-;; Create a get-successors function for a CFG
-;; Returns: BlockId -> (Listof BlockId)
+;; Create a get-successors function for a CFG.
+;; Returns: BlockId -> pvector[BlockId]
 ;;
 (define (cfg-make-successors cfg)
   (lambda (block-id)
     (define block (cfg-get-block cfg block-id))
     (if block
         (terminator-successors (CfgBlock-terminator block))
-        '())))
+        (pvector-empty))))
 
-;; Create a get-predecessors function for a CFG
-;; Returns: BlockId -> (Listof BlockId)
+;; Create a get-predecessors function for a CFG.
+;; Returns: BlockId -> pvector[BlockId]
 ;;
 (define (cfg-make-predecessors cfg)
-  ;; Build predecessor map once
-  (define pred-map (make-hash))
-  (for ([bid (cfg-all-block-ids cfg)])
-    (hash-set! pred-map bid '()))
+  ;; Build predecessor map once (ordered-map keyed by BlockId).
+  (define pred-map
+    (for/fold ([m (ordered-map-empty block-id-compare)])
+              ([bid (in-list (cfg-all-block-ids cfg))])
+      (ordered-map-set m bid (pvector-empty))))
 
-  (for ([bid (cfg-all-block-ids cfg)])
-    (define block (cfg-get-block cfg bid))
-    (when block
-      (for ([succ (terminator-successors (CfgBlock-terminator block))])
-        (hash-set! pred-map succ
-                   (cons bid (hash-ref pred-map succ '()))))))
+  (define pred-map*
+    (for/fold ([m pred-map])
+              ([bid (in-list (cfg-all-block-ids cfg))])
+      (define block (cfg-get-block cfg bid))
+      (cond
+        [(not block) m]
+        [else
+         (for/fold ([m m])
+                   ([succ (in-pvector (terminator-successors
+                                        (CfgBlock-terminator block)))])
+           (define cur (ordered-map-ref m succ (pvector-empty)))
+           (ordered-map-set m succ (pvector-cons-right cur bid)))])))
 
   (lambda (block-id)
-    (hash-ref pred-map block-id '())))
+    (ordered-map-ref pred-map* block-id (pvector-empty))))
 
 ;; ============================================================
 ;; CFG Accessors
@@ -123,13 +131,6 @@
   (define new-value (fn old-value))
   (cfg-set-info cfg key new-value))
 
-;; Symbol comparison for info map
-(define (symbol-compare a b)
-  (cond
-    [(symbol<? a b) '<]
-    [(symbol<? b a) '>]
-    [else '=]))
-
 ;; ============================================================
 ;; Block Modification Operations
 ;; ============================================================
@@ -141,21 +142,12 @@
   (define new-blocks (ordered-map-set blocks bid block))
   (struct-copy Cfg cfg [blocks new-blocks]))
 
-;; BlockId comparison for block map
-(define (block-id-compare a b)
-  (define a-id (BlockId-id a))
-  (define b-id (BlockId-id b))
-  (cond
-    [(< a-id b-id) '<]
-    [(> a-id b-id) '>]
-    [else '=]))
-
 ;; Append an instruction to a block
 (define (cfg-block-append-insn cfg block-id insn)
   (define block (cfg-get-block cfg block-id))
   (when (not block)
     (error 'cfg-block-append-insn "block not found: ~a" block-id))
-  (define new-insns (append (CfgBlock-insns block) (list insn)))
+  (define new-insns (pvector-cons-right (CfgBlock-insns block) insn))
   (define new-block (struct-copy CfgBlock block [insns new-insns]))
   (cfg-set-block cfg new-block))
 
@@ -168,38 +160,47 @@
   (define new-block (struct-copy CfgBlock block [insns new-insns]))
   (cfg-set-block cfg new-block))
 
-;; Convert blocks ordered-map to list
-(define (cfg-blocks->list cfg)
+;; Sequence of all blocks in the CFG (empty sequence if none).
+(define (in-cfg-blocks cfg)
   (define blocks (Cfg-blocks cfg))
   (if blocks
-      (for/list ([bid (ordered-map-keys blocks)])
-        (ordered-map-ref blocks bid #f))
-      '()))
+      (in-ordered-map-values blocks)
+      (in-list '())))
+
+;; Sequence of all block ids in the CFG (empty sequence if none).
+(define (in-cfg-block-ids cfg)
+  (define blocks (Cfg-blocks cfg))
+  (if blocks
+      (in-ordered-map-keys blocks)
+      (in-list '())))
 
 ;; ============================================================
 ;; Terminator Helpers
 ;; ============================================================
 
-;; Get successor block IDs from a terminator
+;; Get successor block IDs from a terminator.
+;; Returns: pvector[BlockId]
 (define (terminator-successors term)
   (match term
-    [(TermJump target) (list target)]
-    [(TermBranch _ then-target else-target)
-     (list then-target else-target)]
-    [(TermSwitch _ cases default)
-     (cons default (map cdr cases))]
-    [(TermReturn _) '()]
-    [(TermThrow _) '()]
-    [(TermUnreachable) '()]
-    [_ '()]))
+    [(Term:jump target) (pvector target)]
+    [(Term:cond _ then-target else-target)
+     (pvector then-target else-target)]
+    [(Term:switch _ cases default)
+     ;; cases is pvector[(Pairof Integer BlockId)].
+     (pvector-cons-left (pvector-map cdr cases) default)]
+    [(Term:ret _) (pvector-empty)]
+    [(Term:throw _) (pvector-empty)]
+    [(Term:unreachable) (pvector-empty)]
+    [_ (pvector-empty)]))
 
-;; Get VarId uses from a terminator
+;; Get VarId uses from a terminator.
+;; Returns: pvector[VarId]
 (define (terminator-uses term)
   (match term
-    [(TermJump _) '()]
-    [(TermBranch cond _ _) (list cond)]
-    [(TermSwitch value _ _) (list value)]
-    [(TermReturn values) values]
-    [(TermThrow exception) (list exception)]
-    [(TermUnreachable) '()]
-    [_ '()]))
+    [(Term:jump _) (pvector-empty)]
+    [(Term:cond cond _ _) (pvector cond)]
+    [(Term:switch value _ _) (pvector value)]
+    [(Term:ret values) values]          ; already pvector
+    [(Term:throw exception) (pvector exception)]
+    [(Term:unreachable) (pvector-empty)]
+    [_ (pvector-empty)]))

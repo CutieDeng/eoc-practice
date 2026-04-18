@@ -5,7 +5,7 @@
 (require rackunit
          rackunit/text-ui
          racket/match
-         "../../../../cutie-ftree/pvector.rkt"
+         cutie-ftree/pvector
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../frontend/parser.rkt")

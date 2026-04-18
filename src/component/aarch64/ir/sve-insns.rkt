@@ -6,8 +6,8 @@
 ;; and SVE2, organized by category.
 
 (require racket/match
-         "../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../cutie-ftree/comparator.rkt")
+         cutie-ftree/ordered-map
+         cutie-ftree/comparator)
 
 (provide
  ;; Instruction categories (lists of symbols)

@@ -17,11 +17,11 @@
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../analysis/liveness.rkt"
-         "../../../../../cutie-ftree/pvector.rkt"
-         "../../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../../cutie-ftree/bitset.rkt"
-         "../../../../../cutie-ftree/comparator.rkt"
-         (only-in "../../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
+         cutie-ftree/pvector
+         cutie-ftree/ordered-map
+         cutie-ftree/bitset
+         cutie-ftree/comparator
+         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
 
 (provide
  ;; Main entry point
@@ -219,22 +219,31 @@
                     (bitset-add rem found-v))
           (values stk rem))))
 
-  ;; Remaining high-degree nodes -> potential spills
+  ;; Remaining high-degree nodes -> potential spills.
   (define remaining
-    (for/list ([v (in-range num-vertices)]
-               #:when (not (bitset-member? removed v)))
+    (for/pvector ([v (in-range num-vertices)]
+                  #:when (not (bitset-member? removed v)))
       v))
 
   (define-values (final-stack initial-spills)
-    (if (null? remaining)
-        (values stack bitset-empty)
-        ;; Add all remaining to stack, mark highest-degree as spill
-        (let ([highest-degree-node
-               (argmax (lambda (v)
-                         (bitset-count (bitset-subtract (igraph-neighbors graph v) removed)))
-                       remaining)])
-          (values (pvector-append stack (list->pvector remaining))
-                  (bitset-add bitset-empty highest-degree-node)))))
+    (cond
+      [(= (pvector-length remaining) 0)
+       (values stack bitset-empty)]
+      [else
+       ;; Add all remaining to stack; mark highest-degree as spill.
+       (define highest-degree-node
+         (let-values ([(best _)
+                       (for/fold ([best (pvector-ref remaining 0)]
+                                  [best-deg -1])
+                                 ([v (in-pvector remaining)])
+                         (define deg (bitset-count
+                                       (bitset-subtract (igraph-neighbors graph v) removed)))
+                         (if (> deg best-deg)
+                             (values v deg)
+                             (values best best-deg)))])
+           best))
+       (values (pvector-append stack remaining)
+               (bitset-add bitset-empty highest-degree-node))]))
 
   ;; Select phase: assign colors
   (define-values (coloring to-spill)
@@ -260,18 +269,6 @@
 
   (values coloring to-spill))
 
-;; Helper: argmax
-(define (argmax f lst)
-  (if (null? lst)
-      #f
-      (for/fold ([best (car lst)]
-                 [best-val (f (car lst))]
-                 #:result best)
-                ([x (cdr lst)])
-        (define val (f x))
-        (if (> val best-val)
-            (values x val)
-            (values best best-val)))))
 
 ;; ============================================================================
 ;; Main Register Allocator

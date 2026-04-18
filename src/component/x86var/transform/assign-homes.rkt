@@ -14,7 +14,7 @@
 
 (require racket/match
          racket/set
-         "../../../pipeline/x86/ir/x86var.rkt")
+         "../../../kernel/ir/x86/x86var.rkt")
 
 (provide assign-homes)
 

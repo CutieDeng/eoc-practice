@@ -290,8 +290,8 @@
               ([bid (in-pvector block-ids)])
       (ordered-map-set m bid bitset-empty)))
 
-  ;; Worklist iteration
-  (define worklist (list->pvector (pvector->list block-ids)))
+  ;; Worklist iteration — block-ids is already a pvector, no round-trip needed.
+  (define worklist block-ids)
   (define in-worklist
     (for/fold ([s (ordered-map-empty bid-compare)])
               ([bid (in-pvector block-ids)])

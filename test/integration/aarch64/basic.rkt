@@ -4,9 +4,9 @@
 
 (require rackunit
          racket/string
-         "../aarch64-asm.rkt"
-         "../../../../cutie-ftree/pvector.rkt"
-         (only-in "../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
+         "../../../src/pipeline/aarch64-asm/aarch64-asm.rkt"
+         cutie-ftree/pvector
+         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
 
 ;; Test 1: CFG construction with cutie-ftree/graph
 (define (test-cfg-construction)
@@ -45,13 +45,13 @@
   (check-equal? (cfg-block-count cfg4) 2 "CFG should have 2 blocks")
   (check-equal? (AsmBlock-id (cfg-entry-block cfg4)) bid0 "entry block should be block0")
 
-  ;; Test successors/predecessors
+  ;; Test successors/predecessors (pvector of vertex-ids)
   (define succs (cfg-successors cfg4 bid0))
-  (check-equal? (length succs) 1 "block0 should have 1 successor")
-  (check-equal? (vertex-id-val (car succs)) (vertex-id-val bid1) "successor should be block1")
+  (check-equal? (pvector-length succs) 1 "block0 should have 1 successor")
+  (check-equal? (vertex-id-val (pvector-ref succs 0)) (vertex-id-val bid1) "successor should be block1")
 
   (define preds (cfg-predecessors cfg4 bid1))
-  (check-equal? (length preds) 1 "block1 should have 1 predecessor")
+  (check-equal? (pvector-length preds) 1 "block1 should have 1 predecessor")
 
   (printf "  PASSED\n")
   cfg4)

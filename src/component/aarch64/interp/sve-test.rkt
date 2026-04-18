@@ -6,7 +6,7 @@
          rackunit/text-ui
          racket/class
          racket/match
-         "../../../../cutie-ftree/pvector.rkt"
+         cutie-ftree/pvector
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../ir/config.rkt"

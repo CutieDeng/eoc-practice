@@ -12,10 +12,10 @@
          "../frontend/parser.rkt"
          "../analysis/liveness.rkt"
          "../backend/regalloc.rkt"
-         "../../../../cutie-ftree/pvector.rkt"
-         "../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../cutie-ftree/bitset.rkt"
-         "../../../../cutie-ftree/comparator.rkt")
+         cutie-ftree/pvector
+         cutie-ftree/ordered-map
+         cutie-ftree/bitset
+         cutie-ftree/comparator)
 
 ;; ============================================================================
 ;; Virtual Register Parsing Tests
@@ -137,14 +137,13 @@
               (Insn:mov 'mov (Reg:x 0) v1)
               (Insn:ret))))
 
+     (define cfg0 (make-empty-cfg))
+     (define-values (bid cfg1) (cfg-fresh-block-id cfg0))
      (define block
-       (AsmBlock (BlockId 0) (Label:named 'entry) insns (Term:ret)
-                 (ordered-map-empty block-id-compare)))
-
-     (define cfg
-       (AsmCfg (BlockId 0)
-               (ordered-map-set (ordered-map-empty block-id-compare) (BlockId 0) block)
-               1 1 #f))
+       (struct-copy AsmBlock (make-empty-block bid (Label:named 'entry))
+                    [insns insns]
+                    [terminator (Term:ret)]))
+     (define cfg (cfg-add-block cfg1 block #:set-entry? #t))
 
      ;; Run allocation
      (define result (allocate-registers cfg))
@@ -163,14 +162,13 @@
               (Insn:sve-load 'ld1w vp vz (Mem:base (Reg:x 1)))
               (Insn:ret))))
 
+     (define cfg0 (make-empty-cfg))
+     (define-values (bid cfg1) (cfg-fresh-block-id cfg0))
      (define block
-       (AsmBlock (BlockId 0) (Label:named 'entry) insns (Term:ret)
-                 (ordered-map-empty block-id-compare)))
-
-     (define cfg
-       (AsmCfg (BlockId 0)
-               (ordered-map-set (ordered-map-empty block-id-compare) (BlockId 0) block)
-               1 1 #f))
+       (struct-copy AsmBlock (make-empty-block bid (Label:named 'entry))
+                    [insns insns]
+                    [terminator (Term:ret)]))
+     (define cfg (cfg-add-block cfg1 block #:set-entry? #t))
 
      (define result (allocate-registers cfg))
 

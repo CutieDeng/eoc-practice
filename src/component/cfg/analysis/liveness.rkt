@@ -11,6 +11,7 @@
 
 (require racket/list racket/set racket/match)
 (require "../../../kernel/ir/cfg/cfg.rkt")
+(require (except-in "../../../kernel/data/data.rkt" integer-compare))
 (require "../../../driver/dataflow/dataflow.rkt")
 (require "../utils/graph-ops.rkt")
 (require "../../common/common.rkt")
@@ -56,27 +57,27 @@
 
     (when block
       ;; PHI nodes: outputs are defs, inputs are uses
-      (for ([phi (CfgBlock-phis block)])
+      (for ([phi (in-pvector (CfgBlock-phis block))])
         (when (PhiInsn? phi)
           (set-add! def-set (PhiInsn-output phi))
-          (for ([src (PhiInsn-sources phi)])
+          (for ([src (in-pvector (PhiInsn-sources phi))])
             (define v (cdr src))
             (when (and (VarId? v) (not (set-member? def-set v)))
               (set-add! use-set v)))))
 
       ;; Instructions: process in order
-      (for ([insn (CfgBlock-insns block)])
+      (for ([insn (in-pvector (CfgBlock-insns block))])
         (when (VfInsn? insn)
           ;; Uses before defs
-          (for ([input (VfInsn-inputs insn)])
+          (for ([input (in-pvector (VfInsn-inputs insn))])
             (when (and (VarId? input) (not (set-member? def-set input)))
               (set-add! use-set input)))
           ;; Then defs
-          (for ([out (VfInsn-outputs insn)])
+          (for ([out (in-pvector (VfInsn-outputs insn))])
             (set-add! def-set out))))
 
       ;; Terminator uses
-      (for ([v (terminator-uses (CfgBlock-terminator block))])
+      (for ([v (in-pvector (terminator-uses (CfgBlock-terminator block)))])
         (when (and (VarId? v) (not (set-member? def-set v)))
           (set-add! use-set v))))
 
@@ -104,21 +105,25 @@
     (hash-set! live-out bid (set))
     (hash-set! live-in bid (set)))
 
-  ;; Worklist algorithm (backward)
-  (define worklist (reverse block-ids))
+  ;; Worklist algorithm (backward).  worklist is a pvector; we pop from the
+  ;; right (stack discipline — same LIFO semantics as cons/cdr).
+  (define worklist
+    (for/fold ([pv (pvector-empty)]) ([bid (in-list block-ids)])
+      (pvector-cons-right pv bid)))
   (define iterations 0)
 
   (let loop ()
-    (unless (null? worklist)
+    (unless (= (pvector-length worklist) 0)
       (set! iterations (+ iterations 1))
-      (define bid (car worklist))
-      (set! worklist (cdr worklist))
+      (define idx (sub1 (pvector-length worklist)))
+      (define bid (pvector-ref worklist idx))
+      (set! worklist (pvector-drop-right worklist 1))
 
       ;; live-out[B] = ∪ live-in[S] for all successors S
       (define succs (get-succs bid))
       (define new-out
         (for/fold ([out (set)])
-                  ([s succs])
+                  ([s (in-pvector succs)])
           (set-union out (hash-ref live-in s (set)))))
 
       ;; Always update live-out (computed from successors' live-in)
@@ -134,7 +139,7 @@
       (unless (equal? new-in (hash-ref live-in bid (set)))
         (hash-set! live-in bid new-in)
         (define preds (get-preds bid))
-        (set! worklist (append preds worklist)))
+        (set! worklist (pvector-append worklist preds)))
 
       (loop)))
 

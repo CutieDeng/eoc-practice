@@ -14,7 +14,7 @@
 (require racket/match
          racket/string
          racket/format
-         "../../../pipeline/x86/ir/types.rkt")
+         "../../../kernel/ir/x86/types.rkt")
 
 (provide emit-x86
          print-x86)

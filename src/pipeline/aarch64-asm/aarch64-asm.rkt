@@ -19,28 +19,28 @@
 
 (require
  ;; Utilities
- "../../../cutie-ftree/bitset.rkt"
+ cutie-ftree/bitset
 
  ;; IR - Core types and structures
- "component/ir/types.rkt"
- "component/ir/cfg.rkt"
- "component/ir/config.rkt"
- "component/ir/sve-insns.rkt"
+ "../../component/aarch64/ir/types.rkt"
+ "../../component/aarch64/ir/cfg.rkt"
+ "../../component/aarch64/ir/config.rkt"
+ "../../component/aarch64/ir/sve-insns.rkt"
 
  ;; Frontend - Parsing
- "component/frontend/parser.rkt"
+ "../../component/aarch64/frontend/parser.rkt"
 
  ;; Analysis - Liveness
- "component/analysis/liveness.rkt"
+ "../../component/aarch64/analysis/liveness.rkt"
 
  ;; Backend - Register allocation and emission
- "component/backend/regalloc.rkt"
- "component/backend/emit.rkt"
+ "../../component/aarch64/backend/regalloc.rkt"
+ "../../component/aarch64/backend/emit.rkt"
 
  ;; Interpreter - For testing
- "component/interp/state.rkt"
- "component/interp/base.rkt"
- "component/interp/sve.rkt")
+ "../../component/aarch64/interp/state.rkt"
+ "../../component/aarch64/interp/base.rkt"
+ "../../component/aarch64/interp/sve.rkt")
 
 ;; ============================================================================
 ;; Re-export all public APIs
@@ -173,8 +173,6 @@
  cfg-reachable-blocks
  cfg-add-edge
  cfg-remove-edge
- pvector-insns->list
- list->pvector-insns
 
  ;; === Config ===
  AsmConfig AsmConfig?

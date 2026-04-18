@@ -15,7 +15,7 @@
          racket/dict
          "../ir/types.rkt"
          "../ir/cfg.rkt"
-         (only-in "../../../../driver/dataflow/liveness.rkt"
+         (only-in "../../../driver/dataflow/liveness.rkt"
                   liveness-interface<%>
                   [compute-liveness driver:compute-liveness]
                   LivenessResult LivenessResult?
@@ -24,11 +24,11 @@
                   BlockLiveness-insn-liveness BlockLiveness-gen BlockLiveness-kill
                   InsnLiveness InsnLiveness?
                   InsnLiveness-live-before InsnLiveness-live-after)
-         "../../../../../cutie-ftree/pvector.rkt"
-         "../../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../../cutie-ftree/bitset.rkt"
-         "../../../../../cutie-ftree/comparator.rkt"
-         (only-in "../../../../../cutie-ftree/graph.rkt" vertex-id? vertex-id-val))
+         cutie-ftree/pvector
+         cutie-ftree/ordered-map
+         cutie-ftree/bitset
+         cutie-ftree/comparator
+         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
 
 (provide
  ;; Main analysis (uses driver framework)
@@ -178,7 +178,7 @@
   (define var-cnt (vreg-index-count vreg-index))
 
   ;; Precompute predecessors map for entire CFG
-  ;; cfg-predecessors now returns list directly per block
+  ;; cfg-predecessors returns a pvector of vertex-ids per block
   (define pred-map
     (for/fold ([m (ordered-map-empty integer-compare)])
               ([bid (in-cfg-block-ids cfg)])
@@ -227,11 +227,12 @@
       (AsmBlock-insns block))
 
     (define/public (block-successors cfg bid)
-      (list->pvector (cfg-successors cfg bid)))
+      (cfg-successors cfg bid))
 
     (define/public (block-predecessors cfg bid)
       (define vid-val (get-block-id-val bid))
-      (list->pvector (dict-ref predecessors-map vid-val '())))
+      (or (ordered-map-query predecessors-map vid-val)
+          (pvector-empty)))
 
     ;; === Instruction def/use (returns bitset) ===
     (define/public (insn-defs-bitset insn)

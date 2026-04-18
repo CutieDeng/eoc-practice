@@ -186,10 +186,10 @@
                    [updated (ordered-map-set existing dst-scc #t)])
               (ordered-map-set adj* src-scc updated))))))
 
-  ;; SCC successors function
+  ;; SCC successors function — pvector output for driver-algorithm compat.
   (define (scc-successors scc-id)
     (define adj-map (ordered-map-ref scc-adj scc-id (ordered-map-empty integer-compare)))
-    (list->pvector (ordered-map-keys adj-map)))
+    (for/pvector ([k (in-ordered-map-keys adj-map)]) k))
 
   (values node->scc-id sccs scc-successors))
 

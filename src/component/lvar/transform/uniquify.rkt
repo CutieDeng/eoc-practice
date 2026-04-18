@@ -138,7 +138,9 @@
 
 ;; uniquify-exp-list: env counter list -> (values new-list new-counter)
 (define (uniquify-exp-list env counter exprs)
-  (for/fold ([acc '()] [c counter])
-            ([e exprs])
-    (define-values (new-e new-c) (uniquify-exp env c e))
-    (values (append acc (list new-e)) new-c)))
+  (define-values (rev-acc new-counter)
+    (for/fold ([acc '()] [c counter])
+              ([e exprs])
+      (define-values (new-e new-c) (uniquify-exp env c e))
+      (values (cons new-e acc) new-c)))
+  (values (reverse rev-acc) new-counter))

@@ -17,8 +17,8 @@
 
 (require racket/match
          "../../../kernel/data/data.rkt"
-         "../../../pipeline/x86/ir/cvar.rkt"
-         "../../../pipeline/x86/ir/x86var.rkt")
+         "../../../kernel/ir/cvar/types.rkt"
+         "../../../kernel/ir/x86/x86var.rkt")
 
 (provide select-instructions)
 

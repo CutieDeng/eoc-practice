@@ -12,11 +12,11 @@
 
 (require racket/match
          racket/dict
-         "../../../../../cutie-ftree/pvector.rkt"
-         "../../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../../cutie-ftree/bitset.rkt"
-         "../../../../../cutie-ftree/comparator.rkt"
-         "../../../../../cutie-ftree/graph.rkt"
+         cutie-ftree/pvector
+         cutie-ftree/ordered-map
+         cutie-ftree/bitset
+         cutie-ftree/comparator
+         cutie-ftree/graph
          "types.rkt")
 
 (provide
@@ -72,10 +72,6 @@
  ;; Edge management
  cfg-add-edge
  cfg-remove-edge
-
- ;; Block sequence utilities
- pvector-insns->list
- list->pvector-insns
 
  ;; Re-export useful graph functions
  graph-successors
@@ -316,49 +312,40 @@
 ;; CFG Traversal (using graph structure)
 ;; ============================================================================
 
-;; Get successors of a block (returns list of vertex-ids)
+;; Get successors of a block (returns pvector of vertex-ids)
 (define (cfg-successors cfg block-id)
   (unless (vertex-id? block-id)
     (raise-argument-error 'cfg-successors "vertex-id?" 1 cfg block-id))
-  ;; graph-successors now returns (pvector vertex-id)
-  (define succs (graph-successors (AsmCfg-graph cfg) block-id))
-  (pvector->list succs))
+  (graph-successors (AsmCfg-graph cfg) block-id))
 
-;; Get predecessors of a block (returns list of vertex-ids)
+;; Get predecessors of a block (returns pvector of vertex-ids)
 (define (cfg-predecessors cfg block-id)
   (unless (vertex-id? block-id)
     (raise-argument-error 'cfg-predecessors "vertex-id?" 1 cfg block-id))
-  ;; graph-predecessors now returns (pvector vertex-id)
-  (define preds (graph-predecessors (AsmCfg-graph cfg) block-id))
-  (pvector->list preds))
+  (graph-predecessors (AsmCfg-graph cfg) block-id))
 
 ;; Find all reachable blocks from entry (returns bitset of vertex-id vals)
 (define (cfg-reachable-blocks cfg)
   (define entry (AsmCfg-entry cfg))
   (if (not entry)
       (bitset)
-      (let loop ([worklist (list entry)]
+      ;; worklist is a pvector; we pop from the right (stack discipline)
+      (let loop ([worklist (pvector-cons-right (pvector-empty) entry)]
                  [visited (bitset)])
-        (if (null? worklist)
-            visited
-            (let ([current (car worklist)]
-                  [rest (cdr worklist)])
-              (define vid-val (vertex-id-val current))
-              (if (bitset-member? visited vid-val)
-                  (loop rest visited)
-                  (let ([new-visited (bitset-add visited vid-val)]
-                        [succs (cfg-successors cfg current)])
-                    (loop (append succs rest) new-visited))))))))
-
-;; ============================================================================
-;; Utility: Convert between pvector and list
-;; ============================================================================
-
-(define (pvector-insns->list pv)
-  (pvector->list pv))
-
-(define (list->pvector-insns lst)
-  (list->pvector lst))
+        (cond
+          [(= (pvector-length worklist) 0) visited]
+          [else
+           (define idx (sub1 (pvector-length worklist)))
+           (define current (pvector-ref worklist idx))
+           (define rest (pvector-drop-right worklist 1))
+           (define vid-val (vertex-id-val current))
+           (cond
+             [(bitset-member? visited vid-val)
+              (loop rest visited)]
+             [else
+              (define new-visited (bitset-add visited vid-val))
+              (define succs (cfg-successors cfg current))
+              (loop (pvector-append rest succs) new-visited)])]))))
 
 ;; ============================================================================
 ;; Backward Compatibility: BlockId alias

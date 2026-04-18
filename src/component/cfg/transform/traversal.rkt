@@ -9,9 +9,9 @@
 ;;
 ;; ============================================================
 
-(require racket/list racket/set)
+(require racket/set)
 (require "../../../kernel/ir/cfg/cfg.rkt")
-(require "../../../kernel/data/data.rkt")
+(require (except-in "../../../kernel/data/data.rkt" integer-compare))
 (require "../../../driver/graph/graph.rkt")
 (require "../utils/graph-ops.rkt")
 
@@ -35,72 +35,75 @@
 ;; ============================================================
 
 ;; Get blocks in DFS preorder
-;; Returns: (Listof BlockId)
+;; Returns: pvector[BlockId]
 ;;
 (define (cfg-dfs-preorder cfg)
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
-  (dfs-preorder get-succs entry))
+  (dfs-preorder block-id-compare get-succs entry))
 
 ;; Get blocks in DFS postorder
-;; Returns: (Listof BlockId)
+;; Returns: pvector[BlockId]
 ;;
 (define (cfg-dfs-postorder cfg)
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
-  (dfs-postorder get-succs entry))
+  (dfs-postorder block-id-compare get-succs entry))
 
 ;; Get blocks in reverse postorder (topological for acyclic CFG)
-;; Returns: (Listof BlockId)
+;; Returns: pvector[BlockId]
 ;;
 (define (cfg-reverse-postorder cfg)
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
-  (dfs-reverse-postorder get-succs entry))
+  (dfs-reverse-postorder block-id-compare get-succs entry))
 
 ;; Get blocks in BFS order
-;; Returns: (Listof BlockId)
+;; Returns: pvector[BlockId]
 ;;
 (define (cfg-bfs-order cfg)
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
-  (bfs get-succs entry))
+  (bfs block-id-compare get-succs entry))
 
 ;; ============================================================
 ;; Reachability
 ;; ============================================================
 
 ;; Get all blocks reachable from entry
-;; Returns: (Listof BlockId)
+;; Returns: pvector[BlockId]
 ;;
 (define (cfg-reachable-blocks cfg)
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
-  (reachable-from get-succs entry))
+  (reachable-from block-id-compare get-succs entry))
 
 ;; Get all unreachable blocks
-;; Returns: (Listof BlockId)
+;; Returns: pvector[BlockId]
 ;;
 (define (cfg-unreachable-blocks cfg)
   (define all-blocks (cfg-all-block-ids cfg))
-  (define reachable (list->set (cfg-reachable-blocks cfg)))
-  (filter (lambda (bid) (not (set-member? reachable bid)))
-          all-blocks))
+  (define reachable
+    (for/fold ([s (set)]) ([bid (in-pvector (cfg-reachable-blocks cfg))])
+      (set-add s bid)))
+  (for/pvector ([bid (in-list all-blocks)]
+                #:unless (set-member? reachable bid))
+    bid))
 
 ;; ============================================================
 ;; Path Queries
 ;; ============================================================
 
 ;; Find a path between two blocks
-;; Returns: (Listof BlockId) or #f
+;; Returns: pvector[BlockId] or #f
 ;;
 (define (cfg-find-path cfg from-block to-block)
   (define get-succs (cfg-make-successors cfg))
-  (find-path get-succs from-block to-block))
+  (find-path block-id-compare get-succs from-block to-block))
 
 ;; Find all paths between two blocks
-;; Returns: (Listof (Listof BlockId))
+;; Returns: pvector[pvector[BlockId]]
 ;;
 (define (cfg-all-paths cfg from-block to-block)
   (define get-succs (cfg-make-successors cfg))
-  (all-paths get-succs from-block to-block))
+  (all-paths block-id-compare get-succs from-block to-block))

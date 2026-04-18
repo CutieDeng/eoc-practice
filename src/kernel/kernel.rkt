@@ -33,7 +33,7 @@
 ;; ============================================================
 
 (require "data/data.rkt")
-(require "ir/ir.rkt")
+(require (except-in "ir/ir.rkt" integer-compare))
 
 (provide (all-from-out "data/data.rkt"))
 (provide (all-from-out "ir/ir.rkt"))

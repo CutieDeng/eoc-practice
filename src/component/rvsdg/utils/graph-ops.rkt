@@ -11,7 +11,7 @@
 ;; by providing the function signatures that driver algorithms expect.
 ;; ============================================================
 
-(require racket/match racket/list racket/set)
+(require racket/match racket/set)
 (require "../../../kernel/ir/rvsdg/rvsdg.rkt")
 (require "../../../kernel/data/data.rkt")
 
@@ -38,45 +38,42 @@
 ;; Graph Operations (Closures for Driver)
 ;; ============================================================
 
-;; Create a get-successors function for RVSDG data dependency
-;; Successors are nodes that consume the outputs of a node
-;; Returns: NodeId -> (Listof NodeId)
+;; Create a get-successors function for RVSDG data dependency.
+;; Successors are nodes that consume the outputs of a node.
+;; Returns: NodeId -> pvector[NodeId]
 ;;
 (define (region-make-successors region)
   (lambda (node-id)
     (define outputs (region-get-node-outputs region node-id))
     (define result (mutable-set))
-    ;; For each output, find which nodes consume the wires
-    (for ([out-id outputs])
+    ;; For each output, find which nodes consume the wires.
+    (for ([out-id (in-pvector outputs)])
       (define wire-id (ordered-map-ref (Region-output->wire region) out-id #f))
       (when wire-id
-        ;; Find nodes that use this wire via their inputs
         (define input-id (ordered-map-ref (Region-wire->input region) wire-id #f))
         (when input-id
           (define consumer-node (ordered-map-ref (Region-input->node region) input-id #f))
           (when consumer-node
             (set-add! result consumer-node)))))
-    (set->list result)))
+    (for/pvector ([n (in-set result)]) n)))
 
-;; Create a get-predecessors function for RVSDG data dependency
-;; Predecessors are nodes that produce the inputs of a node
-;; Returns: NodeId -> (Listof NodeId)
+;; Create a get-predecessors function for RVSDG data dependency.
+;; Predecessors are nodes that produce the inputs of a node.
+;; Returns: NodeId -> pvector[NodeId]
 ;;
 (define (region-make-predecessors region)
   (lambda (node-id)
     (define inputs (region-get-node-inputs region node-id))
     (define result (mutable-set))
-    ;; For each input, find which nodes produce the wires
-    (for ([in-id inputs])
+    (for ([in-id (in-pvector inputs)])
       (define wire-id (ordered-map-ref (Region-input->wire region) in-id #f))
       (when wire-id
-        ;; Find nodes that produce this wire via their outputs
         (define output-id (ordered-map-ref (Region-wire->output region) wire-id #f))
         (when output-id
           (define producer-node (ordered-map-ref (Region-output->node region) output-id #f))
           (when producer-node
             (set-add! result producer-node)))))
-    (set->list result)))
+    (for/pvector ([n (in-set result)]) n)))
 
 ;; ============================================================
 ;; Region Accessors
@@ -90,25 +87,25 @@
 (define (region-get-node-value region node-id)
   (ordered-map-ref (Region-node->value region) node-id #f))
 
-;; Get input IDs for a node (returns list of InputId)
+;; Get input IDs for a node.  Returns: pvector[InputId]
 (define (region-get-node-inputs region node-id)
   (define entry (ordered-map-ref (Region-node->input region) node-id #f))
   (if entry
       (let ([start-id (car entry)]
             [count (cdr entry)])
-        (for/list ([i (in-range count)])
+        (for/pvector ([i (in-range count)])
           (InputId (+ (InputId-id start-id) i))))
-      '()))
+      (pvector-empty)))
 
-;; Get output IDs for a node (returns list of OutputId)
+;; Get output IDs for a node.  Returns: pvector[OutputId]
 (define (region-get-node-outputs region node-id)
   (define entry (ordered-map-ref (Region-node->output region) node-id #f))
   (if entry
       (let ([start-id (car entry)]
             [count (cdr entry)])
-        (for/list ([i (in-range count)])
+        (for/pvector ([i (in-range count)])
           (OutputId (+ (OutputId-id start-id) i))))
-      '()))
+      (pvector-empty)))
 
 ;; ============================================================
 ;; Wire/Port Operations
@@ -126,14 +123,14 @@
 ;; Node Classification
 ;; ============================================================
 
-;; Get all structured nodes in a region
+;; Get all structured nodes in a region.  Returns: pvector[NodeId]
 (define (region-get-structured-nodes region)
-  (for/list ([nid (region-all-node-ids region)]
-             #:when (structured-node? (region-get-node-value region nid)))
+  (for/pvector ([nid (in-list (region-all-node-ids region))]
+                #:when (structured-node? (region-get-node-value region nid)))
     nid))
 
-;; Get all simple nodes in a region
+;; Get all simple nodes in a region.  Returns: pvector[NodeId]
 (define (region-get-simple-nodes region)
-  (for/list ([nid (region-all-node-ids region)]
-             #:when (simple-node? (region-get-node-value region nid)))
+  (for/pvector ([nid (in-list (region-all-node-ids region))]
+                #:when (simple-node? (region-get-node-value region nid)))
     nid))

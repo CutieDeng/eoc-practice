@@ -5,11 +5,22 @@
 (require rackunit
          rackunit/text-ui
          racket/match
-         "../../../../cutie-ftree/pvector.rkt"
-         "../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../cutie-ftree/bitset.rkt"
+         cutie-ftree/pvector
+         cutie-ftree/ordered-map
+         cutie-ftree/bitset
          "../ir/types.rkt"
          "../ir/cfg.rkt")
+
+;; Helper: mint N fresh BlockIds using a throwaway CFG (vertex-id constructor is private).
+(define (fresh-bids n)
+  (define cfg0 (make-empty-cfg))
+  (let loop ([i 0] [cfg cfg0] [acc '()])
+    (if (= i n)
+        (reverse acc)
+        (let-values ([(bid cfg*) (cfg-fresh-block-id cfg)])
+          (loop (+ i 1) cfg* (cons bid acc))))))
+
+(define (bid0) (car (fresh-bids 1)))
 
 ;; ============================================================================
 ;; Block Tests
@@ -20,7 +31,7 @@
    "Basic Block Operations"
 
    (test-case "create empty block"
-     (define bid (BlockId 0))
+     (define bid (bid0))
      (define label (Label:named 'entry))
      (define block (make-empty-block bid label))
 
@@ -31,7 +42,7 @@
      (check-false (AsmBlock-terminator block)))
 
    (test-case "append instruction to block"
-     (define block (make-empty-block (BlockId 0) (Label:named 'test)))
+     (define block (make-empty-block (bid0) (Label:named 'test)))
      (define insn (Insn:arith 'add (Reg:x 0) (Reg:x 1) (Reg:x 2)))
 
      (define block2 (block-append-insn block insn))
@@ -41,7 +52,7 @@
      (check-equal? (block-insn-count block) 0))
 
    (test-case "append multiple instructions"
-     (define block (make-empty-block (BlockId 0) (Label:named 'test)))
+     (define block (make-empty-block (bid0) (Label:named 'test)))
      (define insns (list
                     (Insn:arith 'add (Reg:x 0) (Reg:x 1) (Reg:x 2))
                     (Insn:arith 'sub (Reg:x 3) (Reg:x 4) (Reg:x 5))
@@ -51,14 +62,14 @@
      (check-equal? (block-insn-count block2) 3))
 
    (test-case "set terminator"
-     (define block (make-empty-block (BlockId 0) (Label:named 'test)))
+     (define block (make-empty-block (bid0) (Label:named 'test)))
      (define block2 (block-set-terminator block (Term:ret)))
 
      (check-true (Term:ret? (AsmBlock-terminator block2)))
      (check-false (AsmBlock-terminator block)))  ; Original unchanged
 
    (test-case "pvector instruction access"
-     (define block (make-empty-block (BlockId 0) (Label:named 'test)))
+     (define block (make-empty-block (bid0) (Label:named 'test)))
      (define insn1 (Insn:arith 'add (Reg:x 0) (Reg:x 1) (Reg:x 2)))
      (define insn2 (Insn:arith 'sub (Reg:x 3) (Reg:x 4) (Reg:x 5)))
 
@@ -88,15 +99,16 @@
      (check-equal? (terminator-successors ret) '()))
 
    (test-case "jump terminator"
-     (define target (BlockId 5))
+     (define target (bid0))
      (define jmp (Term:jump target))
      (check-true (Term:jump? jmp))
      (check-equal? (Term:jump-target jmp) target)
      (check-equal? (terminator-successors jmp) (list target)))
 
    (test-case "conditional terminator"
-     (define then-id (BlockId 1))
-     (define else-id (BlockId 2))
+     (define ids (fresh-bids 2))
+     (define then-id (car ids))
+     (define else-id (cadr ids))
      (define cond-term (Term:cond 'eq then-id else-id))
      (check-true (Term:cond? cond-term))
      (check-equal? (Term:cond-cond cond-term) 'eq)
@@ -163,7 +175,9 @@
      (check-equal? retrieved block)
 
      ;; Non-existent block returns #f
-     (check-false (cfg-get-block cfg2 (BlockId 999))))
+     ;; Mint a fresh bid from cfg2 itself (not added) — guaranteed not present.
+     (define-values (phantom-bid _) (cfg-fresh-block-id cfg2))
+     (check-false (cfg-get-block cfg2 phantom-bid)))
 
    (test-case "update block in CFG"
      (define cfg0 (make-empty-cfg))
@@ -231,8 +245,8 @@
      (define cfg3 (cfg-add-block cfg2 block1 #:set-entry? #t))
      (define cfg4 (cfg-add-block cfg3 block2))
 
-     (check-equal? (cfg-successors cfg4 bid1) (list bid2))
-     (check-equal? (cfg-successors cfg4 bid2) '()))
+     (check-equal? (pvector->list (cfg-successors cfg4 bid1)) (list bid2))
+     (check-equal? (pvector->list (cfg-successors cfg4 bid2)) '()))
 
    (test-case "cfg-predecessors"
      (define cfg0 (make-empty-cfg))
@@ -255,10 +269,9 @@
      (define cfg5 (cfg-add-block cfg4 block2))
      (define cfg6 (cfg-add-block cfg5 block3))
 
-     (define preds (cfg-predecessors cfg6))
-     (check-equal? (ordered-map-ref preds bid1 '()) '())  ; Entry has no preds
-     (check-equal? (ordered-map-ref preds bid2 '()) (list bid1))
-     (check-equal? (ordered-map-ref preds bid3 '()) (list bid1)))
+     (check-equal? (pvector->list (cfg-predecessors cfg6 bid1)) '())  ; Entry has no preds
+     (check-equal? (pvector->list (cfg-predecessors cfg6 bid2)) (list bid1))
+     (check-equal? (pvector->list (cfg-predecessors cfg6 bid3)) (list bid1)))
 
    (test-case "cfg-reachable-blocks"
      (define cfg0 (make-empty-cfg))
@@ -294,7 +307,7 @@
    "Persistent Data Structure Properties"
 
    (test-case "block modification doesn't affect original"
-     (define block1 (make-empty-block (BlockId 0) (Label:named 'test)))
+     (define block1 (make-empty-block (bid0) (Label:named 'test)))
      (define insn (Insn:arith 'add (Reg:x 0) (Reg:x 1) (Reg:x 2)))
      (define block2 (block-append-insn block1 insn))
 
@@ -312,7 +325,7 @@
 
    (test-case "pvector structural sharing"
      ;; This tests that pvector shares structure efficiently
-     (define block1 (make-empty-block (BlockId 0) (Label:named 'test)))
+     (define block1 (make-empty-block (bid0) (Label:named 'test)))
 
      ;; Add 100 instructions
      (define block2

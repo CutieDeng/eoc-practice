@@ -8,10 +8,10 @@
 ;; - bitset for flags
 
 (require racket/match
-         "../../../../cutie-ftree/pvector.rkt"
-         "../../../../cutie-ftree/ordered-map.rkt"
-         "../../../../cutie-ftree/bitset.rkt"
-         "../../../../cutie-ftree/comparator.rkt"
+         cutie-ftree/pvector
+         cutie-ftree/ordered-map
+         cutie-ftree/bitset
+         cutie-ftree/comparator
          "../ir/types.rkt"
          "../ir/config.rkt")
 

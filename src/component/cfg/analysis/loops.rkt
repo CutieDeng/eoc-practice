@@ -9,8 +9,9 @@
 ;;
 ;; ============================================================
 
-(require racket/list racket/set)
+(require racket/set)
 (require "../../../kernel/ir/cfg/cfg.rkt")
+(require (except-in "../../../kernel/data/data.rkt" integer-compare))
 (require "../../../driver/loop/loop.rkt")
 (require "../../../driver/dominance/dominance.rkt")
 (require "../utils/graph-ops.rkt")
@@ -46,26 +47,31 @@
 ;; Loop Analysis Implementation
 ;; ============================================================
 
+;; Build a pvector of block ids from a CFG.
+(define (cfg-block-ids-pv cfg)
+  (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
+
 (define (compute-cfg-loops cfg ctx)
-  (define block-ids (cfg-all-block-ids cfg))
+  (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
 
   ;; Use driver algorithms
   (define back-edges
-    (find-back-edges block-ids entry get-succs get-preds))
+    (find-back-edges block-id-compare block-ids entry get-succs get-preds))
 
   (define loops
-    (find-natural-loops block-ids entry get-succs get-preds))
+    (find-natural-loops block-id-compare block-ids entry get-succs get-preds))
 
-  (define headers (find-loop-headers block-ids entry get-succs get-preds))
+  (define headers
+    (find-loop-headers block-id-compare block-ids entry get-succs get-preds))
 
   ;; Build loop forest with proper depths
   (define-values (updated-loops parent-map children-map)
     (if (null? loops)
         (values '() (hash) (hash))
-        (build-loop-forest loops)))
+        (build-loop-forest block-id-compare loops)))
 
   (AnalysisResult
     (CfgLoopInfo updated-loops back-edges headers parent-map children-map)
@@ -93,34 +99,28 @@
 ;; ============================================================
 
 ;; Find all loops in a CFG
-;; Returns: (Listof LoopInfo)
-;;
 (define (cfg-find-loops cfg)
-  (define block-ids (cfg-all-block-ids cfg))
+  (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (find-natural-loops block-ids entry get-succs get-preds))
+  (find-natural-loops block-id-compare block-ids entry get-succs get-preds))
 
 ;; Find all back edges in a CFG
-;; Returns: (Listof (Cons BlockId BlockId))
-;;
 (define (cfg-find-back-edges cfg)
-  (define block-ids (cfg-all-block-ids cfg))
+  (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (find-back-edges block-ids entry get-succs get-preds))
+  (find-back-edges block-id-compare block-ids entry get-succs get-preds))
 
 ;; Find all loop headers in a CFG
-;; Returns: Set[BlockId]
-;;
 (define (cfg-find-loop-headers cfg)
-  (define block-ids (cfg-all-block-ids cfg))
+  (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (find-loop-headers block-ids entry get-succs get-preds))
+  (find-loop-headers block-id-compare block-ids entry get-succs get-preds))
 
 ;; Get the nesting depth of a block (0 = not in loop)
 ;;

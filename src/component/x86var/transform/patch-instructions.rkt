@@ -14,7 +14,7 @@
 ;; ============================================================
 
 (require racket/match
-         "../../../pipeline/x86/ir/types.rkt")
+         "../../../kernel/ir/x86/types.rkt")
 
 (provide patch-instructions)
 

@@ -50,13 +50,13 @@
 ;; ============================================================
 
 (define (make-fifo-worklist item-compare [initial (pvector-empty)])
-  (define initial-pv
-    (if (pvector? initial) initial (list->pvector initial)))
+  (unless (pvector? initial)
+    (raise-argument-error 'make-fifo-worklist "pvector?" initial))
   (define members
     (for/fold ([m (ordered-map-empty item-compare)])
-              ([item (in-pvector initial-pv)])
+              ([item (in-pvector initial)])
       (ordered-map-set m item #t)))
-  (FifoWorklist item-compare (box initial-pv) (box members)))
+  (FifoWorklist item-compare (box initial) (box members)))
 
 (define (fifo-empty? wl)
   (pvector-empty? (unbox (FifoWorklist-queue-box wl))))
@@ -86,13 +86,13 @@
 ;; ============================================================
 
 (define (make-lifo-worklist item-compare [initial (pvector-empty)])
-  (define initial-pv
-    (if (pvector? initial) initial (list->pvector initial)))
+  (unless (pvector? initial)
+    (raise-argument-error 'make-lifo-worklist "pvector?" initial))
   (define members
     (for/fold ([m (ordered-map-empty item-compare)])
-              ([item (in-pvector initial-pv)])
+              ([item (in-pvector initial)])
       (ordered-map-set m item #t)))
-  (LifoWorklist item-compare (box initial-pv) (box members)))
+  (LifoWorklist item-compare (box initial) (box members)))
 
 (define (lifo-empty? wl)
   (pvector-empty? (unbox (LifoWorklist-stack-box wl))))
@@ -122,17 +122,17 @@
 ;; ============================================================
 
 (define (make-priority-worklist item-compare priority-fn [initial (pvector-empty)])
-  (define initial-pv
-    (if (pvector? initial) initial (list->pvector initial)))
-  (define members
-    (for/fold ([m (ordered-map-empty item-compare)])
-              ([item (in-pvector initial-pv)])
-      (ordered-map-set m item #t)))
-  ;; Sort initial list by priority (lower = higher priority)
-  (define sorted
-    (list->pvector
-      (sort (pvector->list initial-pv) < #:key priority-fn)))
-  (PriorityWorklist item-compare (box sorted) (box members) priority-fn))
+  (unless (pvector? initial)
+    (raise-argument-error 'make-priority-worklist "pvector?" initial))
+  ;; Build the heap by incremental sorted insertion, which is the same
+  ;; operation priority-add! uses — no list round-trip needed.
+  (define wl (PriorityWorklist item-compare
+                               (box (pvector-empty))
+                               (box (ordered-map-empty item-compare))
+                               priority-fn))
+  (for ([item (in-pvector initial)])
+    (priority-add! wl item))
+  wl)
 
 (define (priority-empty? wl)
   (pvector-empty? (unbox (PriorityWorklist-heap-box wl))))
@@ -189,8 +189,9 @@
     [else (error 'worklist-add! "unknown worklist type")]))
 
 (define (worklist-add-all! wl items)
-  (define pv (if (pvector? items) items (list->pvector items)))
-  (for ([item (in-pvector pv)])
+  (unless (pvector? items)
+    (raise-argument-error 'worklist-add-all! "pvector?" items))
+  (for ([item (in-pvector items)])
     (worklist-add! wl item)))
 
 (define (worklist-remove! wl)
