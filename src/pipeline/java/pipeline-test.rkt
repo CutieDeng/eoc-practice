@@ -15,25 +15,16 @@
   "../../../test/integration/ClassTransform.dat")
 
 (module+ test
-  ;; End-to-end: read → CFG → SSA → RVSDG for every method.  Linear
-  ;; (init) and single if-else diamond (test) methods should produce
-  ;; Lambdas; methods with loops / switches still surface as
-  ;; ('error . message) until Theta/Kappa recovery lands.  Either
-  ;; way, the wiring itself must not throw.
+  ;; End-to-end: read → CFG → SSA → RVSDG for every method.  With
+  ;; M4 Gamma + M5 Theta + the object-creation opcode coverage in
+  ;; jvm-to-cfg, every fixture method should now lower to a Lambda.
   (test-case "java-compile-class returns per-method results"
     (define results (java-compile-class fixture-class-transform))
     (check-true (pair? results))
-    (define (pick name)
-      (for/or ([kv (in-list results)])
-        (and (equal? (car kv) name) (cdr kv))))
-    ;; init must succeed -- it's linear.
-    (define init-r (pick "init"))
-    (check-not-false init-r)
-    (check-pred Lambda? init-r)
-    ;; test must now succeed post-Gamma-recovery (single if-else).
-    (define test-r (pick "test"))
-    (check-not-false test-r)
-    (check-pred Lambda? test-r))
+    ;; Every method must produce a Lambda -- no error fallbacks.
+    (for ([kv (in-list results)])
+      (check-pred Lambda? (cdr kv)
+                  (format "method ~a did not lower to a Lambda" (car kv)))))
 
   (test-case "java-method->cfg / ->ssa-cfg / ->rvsdg compose correctly"
     (define klass (read-jvm-class-file fixture-class-transform))

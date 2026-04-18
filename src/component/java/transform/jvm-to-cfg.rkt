@@ -394,6 +394,52 @@
     [(INVOKEVIRTUAL INVOKESPECIAL INVOKEINTERFACE)
      (translate-invoke op args stack vc #:receiver? #t)]
 
+    ;; ---- Object creation / type ops ----
+    ;; NEW: pushes an uninitialised reference; ctor runs later via
+    ;; INVOKESPECIAL on the same (DUPed) ref.
+    [(NEW)
+     (define-values (out vc*) (fresh-var vc))
+     (values
+       (VfInsn op
+               (pvector-empty)
+               (pvector-cons-right (pvector-empty) out)
+               (hash 'type (car args))
+               #f)
+       (stack-push stack out)
+       vc*)]
+    ;; CHECKCAST / INSTANCEOF: pop objref, push narrowed / boolean.
+    [(CHECKCAST INSTANCEOF)
+     (define-values (popped stack*) (stack-pop-n stack 1))
+     (define-values (out vc*) (fresh-var vc))
+     (values
+       (VfInsn op popped
+               (pvector-cons-right (pvector-empty) out)
+               (hash 'type (car args))
+               #f)
+       (stack-push stack* out)
+       vc*)]
+    ;; ANEWARRAY / NEWARRAY: pop length, push array ref.
+    [(ANEWARRAY NEWARRAY)
+     (define-values (popped stack*) (stack-pop-n stack 1))
+     (define-values (out vc*) (fresh-var vc))
+     (values
+       (VfInsn op popped
+               (pvector-cons-right (pvector-empty) out)
+               (hash 'type (car args))
+               #f)
+       (stack-push stack* out)
+       vc*)]
+    ;; ARRAYLENGTH: pop array ref, push int length.
+    [(ARRAYLENGTH)
+     (define-values (popped stack*) (stack-pop-n stack 1))
+     (define-values (out vc*) (fresh-var vc))
+     (values
+       (VfInsn op popped
+               (pvector-cons-right (pvector-empty) out)
+               #f #f)
+       (stack-push stack* out)
+       vc*)]
+
     [else
      (error 'translate-insn "unhandled opcode: ~a (args ~s)" op args)]))
 
