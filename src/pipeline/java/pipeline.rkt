@@ -80,6 +80,7 @@
     'description "Java bytecode compilation pipeline"
     'status 'partial
     'supported '(jvm-to-cfg ssa-construct linear-rvsdg
-                 gamma-recovery gamma-multi-block-arms theta-recovery)
+                 gamma-recovery gamma-multi-block-arms
+                 gamma-nested-diamonds theta-recovery)
     'deferred  '(switch-recovery kappa-recovery nested-loops
-                 gamma-nested-control-flow)))
+                 gamma-early-exit)))

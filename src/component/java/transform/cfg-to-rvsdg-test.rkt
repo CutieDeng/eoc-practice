@@ -186,6 +186,61 @@
     ;; And the parent must still terminate with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Gamma recovery: nested if-inside-if -----
+  (test-case "Gamma lowers with nested if inside then-arm"
+    ;; if (arg0) {
+    ;;   if (arg1) { slot0 = 1; } else { slot0 = 2; }
+    ;; } else {
+    ;;   slot0 = 3;
+    ;; }
+    ;; return slot0;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_OUTER_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_THEN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_INNER_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_THEN")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'GOTO "L_INNER_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_ELSE")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_JOIN")
+                       (mk-insn 'GOTO "L_OUTER_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_ELSE")
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_JOIN")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region has exactly one outer Gamma.
+    (define outer-gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length outer-gammas) 1
+                  "parent region should contain exactly one Gamma")
+    (define outer-gamma (car outer-gammas))
+    ;; One of the outer Gamma's sub-regions must itself contain an
+    ;; inner Gamma (the nested if).  Regardless of which arm IFEQ
+    ;; mapped the outer-then/else onto, *some* sub-region has a
+    ;; Gamma node inside.
+    (define nested-gamma-count
+      (for/sum ([sub (in-list (Gamma-regions outer-gamma))])
+        (for/sum ([kv (in-ordered-map (Region-node->value sub))])
+          (if (Gamma? (cdr kv)) 1 0))))
+    (check-equal? nested-gamma-count 1
+                  "exactly one of the outer Gamma's sub-regions should contain an inner Gamma")
+    ;; Parent region finishes with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- Theta recovery: simple while-loop -----
   (test-case "while-loop lowers to a Theta node"
     ;; slot0 = 0; while (slot1 != 0) { slot0 = slot0 + 1; } return slot0;
