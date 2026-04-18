@@ -135,6 +135,48 @@
     ;; And must finish with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Theta recovery: simple while-loop -----
+  (test-case "while-loop lowers to a Theta node"
+    ;; slot0 = 0; while (slot1 != 0) { slot0 = slot0 + 1; } return slot0;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IADD)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains a Theta node.
+    (define has-theta?
+      (for/or ([kv (in-ordered-map (Region-node->value r))])
+        (Theta? (cdr kv))))
+    (check-true has-theta?)
+    ;; IFEQ body is on the else arm, so Theta polarity-flip inserts
+    ;; a `Simple 'not` inside the theta's region.
+    (define theta
+      (for/or ([kv (in-ordered-map (Region-node->value r))])
+        (and (Theta? (cdr kv)) (cdr kv))))
+    (define theta-sub (Theta-region theta))
+    (define has-not?
+      (for/or ([kv (in-ordered-map (Region-node->value theta-sub))])
+        (define v (cdr kv))
+        (and (Simple? v) (equal? (Simple-op v) 'not))))
+    (check-true has-not?)
+    ;; Parent must still terminate with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

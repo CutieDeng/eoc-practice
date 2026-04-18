@@ -18,9 +18,17 @@
 ;;   - Term:ret / Term:throw yield synthetic `Simple 'return` /
 ;;     kernel `Throw` sink nodes in whichever region they appear.
 ;;
+;;   - A single natural loop with a one-block body is lowered to a
+;;     Theta node.  The header must end in Term:cond; one arm equals
+;;     the latch (continue) and the other is the exit.  All parent-
+;;     scope vars pass through as conservatively-closed loop-carried
+;;     or loop-invariant inputs.  A `Simple 'not` node flips polarity
+;;     when the body sits on the else-arm.
+;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
-;;   - Loops (back edges / Theta recovery)
+;;   - Nested / multiple natural loops
+;;   - Loop body spanning more than one block
 ;;   - Branches where one side spans multiple blocks before the join
 ;;   - try/catch (Kappa recovery)
 ;;
@@ -32,10 +40,22 @@
          "../../../kernel/ir/cfg/types.rkt"
          "../../../kernel/ir/rvsdg/rvsdg.rkt"
          "../../../component/cfg/utils/graph-ops.rkt"
+         "../../../component/cfg/analysis/loops.rkt"
          "../../../component/rvsdg/utils/builder.rkt"
          (except-in "../../../kernel/data/data.rkt" integer-compare))
 
 (provide cfg->rvsdg)
+
+;; ============================================================
+;; Loop context (single-loop scope)
+;; ============================================================
+;;
+;; Threaded through translate-segment so that the first entry into a
+;; loop header spawns a Theta.  We currently support at most one
+;; natural loop per CFG with a single-block body whose back-edge
+;; closes to the header.
+;;
+(struct Theta-Ctx (header latch) #:prefab)
 
 ;; ============================================================
 ;; Entry
@@ -47,6 +67,22 @@
     (or (cfg-get-info cfg 'java/ssa-param-names #f)
         (error 'cfg->rvsdg
                "ssa must publish 'java/ssa-param-names; run jvm-cfg->ssa first")))
+
+  ;; Detect loop structure.  At most one back-edge supported; nested
+  ;; or irreducible loops raise.
+  (define back-edges (cfg-find-back-edges cfg))
+  (define n-back-edges (pvector-length back-edges))
+  (define theta-ctx
+    (cond
+      [(= n-back-edges 0) #f]
+      [(= n-back-edges 1)
+       (define be (pvector-ref back-edges 0))
+       (Theta-Ctx (cdr be) (car be))]
+      [else
+       (error 'cfg->rvsdg
+              "multiple back-edges not yet supported: ~s"
+              (for/list ([e (in-pvector back-edges)]) e))]))
+
   (define region0 (region-empty))
 
   ;; 1. Parameter provider node.
@@ -63,7 +99,7 @@
   ;; 3. Translate starting at entry; stop-bid = #f means "until a
   ;;    terminator or unreachable".
   (define-values (region-final var->out-final payload)
-    (translate-segment cfg (Cfg-entry cfg) #f region1 var->out-init))
+    (translate-segment cfg (Cfg-entry cfg) #f region1 var->out-init theta-ctx))
 
   ;; 4. Materialise Term:ret / Term:throw.
   (define region-done
@@ -81,10 +117,17 @@
 ;; Returns (values region var->out payload).  `payload` is #f for a
 ;; segment that hits stop-bid, or (cons 'ret pvector) / (cons
 ;; 'throw VarId) for one that ran into a function-level exit.
-(define (translate-segment cfg start-bid stop-bid region var->out)
+;;
+;; `theta-ctx` describes the currently-active loop (if any).  When
+;; `start-bid` equals the Theta header AND the caller did not pass
+;; stop-bid=header (which would catch back-edge closure first), we
+;; dispatch into translate-theta to build a Theta node.
+(define (translate-segment cfg start-bid stop-bid region var->out theta-ctx)
   (cond
     [(and stop-bid (equal? start-bid stop-bid))
      (values region var->out #f)]
+    [(and theta-ctx (equal? start-bid (Theta-Ctx-header theta-ctx)))
+     (translate-theta cfg theta-ctx stop-bid region var->out)]
     [else
      (define blk (cfg-get-block cfg start-bid))
      (unless blk (error 'translate-segment "missing block ~a" start-bid))
@@ -107,7 +150,7 @@
      ;; Dispatch on the terminator.
      (match (CfgBlock-terminator blk)
        [(Term:jump nxt)
-        (translate-segment cfg nxt stop-bid region1 var->out1)]
+        (translate-segment cfg nxt stop-bid region1 var->out1 theta-ctx)]
        [(Term:ret ret-vs)
         (values region1 var->out1 (cons 'ret ret-vs))]
        [(Term:throw ex)
@@ -120,7 +163,7 @@
                            region1 var->out1))
         (cond
           [join-bid
-           (translate-segment cfg join-bid stop-bid region2 var->out2)]
+           (translate-segment cfg join-bid stop-bid region2 var->out2 theta-ctx)]
           [else
            (values region2 var->out2 #f)])]
        [(Term:switch _ _ _)
@@ -330,6 +373,192 @@
              "phi at ~a has no source from ~a branch (block ~a); sources=~s"
              (PhiInsn-output phi) which branch-bid
              (for/list ([s (in-pvector srcs)]) s))))
+
+;; ============================================================
+;; Theta recovery (while-loop)
+;; ============================================================
+;;
+;; Scope: exactly one natural loop, with a single-block body that
+;; jumps back to the header (the latch).  The header must end in
+;; Term:cond; one arm leads into the body (the latch), the other
+;; exits the loop.  Deviations raise self-identifying errors.
+;;
+;; Sub-region layout:
+;;   - `Simple '(region-arg N)` producer provides one output per
+;;     loop-carried phi (these mirror the Theta node's inputs).
+;;   - Header's non-phi insns are translated in-region.
+;;   - Body block's insns are translated in-region via a scoped
+;;     translate-segment call with stop-bid=header (closing on the
+;;     back-edge).
+;;   - `Simple '(region-result (+ N 1))` consumer takes (predicate,
+;;     loop-carried-updates...); `Simple 'not` is inserted when the
+;;     natural cond polarity would iterate on the wrong branch.
+;;
+;; Returns (values region var->out payload) shaped like
+;; translate-segment -- after the Theta, translation continues at
+;; the exit-arm block and may hit a terminator there.
+(define (translate-theta cfg theta-ctx stop-bid region var->out)
+  (define header-bid (Theta-Ctx-header theta-ctx))
+  (define latch-bid (Theta-Ctx-latch theta-ctx))
+  (define header-blk (cfg-get-block cfg header-bid))
+  (define phis (CfgBlock-phis header-blk))
+
+  ;; Build phi index: phi-output VarId -> PhiInsn.  Every loop-carried
+  ;; parent var has an entry here; every other parent var is
+  ;; loop-invariant and passes through unchanged.
+  (define phi-by-output
+    (for/fold ([m (ordered-map-empty var-id-compare)])
+              ([p (in-pvector phis)])
+      (ordered-map-set m (PhiInsn-output p) p)))
+
+  ;; Theta's inputs/outputs cover every var visible inside the loop:
+  ;;   (a) phi outputs at the header (loop-carried)
+  ;;   (b) every parent-scope var (loop-invariant context; overly
+  ;;       conservative but correct -- escape analysis can prune later).
+  ;; Duplicates removed: a phi output never appears in parent var->out
+  ;; at theta entry (the phi materialises inside the theta), but we
+  ;; guard against it anyway.
+  (define carried-vars
+    (let* ([acc (for/pvector ([p (in-pvector phis)]) (PhiInsn-output p))]
+           [seen (for/fold ([s (ordered-map-empty var-id-compare)])
+                           ([v (in-pvector acc)])
+                   (ordered-map-set s v #t))])
+      (for/fold ([out acc] [s seen]
+                 #:result out)
+                ([kv (in-ordered-map var->out)])
+        (define v (car kv))
+        (if (ordered-map-ref s v #f)
+            (values out s)
+            (values (pvector-cons-right out v)
+                    (ordered-map-set s v #t))))))
+  (define n-carried (pvector-length carried-vars))
+
+  ;; For each carried var, derive the "entry" source var (value on
+  ;; the first iteration's input to Theta).  Loop-carried: phi's
+  ;; non-latch source.  Invariant: the var itself.
+  (define entry-src-vars
+    (for/pvector ([v (in-pvector carried-vars)])
+      (define phi (ordered-map-ref phi-by-output v #f))
+      (cond
+        [phi
+         (or (for/or ([s (in-pvector (PhiInsn-sources phi))])
+               (and (not (equal? (car s) latch-bid)) (cdr s)))
+             (error 'translate-theta
+                    "phi ~a has no non-latch source" v))]
+        [else v])))
+
+  ;; ---- Build the sub-region. ----
+  (define sub0 (region-empty))
+  (define-values (sub1 _arg-nid _arg-ins arg-outs)
+    (region-add-node sub0 (Simple (list 'region-arg n-carried)) 0 n-carried))
+
+  ;; Sub-var->out maps each carried var to its region-arg output.
+  (define sub-var->out-init
+    (for/fold ([m (ordered-map-empty var-id-compare)])
+              ([v (in-pvector carried-vars)]
+               [oid (in-pvector arg-outs)])
+      (ordered-map-set m v oid)))
+
+  ;; Translate header's non-phi insns (includes the comparison VfInsn
+  ;; that produces the Term:cond predicate).
+  (define-values (sub2 sub-var->out2)
+    (translate-insns (CfgBlock-insns header-blk) sub1 sub-var->out-init))
+
+  ;; Identify continue / exit arms.
+  (define header-term (CfgBlock-terminator header-blk))
+  (unless (Term:cond? header-term)
+    (error 'translate-theta
+           "header ~a must end in Term:cond for Theta lowering (got ~a)"
+           header-bid header-term))
+  (define pred-var (Term:cond-cond header-term))
+  (define then-bid (Term:cond-then-target header-term))
+  (define else-bid (Term:cond-else-target header-term))
+  (define-values (body-is-then? exit-arm-bid)
+    (cond
+      [(equal? then-bid latch-bid) (values #t else-bid)]
+      [(equal? else-bid latch-bid) (values #f then-bid)]
+      [else (error 'translate-theta
+                   "neither cond arm equals latch ~a (then=~a else=~a) -- multi-block loop body not yet supported"
+                   latch-bid then-bid else-bid)]))
+
+  ;; Translate the body block, stopping at the back-edge into header.
+  (define-values (sub3 sub-var->out3 body-payload)
+    (translate-segment cfg latch-bid header-bid sub2 sub-var->out2 #f))
+  (unless (eq? body-payload #f)
+    (error 'translate-theta
+           "loop body payload ~s unsupported (ret/throw inside loop not yet lowered)"
+           body-payload))
+
+  ;; Iteration predicate (see translate-theta docstring).
+  (define pred-oid
+    (or (ordered-map-ref sub-var->out3 pred-var #f)
+        (error 'translate-theta "predicate ~a undefined in sub-region" pred-var)))
+  (define-values (sub4 iter-pred-oid)
+    (cond
+      [body-is-then? (values sub3 pred-oid)]
+      [else
+       (define-values (s* _not-nid not-ins not-outs)
+         (region-add-node sub3 (Simple 'not) 1 1))
+       (define-values (s** _w)
+         (region-add-wire s* pred-oid (pvector-ref not-ins 0)))
+       (values s** (pvector-ref not-outs 0))]))
+
+  ;; For each carried var, its "update" going back to the next
+  ;; iteration / exposed as Theta's output.  Loop-carried: the phi's
+  ;; latch source.  Invariant: the sub-region's own current value
+  ;; (which equals the region-arg output since nothing rebound it).
+  (define update-oids
+    (for/pvector ([v (in-pvector carried-vars)])
+      (define phi (ordered-map-ref phi-by-output v #f))
+      (cond
+        [phi
+         (define latch-var (pick-phi-source phi latch-bid 'latch))
+         (or (ordered-map-ref sub-var->out3 latch-var #f)
+             (error 'translate-theta "latch source ~a undefined" latch-var))]
+        [else
+         (or (ordered-map-ref sub-var->out3 v #f)
+             (error 'translate-theta "carried var ~a lost during body" v))])))
+
+  ;; region-result: 1 (predicate) + n-carried updates.
+  (define-values (sub5 _res-nid res-ins _res-outs)
+    (region-add-node sub4
+                     (Simple (list 'region-result (add1 n-carried)))
+                     (add1 n-carried) 0))
+  (define-values (sub6 _wpred)
+    (region-add-wire sub5 iter-pred-oid (pvector-ref res-ins 0)))
+  (define sub7
+    (for/fold ([r sub6])
+              ([oid (in-pvector update-oids)]
+               [i (in-naturals 1)])
+      (define-values (r* _w) (region-add-wire r oid (pvector-ref res-ins i)))
+      r*))
+
+  ;; ---- Install Theta node in the parent region. ----
+  (define theta-val (Theta sub7))
+  (define-values (region1 _tnid t-ins t-outs)
+    (region-add-node region theta-val n-carried n-carried))
+
+  ;; Wire Theta inputs from parent-scope values.
+  (define region2
+    (for/fold ([r region1])
+              ([entry-var (in-pvector entry-src-vars)]
+               [iid (in-pvector t-ins)])
+      (define src-oid
+        (or (ordered-map-ref var->out entry-var #f)
+            (error 'translate-theta "entry source ~a undefined" entry-var)))
+      (define-values (r* _w) (region-add-wire r src-oid iid))
+      r*))
+
+  ;; Publish each carried var's post-loop value = Theta output.
+  (define var->out*
+    (for/fold ([m var->out])
+              ([v (in-pvector carried-vars)]
+               [oid (in-pvector t-outs)])
+      (ordered-map-set m v oid)))
+
+  ;; Continue translating from the exit-arm.  Only one loop supported,
+  ;; so no more theta-ctx beyond this point.
+  (translate-segment cfg exit-arm-bid stop-bid region2 var->out* #f))
 
 ;; ============================================================
 ;; Terminator materialisation
