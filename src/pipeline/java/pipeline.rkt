@@ -10,10 +10,12 @@
 ;; Current scope:
 ;;   - Reads a class file via the ASM-based reader.
 ;;   - Runs each method through jvm-method->cfg, jvm-cfg->ssa, and
-;;     cfg->rvsdg.  Methods whose control flow exceeds the initial
-;;     RVSDG lowering (Term:cond / switch / loops) currently error
-;;     from cfg->rvsdg -- we propagate that to the caller rather
-;;     than silently skipping.
+;;     cfg->rvsdg.  cfg->rvsdg handles linear jump chains and
+;;     single-block if-else diamonds (lowered to Gamma nodes).
+;;   - Methods whose control flow still exceeds lowering capacity
+;;     (loops, switch, try/catch, multi-block branches) error from
+;;     cfg->rvsdg; `java-compile-class` catches each exception per
+;;     method rather than aborting the whole class.
 ;;
 ;; ============================================================
 
@@ -75,5 +77,5 @@
     'name 'java
     'description "Java bytecode compilation pipeline"
     'status 'partial
-    'supported '(jvm-to-cfg ssa-construct linear-rvsdg)
-    'deferred  '(gamma-recovery theta-recovery kappa-recovery)))
+    'supported '(jvm-to-cfg ssa-construct linear-rvsdg gamma-recovery)
+    'deferred  '(theta-recovery switch-recovery kappa-recovery)))

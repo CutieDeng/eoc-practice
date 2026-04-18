@@ -16,18 +16,24 @@
 
 (module+ test
   ;; End-to-end: read → CFG → SSA → RVSDG for every method.  Linear
-  ;; methods (init) should produce a Lambda; branch-heavy methods
-  ;; (test) surface as ('error . message) until Gamma/Theta recovery
-  ;; lands.  Either way, the wiring itself must not throw.
+  ;; (init) and single if-else diamond (test) methods should produce
+  ;; Lambdas; methods with loops / switches still surface as
+  ;; ('error . message) until Theta/Kappa recovery lands.  Either
+  ;; way, the wiring itself must not throw.
   (test-case "java-compile-class returns per-method results"
     (define results (java-compile-class fixture-class-transform))
     (check-true (pair? results))
-    ;; init must succeed -- it's linear.
-    (define init-r
+    (define (pick name)
       (for/or ([kv (in-list results)])
-        (and (equal? (car kv) "init") (cdr kv))))
+        (and (equal? (car kv) name) (cdr kv))))
+    ;; init must succeed -- it's linear.
+    (define init-r (pick "init"))
     (check-not-false init-r)
-    (check-pred Lambda? init-r))
+    (check-pred Lambda? init-r)
+    ;; test must now succeed post-Gamma-recovery (single if-else).
+    (define test-r (pick "test"))
+    (check-not-false test-r)
+    (check-pred Lambda? test-r))
 
   (test-case "java-method->cfg / ->ssa-cfg / ->rvsdg compose correctly"
     (define klass (read-jvm-class-file fixture-class-transform))
