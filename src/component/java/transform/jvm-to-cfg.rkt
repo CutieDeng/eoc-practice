@@ -131,13 +131,24 @@
   (define entry-bid
     (ordered-map-ref label->bid (JvmMethodBBs-entry mbb) #f))
 
+  (define-values (param-n _has-ret?)
+    (parse-method-descriptor (JvmMethod-descriptor method)))
+
+  (define local-count (max (add1 max-local) param-n))
+  (define info0
+    (ordered-map-set
+      (ordered-map-set
+        (ordered-map-empty symbol-compare)
+        'java/param-count param-n)
+      'java/max-local local-count))
+
   (Cfg graph-final
        blocks-map
        entry-bid
        #f
        vc-final
        0
-       (ordered-map-empty symbol-compare)))
+       info0))
 
 ;; ============================================================
 ;; Local-index scan
