@@ -106,6 +106,35 @@
     (define r (region-of lam))
     (check-equal? (node-ops r) '(param ILOAD ILOAD IADD return)))
 
+  ;; ----- Gamma recovery: IF-join -----
+  (test-case "IF-join lowers to a Gamma node"
+    ;; if (arg0) { local0 = 1; } else { local0 = 2; } return local0;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_JOIN")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; The parent region must contain a Gamma node.
+    (define has-gamma?
+      (for/or ([kv (in-ordered-map (Region-node->value r))])
+        (Gamma? (cdr kv))))
+    (check-true has-gamma?)
+    ;; And must finish with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
