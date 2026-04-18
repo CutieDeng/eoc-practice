@@ -249,11 +249,16 @@
   (define phis (CfgBlock-phis join-blk))
   (define n-phis (pvector-length phis))
 
-  ;; Context vars = every VarId currently mapped in parent var->out.
-  ;; We can prune later via escape analysis; for now the conservative
-  ;; closure is both correct and simple.
+  ;; Context vars: only parent-scope vars each sub-region actually
+  ;; reads (plus the phi source on each side).  We walk the branch
+  ;; block's VfInsn inputs, subtract locally-defined outputs, and
+  ;; union the reads across both branches so the Gamma sub-regions
+  ;; agree on input shape.  Vars mapped in parent var->out but not
+  ;; referenced anywhere in either branch drop out entirely.
+  (define ctx-set
+    (collect-gamma-ctx cfg var->out then-bid else-bid join-bid phis))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map var->out)]) (car kv)))
+    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   ;; Build the per-branch sub-region closures.
@@ -364,6 +369,92 @@
     (define-values (r* _w) (region-add-wire r src-oid iid))
     r*))
 
+;; Collect parent-scope VarIds actually needed by either Gamma
+;; branch.  A branch "needs" a parent var iff it reads it (via a
+;; VfInsn input not locally defined earlier in the same branch) or
+;; that var is the phi-source it contributes at the join.  Returns
+;; an ordered-map used as a set of VarId -> #t.
+(define (collect-gamma-ctx cfg parent-var->out then-bid else-bid join-bid phis)
+  (define (walk-branch branch-bid acc)
+    (cond
+      [(equal? branch-bid join-bid)
+       ;; Empty branch -- only phi sources matter.
+       (for/fold ([a acc]) ([phi (in-pvector phis)])
+         (define src (pick-phi-source phi branch-bid 'gamma-ctx))
+         (cond
+           [(and (VarId? src)
+                 (ordered-map-ref parent-var->out src #f))
+            (ordered-map-set a src #t)]
+           [else a]))]
+      [else
+       (define blk (cfg-get-block cfg branch-bid))
+       (define insns (CfgBlock-insns blk))
+       ;; Step through in order, tracking locally-defined outputs.
+       (define-values (_ acc*)
+         (for/fold ([locals (ordered-map-empty var-id-compare)]
+                    [a acc])
+                   ([insn (in-pvector insns)])
+           (define a*
+             (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
+               (cond
+                 [(and (VarId? x)
+                       (not (ordered-map-ref locals x #f))
+                       (ordered-map-ref parent-var->out x #f))
+                  (ordered-map-set a x #t)]
+                 [else a])))
+           (define locals*
+             (for/fold ([s locals]) ([o (in-pvector (VfInsn-outputs insn))]
+                                     #:when (VarId? o))
+               (ordered-map-set s o #t)))
+           (values locals* a*)))
+       ;; Phi source from this branch.
+       (for/fold ([a acc*]) ([phi (in-pvector phis)])
+         (define src (pick-phi-source phi branch-bid 'gamma-ctx))
+         (cond
+           [(and (VarId? src)
+                 (ordered-map-ref parent-var->out src #f))
+            (ordered-map-set a src #t)]
+           [else a]))]))
+  (walk-branch else-bid
+               (walk-branch then-bid
+                            (ordered-map-empty var-id-compare))))
+
+;; Collect parent-scope VarIds actually read inside the loop.  Walks
+;; both the header block and the latch block, tracking locally-defined
+;; outputs (including header phi outputs, which are local to the
+;; sub-region).  Any VfInsn input that is a VarId, not locally-defined
+;; in the block's prefix, and present in `parent-var->out` counts as a
+;; read.  Returns an ordered-map used as a set of VarId -> #t.
+(define (collect-theta-ctx cfg parent-var->out header-bid latch-bid phis)
+  (define phi-out-set
+    (for/fold ([m (ordered-map-empty var-id-compare)])
+              ([p (in-pvector phis)])
+      (ordered-map-set m (PhiInsn-output p) #t)))
+  (define (walk-block bid acc)
+    (define blk (cfg-get-block cfg bid))
+    (define insns (CfgBlock-insns blk))
+    (define-values (_ acc*)
+      (for/fold ([locals phi-out-set]
+                 [a acc])
+                ([insn (in-pvector insns)])
+        (define a*
+          (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
+            (cond
+              [(and (VarId? x)
+                    (not (ordered-map-ref locals x #f))
+                    (ordered-map-ref parent-var->out x #f))
+               (ordered-map-set a x #t)]
+              [else a])))
+        (define locals*
+          (for/fold ([s locals]) ([o (in-pvector (VfInsn-outputs insn))]
+                                  #:when (VarId? o))
+            (ordered-map-set s o #t)))
+        (values locals* a*)))
+    acc*)
+  (walk-block latch-bid
+              (walk-block header-bid
+                          (ordered-map-empty var-id-compare))))
+
 ;; Find the VarId contributed by `branch-bid` to a phi's sources.
 (define (pick-phi-source phi branch-bid which)
   (define srcs (PhiInsn-sources phi))
@@ -411,21 +502,26 @@
               ([p (in-pvector phis)])
       (ordered-map-set m (PhiInsn-output p) p)))
 
-  ;; Theta's inputs/outputs cover every var visible inside the loop:
-  ;;   (a) phi outputs at the header (loop-carried)
-  ;;   (b) every parent-scope var (loop-invariant context; overly
-  ;;       conservative but correct -- escape analysis can prune later).
-  ;; Duplicates removed: a phi output never appears in parent var->out
-  ;; at theta entry (the phi materialises inside the theta), but we
-  ;; guard against it anyway.
+  ;; Theta's inputs/outputs cover:
+  ;;   (a) phi outputs at the header (loop-carried; always needed
+  ;;       because the body rebinds via them)
+  ;;   (b) parent-scope vars actually read inside header or body
+  ;;       (loop-invariant context)
+  ;; Phi entry sources themselves don't need to be in carried-vars --
+  ;; they are resolved by direct lookup in parent var->out when wiring
+  ;; Theta inputs below.
   (define carried-vars
-    (let* ([acc (for/pvector ([p (in-pvector phis)]) (PhiInsn-output p))]
-           [seen (for/fold ([s (ordered-map-empty var-id-compare)])
-                           ([v (in-pvector acc)])
-                   (ordered-map-set s v #t))])
-      (for/fold ([out acc] [s seen]
+    (let* ([phi-outs
+            (for/pvector ([p (in-pvector phis)]) (PhiInsn-output p))]
+           [reads
+            (collect-theta-ctx cfg var->out header-bid latch-bid phis)]
+           [seen
+            (for/fold ([s (ordered-map-empty var-id-compare)])
+                      ([v (in-pvector phi-outs)])
+              (ordered-map-set s v #t))])
+      (for/fold ([out phi-outs] [s seen]
                  #:result out)
-                ([kv (in-ordered-map var->out)])
+                ([kv (in-ordered-map reads)])
         (define v (car kv))
         (if (ordered-map-ref s v #f)
             (values out s)

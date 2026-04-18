@@ -128,10 +128,15 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     ;; The parent region must contain a Gamma node.
-    (define has-gamma?
+    (define gamma-nid
       (for/or ([kv (in-ordered-map (Region-node->value r))])
-        (Gamma? (cdr kv))))
-    (check-true has-gamma?)
+        (and (Gamma? (cdr kv)) (car kv))))
+    (check-not-false gamma-nid)
+    ;; Context pruning: both branches only write locally-defined vars,
+    ;; so the Gamma should have just the predicate input (no context).
+    (define gamma-in-info (ordered-map-ref (Region-node->input r) gamma-nid))
+    (check-equal? (cdr gamma-in-info) 1
+                  "Gamma input count should be 1 (predicate only) after escape pruning")
     ;; And must finish with a return.
     (check-not-false (memq 'return (node-ops r))))
 
