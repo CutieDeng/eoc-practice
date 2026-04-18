@@ -10,13 +10,14 @@
 ;; Current scope:
 ;;   - Reads a class file via the ASM-based reader.
 ;;   - Runs each method through jvm-method->cfg, jvm-cfg->ssa, and
-;;     cfg->rvsdg.  cfg->rvsdg handles linear jump chains,
-;;     single-block if-else diamonds (→ Gamma) and single-loop
-;;     while-patterns with a one-block body (→ Theta).
+;;     cfg->rvsdg.  cfg->rvsdg handles linear jump chains, if-else
+;;     diamonds with multi-block linear arms (→ Gamma), and single-
+;;     loop while-patterns with a one-block body (→ Theta).
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (nested loops, switch, try/catch, multi-block branches) error
-;;     from cfg->rvsdg; `java-compile-class` catches each exception
-;;     per method rather than aborting the whole class.
+;;     (nested loops, switch, try/catch, nested control flow inside
+;;     a Gamma arm) error from cfg->rvsdg; `java-compile-class`
+;;     catches each exception per method rather than aborting the
+;;     whole class.
 ;;
 ;; ============================================================
 
@@ -79,5 +80,6 @@
     'description "Java bytecode compilation pipeline"
     'status 'partial
     'supported '(jvm-to-cfg ssa-construct linear-rvsdg
-                 gamma-recovery theta-recovery)
-    'deferred  '(switch-recovery kappa-recovery nested-loops)))
+                 gamma-recovery gamma-multi-block-arms theta-recovery)
+    'deferred  '(switch-recovery kappa-recovery nested-loops
+                 gamma-nested-control-flow)))

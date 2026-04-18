@@ -10,11 +10,14 @@
 ;;   - Straight-line chains of Term:jump blocks are inlined into a
 ;;     single region (parent or sub-region alike).
 ;;   - Term:cond blocks become `Gamma` nodes with two nested
-;;     sub-regions, provided both branches rejoin at a common
-;;     successor with a Term:jump.  Each sub-region uses a synthetic
-;;     `Simple '(region-arg N)` producer node at its entry to mirror
-;;     the Gamma's context inputs, and a `Simple '(region-result N)`
-;;     consumer node to feed the Gamma's outputs.
+;;     sub-regions.  Each arm may span multiple basic blocks so long
+;;     as every block on the arm is Term:jump-terminated (i.e. the
+;;     arm is a linear chain of jumps); both arms must eventually
+;;     rejoin at a common block (Gamma's join).  Each sub-region uses
+;;     a synthetic `Simple '(region-arg N)` producer node at its
+;;     entry to mirror the Gamma's context inputs, and a
+;;     `Simple '(region-result N)` consumer node to feed the Gamma's
+;;     outputs.
 ;;   - Term:ret / Term:throw yield synthetic `Simple 'return` /
 ;;     kernel `Throw` sink nodes in whichever region they appear.
 ;;
@@ -29,7 +32,8 @@
 ;;   - Term:switch (tablesswitch / lookupswitch)
 ;;   - Nested / multiple natural loops
 ;;   - Loop body spanning more than one block
-;;   - Branches where one side spans multiple blocks before the join
+;;   - Nested control flow within a Gamma arm (inner Term:cond /
+;;     Term:switch / Term:ret before the join)
 ;;   - try/catch (Kappa recovery)
 ;;
 ;; Each of the above raises with a self-identifying error.
@@ -236,36 +240,39 @@
 ;; Returns (values region var->out join-bid) where join-bid is the
 ;; block the caller should continue translating from.
 (define (translate-gamma cfg cond-bid pred then-bid else-bid region var->out)
-  (define-values (join-bid then-result-vars)
-    (branch-jump-target cfg then-bid))
-  (define-values (else-join else-result-vars)
-    (branch-jump-target cfg else-bid))
-  (unless (equal? join-bid else-join)
+  (define join-bid (find-branch-join cfg then-bid else-bid))
+  (when (or (equal? join-bid then-bid) (equal? join-bid else-bid))
     (error 'translate-gamma
-           "then/else branches converge at different joins: ~a vs ~a"
-           join-bid else-join))
+           "empty branch (then=~a else=~a join=~a) not yet supported"
+           then-bid else-bid join-bid))
+  (define then-chain (arm-chain-blocks cfg then-bid join-bid))
+  (define else-chain (arm-chain-blocks cfg else-bid join-bid))
+  (define then-pred
+    (pvector-ref then-chain (sub1 (pvector-length then-chain))))
+  (define else-pred
+    (pvector-ref else-chain (sub1 (pvector-length else-chain))))
 
   (define join-blk (cfg-get-block cfg join-bid))
   (define phis (CfgBlock-phis join-blk))
   (define n-phis (pvector-length phis))
 
   ;; Context vars: only parent-scope vars each sub-region actually
-  ;; reads (plus the phi source on each side).  We walk the branch
-  ;; block's VfInsn inputs, subtract locally-defined outputs, and
-  ;; union the reads across both branches so the Gamma sub-regions
-  ;; agree on input shape.  Vars mapped in parent var->out but not
-  ;; referenced anywhere in either branch drop out entirely.
+  ;; reads (plus the phi source contributed by each arm's pred).  We
+  ;; walk every block on each arm's chain, tracking locally-defined
+  ;; outputs across the chain, and union the reads across both arms
+  ;; so the Gamma sub-regions agree on input shape.
   (define ctx-set
-    (collect-gamma-ctx cfg var->out then-bid else-bid join-bid phis))
+    (collect-gamma-ctx cfg var->out then-chain then-pred
+                                    else-chain else-pred phis))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   ;; Build the per-branch sub-region closures.
   (define then-region
-    (build-branch-region cfg then-bid join-bid ctx-vars phis 'then))
+    (build-branch-region cfg then-bid then-pred join-bid ctx-vars phis 'then))
   (define else-region
-    (build-branch-region cfg else-bid join-bid ctx-vars phis 'else))
+    (build-branch-region cfg else-bid else-pred join-bid ctx-vars phis 'else))
 
   (define gamma-val (Gamma (list then-region else-region)))
 
@@ -300,25 +307,56 @@
 
   (values region3 var->out* join-bid))
 
-;; Given a branch block, return (values join-bid result-var-list).
-;; Accepts either a single-block branch ending in Term:jump, or an
-;; empty branch where branch-bid's only role is to pass control on.
-;; The result-vars are placeholders -- actual source varids are
-;; pulled from the join's phi sources later.
-(define (branch-jump-target cfg branch-bid)
-  (define blk (cfg-get-block cfg branch-bid))
-  (unless blk (error 'branch-jump-target "missing block ~a" branch-bid))
-  (match (CfgBlock-terminator blk)
-    [(Term:jump nxt) (values nxt #f)]
-    [_ (error 'branch-jump-target
-              "expected Term:jump at branch ~a (got ~a)"
-              branch-bid (CfgBlock-terminator blk))]))
+;; Walk the then-arm's Term:jump chain forward, then walk the else-arm
+;; until we hit a bid visited on the then-arm.  That bid is the Gamma
+;; join block.  Errors if neither arm can reach the other.  Both arms
+;; must be Term:jump-only chains -- nested conds/loops in an arm are
+;; not yet supported here.
+(define (find-branch-join cfg then-bid else-bid)
+  (define then-reach
+    (let loop ([b then-bid] [s (ordered-map-empty block-id-compare)])
+      (cond
+        [(ordered-map-ref s b #f) s]
+        [else
+         (define s2 (ordered-map-set s b #t))
+         (define term (CfgBlock-terminator (cfg-get-block cfg b)))
+         (match term
+           [(Term:jump n) (loop n s2)]
+           [_ s2])])))
+  (let loop ([b else-bid])
+    (cond
+      [(ordered-map-ref then-reach b #f) b]
+      [else
+       (define term (CfgBlock-terminator (cfg-get-block cfg b)))
+       (match term
+         [(Term:jump n) (loop n)]
+         [_ (error 'find-branch-join
+                   "branches do not converge (then=~a else=~a terminator ~s at ~a)"
+                   then-bid else-bid term b)])])))
+
+;; Sequence of blocks from branch-bid up to (but not including)
+;; join-bid, following Term:jump links only.  Used both for arm
+;; translation and for context collection.  Errors if the chain
+;; contains non-Term:jump terminators before reaching join-bid.
+(define (arm-chain-blocks cfg branch-bid join-bid)
+  (let loop ([b branch-bid] [acc (pvector-empty)])
+    (cond
+      [(equal? b join-bid) acc]
+      [else
+       (define blk (cfg-get-block cfg b))
+       (unless blk (error 'arm-chain-blocks "missing block ~a" b))
+       (define term (CfgBlock-terminator blk))
+       (match term
+         [(Term:jump n) (loop n (pvector-cons-right acc b))]
+         [_ (error 'arm-chain-blocks
+                   "arm ~a -> ~a: block ~a has non-jump terminator ~s (nested control flow inside arm not yet supported)"
+                   branch-bid join-bid b term)])])))
 
 ;; ============================================================
 ;; Sub-region builder
 ;; ============================================================
 
-(define (build-branch-region cfg branch-bid join-bid ctx-vars phis which)
+(define (build-branch-region cfg branch-bid branch-pred join-bid ctx-vars phis which)
   (define n-ctx (pvector-length ctx-vars))
   (define n-phis (pvector-length phis))
 
@@ -335,23 +373,23 @@
                [oid (in-pvector arg-outs)])
       (ordered-map-set m v oid)))
 
-  ;; Translate branch block's insns (if it isn't trivially the join).
-  (define-values (sub2 sub-var->out2)
-    (cond
-      [(equal? branch-bid join-bid)
-       (values sub1 sub-var->out)]
-      [else
-       (define blk (cfg-get-block cfg branch-bid))
-       (translate-insns (CfgBlock-insns blk) sub1 sub-var->out)]))
+  ;; Translate the arm's chain of blocks.  translate-segment walks
+  ;; from branch-bid through Term:jump edges, stopping at join-bid,
+  ;; and feeds each block's var bindings forward.  theta-ctx is #f:
+  ;; nested loops within a Gamma arm are not yet supported.
+  (define-values (sub2 sub-var->out2 payload)
+    (translate-segment cfg branch-bid join-bid sub1 sub-var->out #f))
+  (unless (eq? payload #f)
+    (error 'build-branch-region
+           "arm ~a reached non-join terminator (payload=~s) before join ~a"
+           which payload join-bid))
 
-  ;; For each phi at the join, look up the source var coming from
-  ;; this branch's predecessor.  The predecessor is `branch-bid` when
-  ;; the branch is non-empty, otherwise it's the grandparent (cond
-  ;; block) -- but in our scope cond→join direct edges aren't
-  ;; supported; so branch-bid is the predecessor.
+  ;; For each phi at the join, look up the source var coming from this
+  ;; arm's immediate predecessor of the join (= last block in the
+  ;; arm's chain).
   (define result-src-vars
     (for/pvector ([phi (in-pvector phis)])
-      (pick-phi-source phi branch-bid which)))
+      (pick-phi-source phi branch-pred which)))
 
   ;; Allocate the `region-result` sink with n-phis inputs.
   (define-values (sub3 _res-nid res-ins _res-outs)
@@ -369,55 +407,51 @@
     (define-values (r* _w) (region-add-wire r src-oid iid))
     r*))
 
-;; Collect parent-scope VarIds actually needed by either Gamma
-;; branch.  A branch "needs" a parent var iff it reads it (via a
-;; VfInsn input not locally defined earlier in the same branch) or
-;; that var is the phi-source it contributes at the join.  Returns
-;; an ordered-map used as a set of VarId -> #t.
-(define (collect-gamma-ctx cfg parent-var->out then-bid else-bid join-bid phis)
-  (define (walk-branch branch-bid acc)
-    (cond
-      [(equal? branch-bid join-bid)
-       ;; Empty branch -- only phi sources matter.
-       (for/fold ([a acc]) ([phi (in-pvector phis)])
-         (define src (pick-phi-source phi branch-bid 'gamma-ctx))
-         (cond
-           [(and (VarId? src)
-                 (ordered-map-ref parent-var->out src #f))
-            (ordered-map-set a src #t)]
-           [else a]))]
-      [else
-       (define blk (cfg-get-block cfg branch-bid))
-       (define insns (CfgBlock-insns blk))
-       ;; Step through in order, tracking locally-defined outputs.
-       (define-values (_ acc*)
-         (for/fold ([locals (ordered-map-empty var-id-compare)]
-                    [a acc])
-                   ([insn (in-pvector insns)])
-           (define a*
-             (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
-               (cond
-                 [(and (VarId? x)
-                       (not (ordered-map-ref locals x #f))
-                       (ordered-map-ref parent-var->out x #f))
-                  (ordered-map-set a x #t)]
-                 [else a])))
-           (define locals*
-             (for/fold ([s locals]) ([o (in-pvector (VfInsn-outputs insn))]
-                                     #:when (VarId? o))
-               (ordered-map-set s o #t)))
-           (values locals* a*)))
-       ;; Phi source from this branch.
-       (for/fold ([a acc*]) ([phi (in-pvector phis)])
-         (define src (pick-phi-source phi branch-bid 'gamma-ctx))
-         (cond
-           [(and (VarId? src)
-                 (ordered-map-ref parent-var->out src #f))
-            (ordered-map-set a src #t)]
-           [else a]))]))
-  (walk-branch else-bid
-               (walk-branch then-bid
-                            (ordered-map-empty var-id-compare))))
+;; Collect parent-scope VarIds actually needed by either Gamma arm.
+;; Each arm is described by its chain (pvector of BlockIds, in order)
+;; plus the block that immediately precedes the join (== last element
+;; of the chain; passed separately so phi lookup can reuse it).  An
+;; arm "needs" a parent var iff some VfInsn along the chain reads it
+;; before any earlier insn in the chain defined it, or that var is
+;; the phi source contributed by the arm's predecessor at the join.
+;; Locals accumulate across all blocks in the arm since SSA scope is
+;; shared along a dominance chain.  Returns an ordered-map used as a
+;; set of VarId -> #t.
+(define (collect-gamma-ctx cfg parent-var->out
+                           then-chain then-pred
+                           else-chain else-pred phis)
+  (define (walk-arm chain arm-pred acc)
+    (define-values (_ acc*)
+      (for/fold ([locals (ordered-map-empty var-id-compare)]
+                 [a acc])
+                ([bid (in-pvector chain)])
+        (define insns (CfgBlock-insns (cfg-get-block cfg bid)))
+        (for/fold ([locals locals] [a a])
+                  ([insn (in-pvector insns)])
+          (define a*
+            (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
+              (cond
+                [(and (VarId? x)
+                      (not (ordered-map-ref locals x #f))
+                      (ordered-map-ref parent-var->out x #f))
+                 (ordered-map-set a x #t)]
+                [else a])))
+          (define locals*
+            (for/fold ([s locals]) ([o (in-pvector (VfInsn-outputs insn))]
+                                    #:when (VarId? o))
+              (ordered-map-set s o #t)))
+          (values locals* a*))))
+    ;; Phi source contributed at the join from this arm's predecessor.
+    (for/fold ([a acc*]) ([phi (in-pvector phis)])
+      (define src (pick-phi-source phi arm-pred 'gamma-ctx))
+      (cond
+        [(and (VarId? src)
+              (ordered-map-ref parent-var->out src #f))
+         (ordered-map-set a src #t)]
+        [else a])))
+  (walk-arm else-chain else-pred
+            (walk-arm then-chain then-pred
+                      (ordered-map-empty var-id-compare))))
 
 ;; Collect parent-scope VarIds actually read inside the loop.  Walks
 ;; both the header block and the latch block, tracking locally-defined

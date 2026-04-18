@@ -140,6 +140,52 @@
     ;; And must finish with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Gamma recovery: multi-block arms -----
+  (test-case "Gamma lowers with multi-block then-arm"
+    ;; if (arg0) { t = 1; slot0 = 2; } else { slot0 = 3; } return slot0;
+    ;; Forces the then-arm to span two blocks via an intermediate label.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN1")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_THEN2")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN2")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_JOIN")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region still has exactly one Gamma node.
+    (define gamma
+      (for/or ([kv (in-ordered-map (Region-node->value r))])
+        (and (Gamma? (cdr kv)) (cdr kv))))
+    (check-pred Gamma? gamma)
+    ;; The multi-block arm lives in Gamma-regions index 1: IFEQ's
+    ;; fallthrough (predicate falsy) is the else-arm of Term:cond,
+    ;; which maps to the second sub-region.  It should contain
+    ;; BOTH ICONST_1 and ICONST_2 (one per source block).
+    (define fallthrough-region (cadr (Gamma-regions gamma)))
+    (define fallthrough-ops
+      (for/list ([kv (in-ordered-map (Region-node->value fallthrough-region))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    (check-not-false (memq 'ICONST_1 fallthrough-ops))
+    (check-not-false (memq 'ICONST_2 fallthrough-ops))
+    (check-not-false (memq 'ISTORE fallthrough-ops))
+    ;; And the parent must still terminate with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- Theta recovery: simple while-loop -----
   (test-case "while-loop lowers to a Theta node"
     ;; slot0 = 0; while (slot1 != 0) { slot0 = slot0 + 1; } return slot0;
