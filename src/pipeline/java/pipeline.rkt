@@ -63,9 +63,17 @@
 ;;     lowers the diamond as a merge Gamma installed inside the Theta
 ;;     body region; the Gamma's outputs become the Theta's phi
 ;;     results.
+;;     A Term:switch (tablesswitch / lookupswitch) whose every target
+;;     (default + each case) reaches only ret / throw leaves lowers
+;;     to an (n+1)-arm Gamma: sub-regions are ordered [default,
+;;     case_0, ..., case_{n-1}] and each sub-region's Region.info
+;;     records 'java/switch-case-key (= 'default or the integer
+;;     key), preserving the key-to-arm correspondence in the RVSDG.
+;;     The Gamma's predicate input is the raw switch value; the
+;;     arm-index dispatch is left for a later pass / backend.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, or a loop header with 3+ back-edges) error
-;;     from cfg->rvsdg;
+;;     (a convergent / non-terminal switch, try/catch, or a loop
+;;     header with 3+ back-edges) error from cfg->rvsdg;
 ;;     `java-compile-class` catches each exception per method rather
 ;;     than aborting the whole class.
 ;;
@@ -141,5 +149,6 @@
                  gamma-early-exit-inside-gamma-multi-block
                  gamma-early-exit-inside-theta-single-block
                  gamma-early-exit-inside-theta-multi-block
-                 multi-latch-loops-two-arm-diamond)
-    'deferred  '(switch-recovery kappa-recovery)))
+                 multi-latch-loops-two-arm-diamond
+                 switch-recovery-terminal)
+    'deferred  '(switch-recovery-convergent kappa-recovery)))

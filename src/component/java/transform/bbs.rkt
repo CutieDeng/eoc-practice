@@ -162,12 +162,24 @@
     [(memq op '(RETURN IRETURN LRETURN FRETURN DRETURN ARETURN ATHROW))
      (pvector-empty)]
 
-    ;; TABLESWITCH / LOOKUPSWITCH --
-    ;; ASM reader encoding for these is not yet exercised by any fixture;
-    ;; leave a conservative no-successor result and revisit in M1.5 when
-    ;; a switch-bearing test class exists.
-    [(memq op '(TABLESWITCH LOOKUPSWITCH))
-     (pvector-empty)]
+    ;; TABLESWITCH: operands = (min max (default-label case-label-min
+    ;; ... case-label-max)).  All labels (default + every case)
+    ;; contribute successors.  Order is: default first, then cases in
+    ;; key order, matching the sub-region ordering chosen at
+    ;; cfg-to-rvsdg time.
+    [(eq? op 'TABLESWITCH)
+     (define labels (list-ref args 2))
+     (for/fold ([pv (pvector-empty)]) ([l (in-list labels)])
+       (pvector-cons-right pv l))]
+
+    ;; LOOKUPSWITCH: operands = (default-label (keys...) (labels...)).
+    ;; Successors are default first, then one per case label in order.
+    [(eq? op 'LOOKUPSWITCH)
+     (define default-l (car args))
+     (define labels (list-ref args 2))
+     (for/fold ([pv (pvector-cons-right (pvector-empty) default-l)])
+               ([l (in-list labels)])
+       (pvector-cons-right pv l))]
 
     ;; anything else: ordinary insn, fall through
     [else (fallthrough-succs next-label)]))

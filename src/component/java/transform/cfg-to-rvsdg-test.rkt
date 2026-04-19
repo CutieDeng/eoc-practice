@@ -1158,6 +1158,100 @@
     (check-equal? (sort istores-per-sub <) '(0 1)
                   "exactly one merge sub-region should host the fall-through ISTORE"))
 
+  ;; ----- terminal TABLESWITCH -----
+  (test-case "TABLESWITCH with all-return arms lowers to an N+1-arm Gamma"
+    ;; switch (slot0) {
+    ;;   case 0: return 1;
+    ;;   case 1: return 2;
+    ;;   case 2: return 3;
+    ;;   default: return -1;
+    ;; }
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'TABLESWITCH
+                                0 2
+                                (list "L_DEFAULT" "L_C0" "L_C1" "L_C2"))
+                       (mk-insn 'CUTIEDENG-LABEL "L_C0")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_C1")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_C2")
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_DEFAULT")
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "parent region should contain exactly one Gamma")
+    (define subs (Gamma-regions (car gammas)))
+    (check-equal? (length subs) 4
+                  "Gamma should have 4 sub-regions (default + 3 cases)")
+    ;; Every sub-region must install a 'return sink.
+    (for ([sub (in-list subs)] [i (in-naturals)])
+      (define ops
+        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+          (define v (cdr kv))
+          (cond [(Simple? v) (Simple-op v)] [else 'other])))
+      (check-not-false (memq 'return ops)
+                       (format "sub-region ~a missing 'return" i)))
+    ;; Keys recorded in each sub-region's info.  Order: default, 0,
+    ;; 1, 2.
+    (define keys
+      (for/list ([sub (in-list subs)])
+        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+    (check-equal? keys '(default 0 1 2)
+                  "sub-regions should carry default / case-key info in order"))
+
+  ;; ----- terminal LOOKUPSWITCH -----
+  (test-case "LOOKUPSWITCH with all-return arms lowers to a keyed Gamma"
+    ;; switch (slot0) {
+    ;;   case 10: return 1;
+    ;;   case 20: return 2;
+    ;;   default: return 0;
+    ;; }
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'LOOKUPSWITCH
+                                "L_DEFAULT"
+                                (list 10 20)
+                                (list "L_C10" "L_C20"))
+                       (mk-insn 'CUTIEDENG-LABEL "L_C10")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_C20")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_DEFAULT")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1)
+    (define subs (Gamma-regions (car gammas)))
+    (check-equal? (length subs) 3)
+    (define keys
+      (for/list ([sub (in-list subs)])
+        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+    (check-equal? keys '(default 10 20)))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

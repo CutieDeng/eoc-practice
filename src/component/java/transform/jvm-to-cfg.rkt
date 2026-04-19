@@ -34,6 +34,7 @@
 ;; ============================================================
 
 (require (only-in racket/set set set-member? set-add)
+         (only-in racket/match match-define)
          (only-in cutie-ftree/graph graph-empty graph-add-vertex graph-add-edge)
          "bbs.rkt"
          "../../../kernel/ir/jvm/types.rkt"
@@ -248,7 +249,8 @@
        'IF_ICMPEQ 'IF_ICMPNE 'IF_ICMPLT 'IF_ICMPGE 'IF_ICMPGT 'IF_ICMPLE
        'IF_ACMPEQ 'IF_ACMPNE 'IFNULL 'IFNONNULL
        'RETURN 'IRETURN 'LRETURN 'FRETURN 'DRETURN 'ARETURN
-       'ATHROW))
+       'ATHROW
+       'TABLESWITCH 'LOOKUPSWITCH))
 
 (define (terminator-opcode? op)
   (set-member? terminator-opcodes op))
@@ -558,6 +560,41 @@
     [(ATHROW)
      (define-values (popped _) (stack-pop-n stack 1))
      (values (Term:throw (pvector-ref popped 0)) (pvector-empty) vc)]
+
+    ;; TABLESWITCH: operands = (min max (default-label
+    ;; case-label-min ... case-label-max)).  Pops the switch value
+    ;; off the operand stack; Term:switch.cases is a pvector of
+    ;; (key . BlockId) pairs spanning min..max in order.
+    [(TABLESWITCH)
+     (define-values (popped _) (stack-pop-n stack 1))
+     (define value (pvector-ref popped 0))
+     (match-define (list min-k max-k labels) args)
+     (define default-lbl (car labels))
+     (define case-lbls (cdr labels))
+     (define cases-pv
+       (for/fold ([pv (pvector-empty)]
+                  [k min-k]
+                  #:result pv)
+                 ([lbl (in-list case-lbls)])
+         (values (pvector-cons-right pv (cons k (bid-of lbl)))
+                 (add1 k))))
+     (values (Term:switch value cases-pv (bid-of default-lbl))
+             (pvector-empty)
+             vc)]
+
+    ;; LOOKUPSWITCH: operands = (default-label (keys...) (labels...)).
+    [(LOOKUPSWITCH)
+     (define-values (popped _) (stack-pop-n stack 1))
+     (define value (pvector-ref popped 0))
+     (match-define (list default-lbl keys labels) args)
+     (define cases-pv
+       (for/fold ([pv (pvector-empty)])
+                 ([k (in-list keys)]
+                  [lbl (in-list labels)])
+         (pvector-cons-right pv (cons k (bid-of lbl)))))
+     (values (Term:switch value cases-pv (bid-of default-lbl))
+             (pvector-empty)
+             vc)]
 
     [else
      (error 'translate-terminator "unhandled terminator: ~a" op)]))

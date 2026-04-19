@@ -86,8 +86,22 @@
 ;;     latch payload for every phi, so the single-latch and multi-
 ;;     latch code paths share the same outer Theta shape.
 ;;
+;;     A Term:switch (from TABLESWITCH / LOOKUPSWITCH) whose every
+;;     target (default + each case in order) reaches only ret /
+;;     throw leaves lowers to an (n+1)-arm Gamma via
+;;     `translate-terminal-switch`: sub-regions are ordered
+;;     [default, case_0, ..., case_{n-1}], each sub-region's
+;;     Region.info records 'java/switch-case-key (= the symbol
+;;     'default or the integer case key), preserving the key-to-arm
+;;     correspondence inside the RVSDG.  Ctx inputs are the union
+;;     of every arm's live parent-scope reads; the Gamma's
+;;     predicate input is the raw switch value and the 0-based
+;;     arm-index dispatch is deferred to a later pass.
+;;
 ;; Currently unsupported:
-;;   - Term:switch (tablesswitch / lookupswitch)
+;;   - Term:switch whose arms convergently rejoin a common
+;;     successor (only fully-terminal switches are lowered; a
+;;     convergent switch hits the generic Term:switch error path)
 ;;   - try/catch (Kappa recovery)
 ;;   - loop headers with 3+ back-edges (only 1-latch and 2-latch
 ;;     diamond loops are currently recognised)
@@ -343,9 +357,14 @@
                  (translate-segment cfg join-bid stop-bid region2 var->out2)]
                 [else
                  (values region2 var->out2 #f)])])])]
-       [(Term:switch _ _ _)
-        (error 'translate-segment
-               "Term:switch at ~a not yet supported" start-bid)]
+       [(Term:switch value cases default-bid)
+        ;; Terminal-switch lowering: every target (default + each case
+        ;; in order) must be a ret/throw-only arm.  Lowered to an
+        ;; (N+1)-arm Gamma; sub-region order is [default, case_0, ...,
+        ;; case_{N-1}], each sub-region's Region.info carries
+        ;; 'java/switch-case-key → 'default or the integer case key.
+        (translate-terminal-switch cfg value cases default-bid
+                                   region1 var->out1)]
        [#f
         (values region1 var->out1 #f)])]))
 
@@ -701,6 +720,104 @@
       (define src-oid
         (or (ordered-map-ref var->out ctx-var #f)
             (error 'translate-terminal-gamma
+                   "undefined ctx var ~a" ctx-var)))
+      (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
+      r*))
+
+  (values region3 var->out 'already-terminated))
+
+;; ============================================================
+;; Terminal switch → N+1 arm Gamma
+;; ============================================================
+;;
+;; Shape: every target of a Term:switch (the default block and each
+;; case block in order) has a reach-set whose leaves are all ret /
+;; throw.  Lowered to a Gamma with (1 + n-cases) sub-regions in order
+;; [default, case_0, ..., case_{n-1}].  Each sub-region's Region.info
+;; maps 'java/switch-case-key to either the symbol 'default or the
+;; integer case key, so the key-to-arm correspondence is preserved
+;; in the RVSDG.  The Gamma's predicate input is the raw switch
+;; value; a later pass / backend is responsible for computing the
+;; arm index from the value against the recorded keys.  Ctx inputs
+;; are the union of every arm's live parent-scope reads.  0 outputs
+;; (terminal).
+
+(define (region-info-set r key val)
+  (struct-copy Region r
+               [info (ordered-map-set (Region-info r) key val)]))
+
+(define (translate-terminal-switch cfg value cases default-bid region var->out)
+  (define case-bids
+    (for/list ([kv (in-pvector cases)]) (cdr kv)))
+  (define all-bids (cons default-bid case-bids))
+
+  ;; Per-arm reach-sets; every arm must be ret / throw leaves only.
+  (define reaches
+    (for/list ([b (in-list all-bids)])
+      (define r (arm-reach-set cfg b))
+      (unless (arm-leaves-all-ret-throw? cfg r)
+        (error 'translate-terminal-switch
+               "switch arm starting at ~a has non-ret/throw leaves"
+               b))
+      r))
+
+  ;; Pairwise disjointness: rejects convergent switches (arms sharing
+  ;; a join block).  Duplicating the join block into N sub-regions is
+  ;; a future extension.
+  (for ([r1 (in-list reaches)] [b1 (in-list all-bids)] [i (in-naturals)])
+    (for ([r2 (in-list reaches)] [b2 (in-list all-bids)] [j (in-naturals)])
+      (when (and (< i j)
+                 (not (reach-sets-disjoint? r1 r2)))
+        (error 'translate-terminal-switch
+               "switch arms ~a and ~a share blocks (convergent switch); only terminal disjoint arms supported"
+               b1 b2))))
+
+  ;; Union of all arms' ctx-vars.
+  (define ctx-set
+    (for/fold ([acc (ordered-map-empty var-id-compare)])
+              ([reach (in-list reaches)])
+      (define arm-ctx (collect-arm-ctx cfg var->out reach))
+      (for/fold ([s acc]) ([kv (in-ordered-map arm-ctx)])
+        (ordered-map-set s (car kv) #t))))
+  (define ctx-vars
+    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+  (define n-ctx (pvector-length ctx-vars))
+
+  ;; Build each sub-region; tag its info with the switch-case-key.
+  (define (build-tagged-arm bid key-tag which)
+    (define sub (build-exit-arm-region cfg bid ctx-vars which))
+    (region-info-set sub 'java/switch-case-key key-tag))
+
+  (define default-region
+    (build-tagged-arm default-bid 'default 'switch-default))
+  (define case-regions
+    (for/list ([kv (in-pvector cases)]
+               [i (in-naturals 0)])
+      (build-tagged-arm (cdr kv) (car kv) (list 'switch-case i))))
+
+  (define sub-regions (cons default-region case-regions))
+  (define gamma-val (Gamma sub-regions))
+
+  ;; Install Gamma: 1 pred input + n-ctx ctx inputs, 0 outputs.
+  (define-values (region1 _gnid g-ins _g-outs)
+    (region-add-node region gamma-val (add1 n-ctx) 0))
+
+  ;; Wire predicate.
+  (define pred-oid
+    (or (ordered-map-ref var->out value #f)
+        (error 'translate-terminal-switch
+               "undefined switch value ~a" value)))
+  (define-values (region2 _pw)
+    (region-add-wire region1 pred-oid (pvector-ref g-ins 0)))
+
+  ;; Wire ctx inputs.
+  (define region3
+    (for/fold ([r region2])
+              ([ctx-var (in-pvector ctx-vars)]
+               [i (in-naturals 1)])
+      (define src-oid
+        (or (ordered-map-ref var->out ctx-var #f)
+            (error 'translate-terminal-switch
                    "undefined ctx var ~a" ctx-var)))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
       r*))

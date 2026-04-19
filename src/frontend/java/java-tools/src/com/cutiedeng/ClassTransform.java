@@ -239,6 +239,7 @@ public class ClassTransform {
       @Override
       public void visitLookupSwitchInsn(Label dflt, int[] keys, Label[] labels) {
         ArrayList<Object> args = new ArrayList();
+        args.add(dflt.toString());
         ArrayList<Object> sArgsL = new ArrayList();
         ArrayList<Object> sArgsR = new ArrayList();
         for (int k: keys) {
