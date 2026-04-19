@@ -541,6 +541,69 @@
       (check-not-false (memq 'return ops)
                        (format "~a sub-region missing 'return sink" which))))
 
+  ;; ----- Gamma early-exit: asymmetric (one arm exits) -----
+  (test-case "if (c) return X; <then continue with an if/else>"
+    ;; int m(int x, int y) {
+    ;;   if (x == 0) return 42;    // early exit
+    ;;   if (y <= 0) y = y * 3;    // inner diamond
+    ;;   else        y = y * 2;
+    ;;   return y;
+    ;; }
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_EARLY")
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFLE "L_NEG")
+                       (mk-insn 'CUTIEDENG-LABEL "L_POS")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'IMUL)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_END")
+                       (mk-insn 'CUTIEDENG-LABEL "L_NEG")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'IMUL)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'CUTIEDENG-LABEL "L_END")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_EARLY")
+                       (mk-insn 'BIPUSH 42)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains exactly two Gamma nodes:
+    ;;   - the outer asymmetric early-exit Gamma (0 outputs)
+    ;;   - the inner if/else diamond for y*2 vs y*3
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 2
+                  "parent region should contain two Gamma nodes")
+    ;; Exactly one of the two Gammas has an exit-arm sub-region
+    ;; hosting a 'return (the asymmetric early-exit Gamma).
+    (define (sub-has-return? sub)
+      (for/or ([kv (in-ordered-map (Region-node->value sub))])
+        (define v (cdr kv))
+        (and (Simple? v) (eq? (Simple-op v) 'return))))
+    (define (gamma-has-any-exit-arm? g)
+      (for/or ([sub (in-list (Gamma-regions g))])
+        (sub-has-return? sub)))
+    (define exit-gammas (filter gamma-has-any-exit-arm? gammas))
+    (check-equal? (length exit-gammas) 1
+                  "exactly one Gamma should carry an early-exit sub-region")
+    ;; Parent region must still have its own top-level 'return
+    ;; materialised from L_END's IRETURN (after the inner Gamma
+    ;; merges y).
+    (check-not-false (memq 'return (node-ops r))
+                     "parent region should still have a top-level return from L_END"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

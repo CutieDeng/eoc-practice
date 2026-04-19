@@ -24,7 +24,11 @@
 ;;     each terminate internally (no region-result, 0 Gamma outputs);
 ;;     translate-segment signals upward with payload
 ;;     'already-terminated so cfg->rvsdg knows not to install another
-;;     return at the outer region.
+;;     return at the outer region.  When only one arm is such a
+;;     terminal block, the cond lowers to an asymmetric early-exit
+;;     Gamma: the exit sub-region owns the return / throw sink while
+;;     the continue sub-region is a no-op; translate-segment resumes
+;;     from the continuing branch's block in the outer region.
 ;;
 ;;   - A single natural loop is lowered to a Theta node.  The header
 ;;     must end in Term:cond; one arm leads to the latch (continue)
@@ -40,8 +44,6 @@
 ;;   - Term:switch (tablesswitch / lookupswitch)
 ;;   - Multi-block early-exit arms (an arm that walks several blocks
 ;;     before its terminating Term:ret / Term:throw)
-;;   - Asymmetric early-exit (one arm terminates, the other rejoins
-;;     and continues past a notional join block)
 ;;   - early-exit Gamma nested inside another Gamma arm or a Theta
 ;;     loop body
 ;;   - try/catch (Kappa recovery)
@@ -210,12 +212,28 @@
        [(Term:cond pred then-bid else-bid)
         (define then-blk (cfg-get-block cfg then-bid))
         (define else-blk (cfg-get-block cfg else-bid))
+        (define then-term? (terminal-block? then-blk))
+        (define else-term? (terminal-block? else-blk))
         (cond
-          [(and (terminal-block? then-blk) (terminal-block? else-blk))
+          [(and then-term? else-term?)
            ;; Both arms exit (Term:ret / Term:throw).  Lower as a
            ;; Gamma whose sub-regions each terminate internally.
            (translate-terminal-gamma cfg pred then-bid else-bid
                                      region1 var->out1)]
+          [(or then-term? else-term?)
+           ;; Asymmetric early-exit: one arm is a single block ending
+           ;; in Term:ret / Term:throw; the other arm is the
+           ;; continuation.  Lower as a Gamma whose exit sub-region
+           ;; runs the early return / throw and whose continue sub-
+           ;; region is a no-op.  After the Gamma falls through,
+           ;; translate-segment resumes from the continuing branch's
+           ;; first block in the outer region.
+           (define-values (region2 var->out2 continue-bid)
+             (translate-asymmetric-exit-gamma cfg pred
+                                              then-bid then-term?
+                                              else-bid else-term?
+                                              region1 var->out1))
+           (translate-segment cfg continue-bid stop-bid region2 var->out2)]
           [else
            (define-values (region2 var->out2 join-bid)
              (translate-gamma cfg start-bid pred then-bid else-bid
@@ -483,6 +501,83 @@
       r*))
 
   (values region3 var->out 'already-terminated))
+
+;; ============================================================
+;; Asymmetric early-exit Gamma (one arm exits, other continues)
+;; ============================================================
+;;
+;; Scope: exactly one of (then-bid, else-bid) is a single block ending
+;; in Term:ret / Term:throw.  The other branch's first block is the
+;; continuation point that translate-segment resumes from in the
+;; outer region (after this Gamma falls through).
+;;
+;; The Gamma has 0 outputs.  Two sub-regions:
+;;   - exit arm: built by build-terminal-arm-region (return/throw
+;;     installed inside).
+;;   - continue arm: a no-op region with just region-arg(0, n-ctx)
+;;     and region-result(0, 0).
+;; Sub-regions are placed in [then, else] order so that the raw
+;; predicate (truthy → region 0) selects the same arm bytecode took
+;; on the original Term:cond.
+;;
+;; The continuation arm runs in the outer region; its parent-scope
+;; reads remain in the outer var->out (unchanged), so we do not seed
+;; ctx-vars from it -- only the exit arm's reads need to be
+;; threaded into the Gamma as context inputs.
+
+(define (build-noop-arm-region n-ctx)
+  (define sub0 (region-empty))
+  (define-values (sub1 _arg-nid _arg-ins _arg-outs)
+    (region-add-node sub0 (Simple (list 'region-arg n-ctx)) 0 n-ctx))
+  (define-values (sub2 _res-nid _res-ins _res-outs)
+    (region-add-node sub1 (Simple (list 'region-result 0)) 0 0))
+  sub2)
+
+(define (translate-asymmetric-exit-gamma cfg pred
+                                         then-bid then-exits?
+                                         else-bid else-exits?
+                                         region var->out)
+  (define exit-bid     (if then-exits? then-bid else-bid))
+  (define continue-bid (if then-exits? else-bid then-bid))
+
+  (define ctx-set
+    (collect-terminal-arm-ctx cfg var->out (list exit-bid)))
+  (define ctx-vars
+    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+  (define n-ctx (pvector-length ctx-vars))
+
+  (define exit-region (build-terminal-arm-region cfg exit-bid ctx-vars 'exit))
+  (define noop-region (build-noop-arm-region n-ctx))
+
+  ;; Place sub-regions in [then, else] order so the raw predicate
+  ;; (truthy -> region 0) keeps original Term:cond semantics.
+  (define then-region (if then-exits? exit-region noop-region))
+  (define else-region (if then-exits? noop-region exit-region))
+
+  (define gamma-val (Gamma (list then-region else-region)))
+
+  (define-values (region1 _gnid g-ins _g-outs)
+    (region-add-node region gamma-val (add1 n-ctx) 0))
+
+  (define pred-oid
+    (or (ordered-map-ref var->out pred #f)
+        (error 'translate-asymmetric-exit-gamma
+               "undefined predicate ~a" pred)))
+  (define-values (region2 _pw)
+    (region-add-wire region1 pred-oid (pvector-ref g-ins 0)))
+
+  (define region3
+    (for/fold ([r region2])
+              ([ctx-var (in-pvector ctx-vars)]
+               [i (in-naturals 1)])
+      (define src-oid
+        (or (ordered-map-ref var->out ctx-var #f)
+            (error 'translate-asymmetric-exit-gamma
+                   "undefined ctx var ~a" ctx-var)))
+      (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
+      r*))
+
+  (values region3 var->out continue-bid))
 
 ;; Advance one step through an arm's control flow, recursively resolving
 ;; nested Term:cond blocks by finding their own diamond-joins.  Returns
