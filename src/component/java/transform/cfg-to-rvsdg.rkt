@@ -2159,12 +2159,14 @@
               [_ '()]))
           (loop (append succs rest) s*)])])))
 
-;; For a convergent Kappa arm, locate the single block whose
-;; terminator is `Term:jump join-bid` — that block is the phi-source
-;; predecessor at the join.  C3 handles only arms that converge via a
-;; single direct Term:jump (no inner diamonds reunifying at join);
-;; complex arm merges are deferred.  Errors if zero or multiple such
-;; blocks exist in the arm.
+;; For a convergent Kappa arm that actually reaches the join via a
+;; direct `Term:jump join-bid`, locate that predecessor block — its
+;; phi-source slot supplies each join-phi's value from this arm.  C3
+;; handles only arms that converge via a single direct jump; complex
+;; arm merges (inner diamonds reunifying at join) are deferred.
+;; Returns #f when no block in the arm jumps to join-bid (that arm is
+;; terminal — the caller installs a ret / throw sink instead).  Errors
+;; when multiple blocks jump to join-bid (ambiguous multi-source).
 (define (find-kappa-arm-pred cfg arm-reach join-bid which)
   (define candidates
     (for/fold ([acc '()])
@@ -2176,24 +2178,18 @@
         [else acc])))
   (cond
     [(= 1 (length candidates)) (car candidates)]
-    [(= 0 (length candidates))
-     (error 'find-kappa-arm-pred
-            "~a arm does not reach join ~a via a direct Term:jump; complex arm merges not yet supported"
-            which join-bid)]
+    [(= 0 (length candidates)) #f]
     [else
      (error 'find-kappa-arm-pred
             "~a arm has multiple direct jumps to join ~a (~s); multi-source arm merges not yet supported"
             which join-bid candidates)]))
 
-;; Build the try sub-region.  Terminal kind: translate-segment walks
-;; the try-bids scope installing its own ret / throw sink on the
-;; payload returned.  Convergent kind: the walk stops at join-bid and
-;; a `region-result n-phis` sink wires each phi's source-from-arm-pred
-;; VarId through.
+;; Build the try sub-region.  Walks translate-segment scoped to try-
+;; bids with stop-bid=join-bid (or #f when kind is 'terminal); delegates
+;; to finish-kappa-sub-region for sink vs region-result installation.
 (define (build-kappa-try-region cfg start-bid try-bids ctx-vars
-                                kind join-bid arm-pred join-phis)
+                                kind join-bid join-phis)
   (define n-ctx (pvector-length ctx-vars))
-  (define n-phis (pvector-length join-phis))
   (define sub0 (region-empty))
   (define-values (sub1 arg-outs) (region-add-region-arg sub0 n-ctx))
   (define sub-var->out
@@ -2201,92 +2197,91 @@
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector arg-outs)])
       (ordered-map-set m v oid)))
-  (parameterize ([current-arm-scope try-bids])
-    (cond
-      [(eq? kind 'terminal)
-       (define-values (sub2 sub-var->out2 payload)
-         (translate-segment cfg start-bid #f sub1 sub-var->out))
-       (match payload
-         [(cons 'ret vs)      (install-return sub2 sub-var->out2 vs)]
-         [(cons 'throw v)     (install-throw  sub2 sub-var->out2 v)]
-         ['already-terminated sub2]
-         [other
-          (error 'build-kappa-try-region
-                 "terminal try at ~a yielded non-ret/throw payload ~s"
-                 start-bid other)])]
-      [else
-       (define-values (sub2 sub-var->out2 payload)
-         (translate-segment cfg start-bid join-bid sub1 sub-var->out))
-       (unless (eq? payload #f)
-         (error 'build-kappa-try-region
-                "convergent try at ~a did not close via join ~a (payload=~s)"
-                start-bid join-bid payload))
-       (define result-src-vars
-         (for/pvector ([phi (in-pvector join-phis)])
-           (pick-phi-source phi arm-pred 'kappa-try)))
-       (define-values (sub3 res-ins) (region-add-region-result sub2 n-phis))
-       (for/fold ([r sub3])
-                 ([src-var (in-pvector result-src-vars)]
-                  [iid (in-pvector res-ins)])
-         (define src-oid
-           (or (ordered-map-ref sub-var->out2 src-var #f)
-               (error 'build-kappa-try-region
-                      "phi source ~a undefined in convergent try sub-region"
-                      src-var)))
-         (define-values (r* _w) (region-add-wire r src-oid iid))
-         r*)])))
+  (define stop (and (eq? kind 'convergent) join-bid))
+  (define-values (sub2 sub-var->out2 payload)
+    (parameterize ([current-arm-scope try-bids]
+                   ;; Hide our own Kappa-Group so translate-segment at
+                   ;; start-bid doesn't re-dispatch us (infinite loop).
+                   [current-kappa-groups
+                    (kappa-groups-without (current-kappa-groups) start-bid)])
+      (translate-segment cfg start-bid stop sub1 sub-var->out)))
+  (finish-kappa-sub-region/cfg cfg sub2 sub-var->out2 payload
+                               try-bids join-bid join-phis 'kappa-try))
 
 ;; Build one handler sub-region.  The region-arg provides `n-ctx`
 ;; context outputs plus an extra exception-ref output (the `(N+1)`-th)
 ;; bound via `current-exn-out` so any `'java/exception-ref` VfInsn at
-;; the handler entry resolves to it.  Terminal kind installs
-;; ret / throw sinks from the payload; convergent kind stops at the
-;; join and wires each phi's arm-pred source into a region-result.
-(define (build-kappa-handler-region cfg handler-bid handler-reach ctx-vars
-                                    kind join-bid arm-pred join-phis)
+;; the handler entry resolves to it.  Arm kind (terminal vs convergent)
+;; is decided from translate-segment's payload — a convergent-kind
+;; Kappa tolerates a handler that ret / throws instead of joining.
+(define (build-kappa-handler-region cfg start-bid handler-bid handler-reach
+                                    ctx-vars kind join-bid join-phis)
   (define n-ctx (pvector-length ctx-vars))
-  (define n-phis (pvector-length join-phis))
   (define-values (sub1 ctx-outs exn-out) (build-handler-region-entry n-ctx))
   (define sub-var->out-init
     (for/fold ([m (ordered-map-empty var-id-compare)])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector ctx-outs)])
       (ordered-map-set m v oid)))
-  (parameterize ([current-arm-scope handler-reach]
-                 [current-exn-out exn-out])
-    (cond
-      [(eq? kind 'terminal)
-       (define-values (sub2 sub-var->out2 payload)
-         (translate-segment cfg handler-bid #f sub1 sub-var->out-init))
-       (match payload
-         [(cons 'ret vs)      (install-return sub2 sub-var->out2 vs)]
-         [(cons 'throw v)     (install-throw  sub2 sub-var->out2 v)]
-         ['already-terminated sub2]
-         [other
-          (error 'build-kappa-handler-region
-                 "terminal handler at ~a yielded non-ret/throw payload ~s"
-                 handler-bid other)])]
-      [else
-       (define-values (sub2 sub-var->out2 payload)
-         (translate-segment cfg handler-bid join-bid sub1 sub-var->out-init))
-       (unless (eq? payload #f)
-         (error 'build-kappa-handler-region
-                "convergent handler at ~a did not close via join ~a (payload=~s)"
-                handler-bid join-bid payload))
-       (define result-src-vars
-         (for/pvector ([phi (in-pvector join-phis)])
-           (pick-phi-source phi arm-pred 'kappa-handler)))
-       (define-values (sub3 res-ins) (region-add-region-result sub2 n-phis))
-       (for/fold ([r sub3])
-                 ([src-var (in-pvector result-src-vars)]
-                  [iid (in-pvector res-ins)])
-         (define src-oid
-           (or (ordered-map-ref sub-var->out2 src-var #f)
-               (error 'build-kappa-handler-region
-                      "phi source ~a undefined in convergent handler sub-region"
-                      src-var)))
-         (define-values (r* _w) (region-add-wire r src-oid iid))
-         r*)])))
+  (define stop (and (eq? kind 'convergent) join-bid))
+  (define-values (sub2 sub-var->out2 payload)
+    (parameterize ([current-arm-scope handler-reach]
+                   [current-exn-out exn-out]
+                   ;; Same re-entry guard as the try builder.
+                   [current-kappa-groups
+                    (kappa-groups-without (current-kappa-groups) start-bid)])
+      (translate-segment cfg handler-bid stop sub1 sub-var->out-init)))
+  (finish-kappa-sub-region/cfg cfg sub2 sub-var->out2 payload
+                               handler-reach join-bid join-phis
+                               (list 'kappa-handler handler-bid)))
+
+;; Remove the current Kappa-Group keyed on `start-bid` from the
+;; active kappa-groups map while building its own sub-regions, so
+;; translate-segment landing back on `start-bid` inside the walk does
+;; not re-dispatch infinitely.  Other groups (nested / sibling trys)
+;; remain visible.  `gs` may be #f (no kappa-groups threading).
+(define (kappa-groups-without gs start-bid)
+  (cond
+    [(not gs) gs]
+    [(ordered-map-ref gs start-bid #f)
+     (define-values (gs* _) (ordered-map-delete gs start-bid))
+     gs*]
+    [else gs]))
+
+;; Wrapper that threads `cfg` into the finisher so find-kappa-arm-pred
+;; can locate the Term:jump predecessor when the arm converges.
+(define (finish-kappa-sub-region/cfg cfg sub2 sub-var->out2 payload
+                                     arm-reach join-bid join-phis which)
+  (match payload
+    [(cons 'ret vs)      (install-return sub2 sub-var->out2 vs)]
+    [(cons 'throw v)     (install-throw  sub2 sub-var->out2 v)]
+    ['already-terminated sub2]
+    [#f
+     (unless join-bid
+       (error 'finish-kappa-sub-region
+              "~a arm reached a block without a join-bid (terminal-kind walk mis-stopped)"
+              which))
+     (define arm-pred
+       (or (find-kappa-arm-pred cfg arm-reach join-bid which)
+           (error 'finish-kappa-sub-region
+                  "~a arm stopped at ~a but no block jumps to it" which join-bid)))
+     (define result-src-vars
+       (for/pvector ([phi (in-pvector join-phis)])
+         (pick-phi-source phi arm-pred which)))
+     (define-values (sub3 res-ins)
+       (region-add-region-result sub2 (pvector-length join-phis)))
+     (for/fold ([r sub3])
+               ([src-var (in-pvector result-src-vars)]
+                [iid (in-pvector res-ins)])
+       (define src-oid
+         (or (ordered-map-ref sub-var->out2 src-var #f)
+             (error 'finish-kappa-sub-region
+                    "phi source ~a undefined in ~a sub-region" src-var which)))
+       (define-values (r* _w) (region-add-wire r src-oid iid))
+       r*)]
+    [other
+     (error 'finish-kappa-sub-region
+            "~a arm yielded unexpected payload ~s" which other)]))
 
 ;; Returns (values region* var->out* payload) where payload is either
 ;; 'already-terminated (terminal Kappa) or join-bid (convergent; caller
@@ -2304,27 +2299,35 @@
     (for/list ([h (in-pvector handlers)])
       (kappa-forward-reach cfg (cdr h) join-bid)))
 
-  ;; Convergent kind: locate each arm's phi-source pred-bid.
+  ;; Convergent kind: pull the join block's phis so each arm that
+  ;; reaches join can wire its pred's phi-source VarId through a
+  ;; region-result.  Arms that instead ret / throw inside the sub-
+  ;; region install a sink and skip this path.
   (define join-phis
     (cond
       [(eq? kind 'convergent)
        (CfgBlock-phis (cfg-get-block cfg join-bid))]
       [else (pvector-empty)]))
   (define n-phis (pvector-length join-phis))
-  (define try-arm-pred
+
+  ;; Per-arm pred-bids (or #f if the arm does not reach join via a
+  ;; direct Term:jump) — only used to extend ctx with phi-source
+  ;; contributions from arms that actually converge.  The builders
+  ;; re-derive these internally when they finish the sub-region, so
+  ;; we don't thread them through.
+  (define (arm-pred-or-false reach which)
     (cond [(eq? kind 'convergent)
-           (find-kappa-arm-pred cfg try-reach join-bid 'try)]
+           (find-kappa-arm-pred cfg reach join-bid which)]
           [else #f]))
+  (define try-arm-pred (arm-pred-or-false try-reach 'try))
   (define handler-arm-preds
     (for/list ([h (in-pvector handlers)]
                [reach (in-list handler-reaches)])
-      (cond [(eq? kind 'convergent)
-             (find-kappa-arm-pred cfg reach join-bid
-                                  (list 'handler (cdr h)))]
-            [else #f])))
+      (arm-pred-or-false reach (list 'handler (cdr h)))))
 
   ;; Ctx vars: union of parent-scope reads across every arm, plus
-  ;; (convergent) phi-source contributions from each arm-pred.
+  ;; (for converging arms only) phi-source VarId contributions at
+  ;; each arm's pred.
   (define try-ctx (collect-arm-ctx cfg var->out try-reach))
   (define handler-ctxs
     (for/list ([reach (in-list handler-reaches)])
@@ -2335,12 +2338,15 @@
       (for/fold ([s s]) ([kv (in-ordered-map hctx)])
         (ordered-map-set s (car kv) #t))))
   (define (add-phi-srcs arm-pred acc)
-    (for/fold ([a acc]) ([phi (in-pvector join-phis)])
-      (define src (pick-phi-source phi arm-pred 'kappa-ctx))
-      (cond
-        [(and (VarId? src) (ordered-map-ref var->out src #f))
-         (ordered-map-set a src #t)]
-        [else a])))
+    (cond
+      [arm-pred
+       (for/fold ([a acc]) ([phi (in-pvector join-phis)])
+         (define src (pick-phi-source phi arm-pred 'kappa-ctx))
+         (cond
+           [(and (VarId? src) (ordered-map-ref var->out src #f))
+            (ordered-map-set a src #t)]
+           [else a]))]
+      [else acc]))
   (define ctx-set
     (cond
       [(eq? kind 'convergent)
@@ -2351,17 +2357,19 @@
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
 
-  ;; Build each sub-region.
+  ;; Build each sub-region.  Arm kind is decided by each builder from
+  ;; translate-segment's payload — terminal-kind Kappa sub-regions
+  ;; must ret / throw; convergent-kind sub-regions may ret / throw or
+  ;; jump to join-bid (whichever the CFG shape dictates).
   (define try-region
     (build-kappa-try-region cfg start-bid try-bids ctx-vars
-                            kind join-bid try-arm-pred join-phis))
+                            kind join-bid join-phis))
   (define handlers-pv
     (for/pvector ([h (in-pvector handlers)]
-                  [reach (in-list handler-reaches)]
-                  [ap (in-list handler-arm-preds)])
+                  [reach (in-list handler-reaches)])
       (define hr
-        (build-kappa-handler-region cfg (cdr h) reach ctx-vars
-                                    kind join-bid ap join-phis))
+        (build-kappa-handler-region cfg start-bid (cdr h) reach ctx-vars
+                                    kind join-bid join-phis))
       (cons (car h) hr)))
 
   ;; Parent-side ctx producer outputs.

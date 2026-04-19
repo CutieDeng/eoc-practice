@@ -158,5 +158,12 @@
                  gamma-early-exit-inside-theta-multi-block
                  multi-latch-loops-two-arm-diamond
                  switch-recovery-terminal
-                 switch-recovery-convergent)
-    'deferred  '(kappa-recovery)))
+                 switch-recovery-convergent
+                 kappa-recovery-terminal
+                 kappa-recovery-convergent
+                 kappa-recovery-multi-handler
+                 kappa-recovery-catch-all)
+    'deferred  '(kappa-recovery-multi-range
+                 kappa-recovery-nested
+                 kappa-recovery-method-end
+                 ssa-handler-block-rename)))

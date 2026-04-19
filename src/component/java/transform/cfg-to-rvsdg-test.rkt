@@ -9,6 +9,7 @@
          racket/list
          "jvm-to-cfg.rkt"
          "ssa-construct.rkt"
+         "normalize-try-exits.rkt"
          "cfg-to-rvsdg.rkt"
          "../../../frontend/java/reader.rkt"
          "../../../kernel/ir/jvm/types.rkt"
@@ -1370,6 +1371,158 @@
       (for/list ([sub (in-list subs)])
         (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
     (check-equal? keys '(default 10 20)))
+
+  ;; ============================================================
+  ;; Kappa recovery (try/catch)
+  ;; ============================================================
+  ;; These fixtures thread normalize-try-exits into the compile
+  ;; pipeline so cfg->rvsdg sees each try window in canonical
+  ;; (≤ 1 fall-through exit) shape.  Handlers are crafted so they
+  ;; don't read locals defined outside the handler — otherwise the
+  ;; SSA-handler-block-rename gap (handler blocks are graph-
+  ;; unreachable, so ssa-construct never renames them) would surface
+  ;; as an "undefined VarId" error; fixing SSA is a pending C4 item.
+  (define (compile-method/kappa m)
+    (cfg->rvsdg (normalize-try-exits (jvm-cfg->ssa (jvm-method->cfg m)))))
+
+  (define (all-kappas r)
+    (for/list ([kv (in-ordered-map (Region-node->value r))]
+               #:when (Kappa? (cdr kv)))
+      (cdr kv)))
+
+  ;; Find (node-id . Kappa) pairs — needed when output count is
+  ;; required, since output counts live in Region-node->output.
+  (define (all-kappa-nodes r)
+    (for/list ([kv (in-ordered-map (Region-node->value r))]
+               #:when (Kappa? (cdr kv)))
+      kv))
+
+  (define (node-output-count r nid)
+    (define entry (ordered-map-ref (Region-node->output r) nid #f))
+    (if entry (cdr entry) 0))
+
+  ;; ----- A. Terminal single-handler Kappa -----
+  (test-case "Kappa A: terminal try + single typed handler"
+    ;; try { return arg0; } catch (RuntimeException e) { return -1; }
+    ;; Both try and handler end in IRETURN → terminal Kappa (M=0).
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER"
+                                "java/lang/RuntimeException"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define ks (all-kappa-nodes r))
+    (check-equal? (length ks) 1 "exactly one Kappa installed")
+    (define knid (car (first ks)))
+    (define k (cdr (first ks)))
+    ;; Terminal ⇒ no outputs.
+    (check-equal? (node-output-count r knid) 0)
+    ;; One try region + one handler region.
+    (check-equal? (pvector-length (Kappa-handlers k)) 1)
+    ;; Handler record preserves the catch-type.
+    (check-equal? (car (pvector-ref (Kappa-handlers k) 0))
+                  "java/lang/RuntimeException"))
+
+  ;; ----- D. Multiple typed handlers, first-wins ordering -----
+  (test-case "Kappa D: two typed handlers preserve declaration order"
+    ;; try { return arg0; }
+    ;; catch (NumberFormatException e) { return -1; }
+    ;; catch (Exception e)             { return -2; }
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_H1")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_H2")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_H1" "L_H1"
+                                "java/lang/NumberFormatException")
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_H1" "L_H2"
+                                "java/lang/Exception"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define ks (all-kappas r))
+    (check-equal? (length ks) 1)
+    (define k (car ks))
+    (define handler-types
+      (for/list ([h (in-pvector (Kappa-handlers k))]) (car h)))
+    ;; First-wins: NumberFormatException precedes Exception.
+    (check-equal? handler-types
+                  '("java/lang/NumberFormatException"
+                    "java/lang/Exception")))
+
+  ;; ----- E. Catch-all (catch-type = #f) -----
+  (test-case "Kappa E: catch-all handler (null catch-type) lowers"
+    ;; Pseudo: try { return arg0; } catch (*) { return -1; }
+    ;; TRY-CATCH-BLOCK with #f catch-type ≡ JVM's "any" / finally form.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER" #f))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define ks (all-kappas r))
+    (check-equal? (length ks) 1)
+    ;; Kappa's sole handler carries #f as its catch-type.
+    (check-false (car (pvector-ref (Kappa-handlers (car ks)) 0))))
+
+  ;; ----- exception-ref binding inside handler -----
+  (test-case "Kappa: 'java/exception-ref producer resolves to handler region-arg"
+    ;; The synthetic `'java/exception-ref` VfInsn at the handler entry
+    ;; must NOT materialise as a `Simple 'java/exception-ref` node in
+    ;; either the outer region or the handler sub-region — it should
+    ;; rebind to the handler region-arg's exn-out OID.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER"
+                                "java/lang/Throwable"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (define r (region-of lam))
+    (define k (first (all-kappas r)))
+    (define handler-region (cdr (pvector-ref (Kappa-handlers k) 0)))
+    (define handler-ops
+      (for/list ([kv (in-ordered-map (Region-node->value handler-region))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    ;; Handler must not carry a fossil 'java/exception-ref Simple node.
+    (check-false (memq 'java/exception-ref handler-ops)
+                 "handler region should not host a residual 'java/exception-ref node")
+    ;; Outer region also shouldn't carry it.
+    (check-false (memq 'java/exception-ref (node-ops r))))
 
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
