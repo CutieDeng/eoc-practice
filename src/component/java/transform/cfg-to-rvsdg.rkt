@@ -21,17 +21,18 @@
 ;;     kernel `Throw` sink nodes in whichever region they appear.
 ;;
 ;;   - A single natural loop is lowered to a Theta node.  The header
-;;     must end in Term:cond; one arm leads (possibly through a chain
-;;     of Term:jump-only blocks) to the latch (continue) and the other
-;;     is the exit.  All parent-scope vars pass through as
-;;     conservatively-closed loop-carried or loop-invariant inputs.  A
-;;     `Simple 'not` node flips polarity when the body sits on the
-;;     else-arm.
+;;     must end in Term:cond; one arm leads to the latch (continue)
+;;     and the other exits the loop.  The body from that cond-arm to
+;;     the latch may be a mixed chain of Term:jump blocks and inner
+;;     diamonds (each inner Term:cond must itself converge at an
+;;     inner join before the latch).  All parent-scope vars pass
+;;     through as conservatively-closed loop-carried or loop-
+;;     invariant inputs.  A `Simple 'not` node flips polarity when
+;;     the body sits on the else-arm.
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
 ;;   - Nested / multiple natural loops
-;;   - Loop body containing its own Term:cond (Gamma inside Theta)
 ;;   - Gamma arm with Term:ret / Term:throw / Term:switch before
 ;;     reaching the outer join (early-exit patterns)
 ;;   - try/catch (Kappa recovery)
@@ -56,11 +57,26 @@
 ;;
 ;; Threaded through translate-segment so that the first entry into a
 ;; loop header spawns a Theta.  We currently support at most one
-;; natural loop per CFG; the body may span multiple blocks as long as
-;; they form a linear Term:jump chain from the header's body-arm to
-;; the latch, whose back-edge closes to the header.
+;; natural loop per CFG; the body from the header's body-arm to the
+;; latch may mix Term:jump steps with inner Gamma diamonds (each
+;; must converge before the latch).  The latch's back-edge closes
+;; to the header.
 ;;
 (struct Theta-Ctx (header latch) #:prefab)
+
+;; Optional restriction on which BlockIds the arm-walking helpers
+;; (`arm-advance`, `find-branch-join`, `arm-blocks-set`,
+;; `arm-last-before-join`) are allowed to traverse.  A successor
+;; outside the scope behaves as if the arm hit a non-advanceable
+;; terminator (Term:ret etc.).  Set inside `translate-theta` to the
+;; loop's body-blocks so that an inner Gamma's diamond search
+;; cannot wander across the back-edge into the loop header and
+;; recurse forever.  #f (the default) disables the check.
+(define current-arm-scope (make-parameter #f))
+
+(define (arm-scope-contains? bid)
+  (define scope (current-arm-scope))
+  (or (not scope) (ordered-map-ref scope bid #f)))
 
 ;; ============================================================
 ;; Entry
@@ -310,12 +326,18 @@
 ;; Advance one step through an arm's control flow, recursively resolving
 ;; nested Term:cond blocks by finding their own diamond-joins.  Returns
 ;; the next BlockId to visit, or #f when the terminator can't be
-;; advanced (ret / throw / switch / unreachable).
+;; advanced (ret / throw / switch / unreachable, or — when
+;; `current-arm-scope` is set — when the next bid would lie outside
+;; that scope).
 (define (arm-advance cfg bid)
   (define term (CfgBlock-terminator (cfg-get-block cfg bid)))
   (match term
-    [(Term:jump n) n]
-    [(Term:cond _ tb eb) (find-branch-join cfg tb eb)]
+    [(Term:jump n) (and (arm-scope-contains? n) n)]
+    [(Term:cond _ tb eb)
+     (cond
+       [(and (arm-scope-contains? tb) (arm-scope-contains? eb))
+        (find-branch-join cfg tb eb)]
+       [else #f])]
     [_ #f]))
 
 ;; Walk the then-arm forward (via arm-advance), then walk the else-arm
@@ -366,10 +388,14 @@
 ;; Set of BlockIds on any path from branch-bid to (but not including)
 ;; join-bid via arm-internal control flow (Term:jump and Term:cond
 ;; only).  Used to collect parent-scope reads across the arm.
+;; Successors that escape the active `current-arm-scope` (when set)
+;; are skipped — they are by definition outside the arm we're
+;; describing.
 (define (arm-blocks-set cfg branch-bid join-bid)
   (define (walk bid visited)
     (cond
       [(equal? bid join-bid) visited]
+      [(not (arm-scope-contains? bid)) visited]
       [(ordered-map-ref visited bid #f) visited]
       [else
        (define v2 (ordered-map-set visited bid #t))
@@ -382,36 +408,56 @@
                    term bid)])]))
   (walk branch-bid (ordered-map-empty block-id-compare)))
 
-;; Walk a Theta cond-arm forward via Term:jump only, returning #t iff
-;; `target` is reachable.  Non-jump terminators or hitting a cycle
-;; before the target both fail.  Used by translate-theta to decide
-;; which arm is the loop body when an arm doesn't equal the latch
-;; directly but a linear chain of jump-only blocks sits between them.
-(define (body-arm-reaches-latch? cfg start target)
-  (let loop ([b start] [v (ordered-map-empty block-id-compare)])
+;; Collect every BlockId reachable from `start` without ever
+;; crossing the loop's back-edge.  Conceptually: run a BFS in the
+;; CFG with `header` removed (so a latch→header edge is a
+;; boundary).  The latch itself is included but not expanded — its
+;; Term:jump target is exactly `header`, which we would skip
+;; anyway.  Non-jump / non-cond terminators (ret / throw / switch)
+;; are tolerated as dead-ends because this helper is also used to
+;; probe the exit arm: the exit arm of a while-loop routinely ends
+;; in Term:ret.  translate-segment will raise a precise error later
+;; if any such terminator actually sits inside the *body* region.
+;;
+;; Note we deliberately avoid `arm-advance` / `find-branch-join`
+;; here: those helpers were designed for Gamma arms that have no
+;; loops in them, and they would recurse indefinitely if asked to
+;; "advance past" the latch (whose only successor is the header,
+;; which in turn has a cond arm that re-enters the body).
+(define (theta-body-blocks cfg start latch header)
+  (let loop ([work (list start)] [s (ordered-map-empty block-id-compare)])
     (cond
-      [(equal? b target) #t]
-      [(ordered-map-ref v b #f) #f]
+      [(null? work) s]
       [else
-       (match (CfgBlock-terminator (cfg-get-block cfg b))
-         [(Term:jump n) (loop n (ordered-map-set v b #t))]
-         [_ #f])])))
+       (define b (car work))
+       (define rest (cdr work))
+       (cond
+         [(equal? b header) (loop rest s)]
+         [(ordered-map-ref s b #f) (loop rest s)]
+         [else
+          (define s* (ordered-map-set s b #t))
+          (cond
+            [(equal? b latch)
+             ;; Latch included; its only outgoing edge goes to
+             ;; header, which is the back-edge we refuse to cross.
+             (loop rest s*)]
+            [else
+             (define succs
+               (match (CfgBlock-terminator (cfg-get-block cfg b))
+                 [(Term:jump n) (list n)]
+                 [(Term:cond _ tb eb) (list tb eb)]
+                 [_ '()]))
+             (loop (append succs rest) s*)])])])))
 
-;; Ordered-set of every BlockId on the Term:jump chain from `start`
-;; through `target`, inclusive on both ends.  Caller must have
-;; verified reachability via `body-arm-reaches-latch?`; any non-jump
-;; terminator before `target` is an internal error.
-(define (theta-body-blocks cfg start target)
-  (let loop ([b start] [s (ordered-map-empty block-id-compare)])
-    (define s* (ordered-map-set s b #t))
-    (cond
-      [(equal? b target) s*]
-      [else
-       (match (CfgBlock-terminator (cfg-get-block cfg b))
-         [(Term:jump n) (loop n s*)]
-         [t (error 'theta-body-blocks
-                   "unexpected terminator ~s at ~a while walking to latch ~a"
-                   t b target)])])))
+;; Body-arm check: starting from the cond-arm bid, do we reach the
+;; latch while remaining inside the body (i.e., never crossing the
+;; back-edge into `header`)?  Implemented as set-membership in
+;; `theta-body-blocks`, so it naturally tolerates inner Gamma
+;; diamonds just like the block-set walk.
+(define (body-arm-reaches-latch? cfg start latch header)
+  (and (ordered-map-ref
+        (theta-body-blocks cfg start latch header) latch #f)
+       #t))
 
 ;; ============================================================
 ;; Sub-region builder
@@ -576,9 +622,10 @@
 ;; ============================================================
 ;;
 ;; Scope: exactly one natural loop.  The header must end in
-;; Term:cond; one arm leads (possibly via a chain of Term:jump-only
-;; blocks) to the latch, which jumps back to the header.  The other
-;; cond arm exits the loop.  Deviations raise self-identifying errors.
+;; Term:cond; one arm leads (possibly through Term:jump steps and/or
+;; inner convergent diamonds) to the latch, which jumps back to the
+;; header.  The other cond arm exits the loop.  Deviations raise
+;; self-identifying errors.
 ;;
 ;; Sub-region layout:
 ;;   - `Simple '(region-arg N)` producer provides one output per
@@ -624,15 +671,16 @@
   (define else-bid (Term:cond-else-target header-term))
   (define-values (body-is-then? body-entry-bid exit-arm-bid)
     (cond
-      [(body-arm-reaches-latch? cfg then-bid latch-bid)
+      [(body-arm-reaches-latch? cfg then-bid latch-bid header-bid)
        (values #t then-bid else-bid)]
-      [(body-arm-reaches-latch? cfg else-bid latch-bid)
+      [(body-arm-reaches-latch? cfg else-bid latch-bid header-bid)
        (values #f else-bid then-bid)]
       [else
        (error 'translate-theta
-              "neither cond arm reaches latch ~a via a Term:jump chain (then=~a else=~a)"
+              "neither cond arm reaches latch ~a without crossing back-edge (then=~a else=~a)"
               latch-bid then-bid else-bid)]))
-  (define body-blocks (theta-body-blocks cfg body-entry-bid latch-bid))
+  (define body-blocks
+    (theta-body-blocks cfg body-entry-bid latch-bid header-bid))
 
   ;; Theta's inputs/outputs cover:
   ;;   (a) phi outputs at the header (loop-carried; always needed
@@ -695,9 +743,12 @@
   ;; Translate the body block(s), stopping at the back-edge into
   ;; header.  translate-segment walks the Term:jump chain from
   ;; body-entry-bid through the latch and naturally stops at header
-  ;; (= back-edge target = stop-bid).
+  ;; (= back-edge target = stop-bid).  We restrict the arm-walking
+  ;; helpers to body-blocks so any inner Gamma's `find-branch-join`
+  ;; cannot wander past the latch into the loop header.
   (define-values (sub3 sub-var->out3 body-payload)
-    (translate-segment cfg body-entry-bid header-bid sub2 sub-var->out2 #f))
+    (parameterize ([current-arm-scope body-blocks])
+      (translate-segment cfg body-entry-bid header-bid sub2 sub-var->out2 #f)))
   (unless (eq? body-payload #f)
     (error 'translate-theta
            "loop body payload ~s unsupported (ret/throw inside loop not yet lowered)"

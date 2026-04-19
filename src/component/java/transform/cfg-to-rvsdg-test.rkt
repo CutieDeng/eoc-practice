@@ -342,6 +342,75 @@
     ;; Parent must still terminate with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Theta recovery: body containing an inner if -----
+  (test-case "while-loop body may contain an inner Gamma"
+    ;; slot0 = 0;
+    ;; while (slot1 != 0) {
+    ;;   if (slot2 != 0) { slot0 += 1; } else { slot0 += 2; }
+    ;;   slot1 -= 1;            ;; latch
+    ;; }
+    ;; return slot0;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY_COND")
+                       (mk-insn 'ILOAD 2)
+                       (mk-insn 'IFEQ "L_BODY_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY_THEN")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IADD)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'GOTO "L_BODY_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY_ELSE")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'IADD)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY_JOIN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains exactly one Theta node.
+    (define thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length thetas) 1
+                  "parent region should contain exactly one Theta")
+    (define theta-sub (Theta-region (car thetas)))
+    ;; The Theta's sub-region must itself host exactly one inner
+    ;; Gamma (the body if/else).  That inner Gamma covers the IADD
+    ;; from each arm; ISUB from the latch block lives in the Theta
+    ;; sub-region directly.
+    (define inner-gammas
+      (for/list ([kv (in-ordered-map (Region-node->value theta-sub))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length inner-gammas) 1
+                  "Theta body should contain exactly one inner Gamma")
+    (define sub-ops
+      (for/list ([kv (in-ordered-map (Region-node->value theta-sub))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    (check-not-false (memq 'ISUB sub-ops)
+                     "ISUB from latch missing from Theta sub-region")
+    ;; Parent must still terminate with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

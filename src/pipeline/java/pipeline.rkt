@@ -13,13 +13,12 @@
 ;;     cfg->rvsdg.  cfg->rvsdg handles linear jump chains, if-else
 ;;     diamonds with multi-block linear arms and nested inner
 ;;     diamonds (→ Gamma), and single-loop while-patterns whose body
-;;     may span multiple Term:jump-linked blocks before reaching the
-;;     latch (→ Theta).
+;;     may span multiple blocks — mixing Term:jump steps with inner
+;;     convergent diamonds — before reaching the latch (→ Theta).
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (nested loops, switch, try/catch, Gamma inside a loop body,
-;;     early-exit inside a Gamma arm) error from cfg->rvsdg;
-;;     `java-compile-class` catches each exception per method rather
-;;     than aborting the whole class.
+;;     (nested loops, switch, try/catch, early-exit inside a Gamma
+;;     arm) error from cfg->rvsdg; `java-compile-class` catches each
+;;     exception per method rather than aborting the whole class.
 ;;
 ;; ============================================================
 
@@ -84,6 +83,6 @@
     'supported '(jvm-to-cfg ssa-construct linear-rvsdg
                  gamma-recovery gamma-multi-block-arms
                  gamma-nested-diamonds theta-recovery
-                 theta-multi-block-body)
+                 theta-multi-block-body theta-gamma-inside-body)
     'deferred  '(switch-recovery kappa-recovery nested-loops
-                 gamma-early-exit gamma-inside-loop)))
+                 gamma-early-exit)))
