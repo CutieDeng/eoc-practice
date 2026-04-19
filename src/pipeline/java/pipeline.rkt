@@ -45,10 +45,18 @@
 ;;     checks whether the active stop-bid lies in exactly one arm's
 ;;     reach-set; if so the other arm's reach-set becomes the exit
 ;;     sub-region (possibly spanning many blocks).
+;;     An early-exit sitting inside a Theta loop body is handled
+;;     analogously: `arm-reach-set` respects `current-arm-scope`
+;;     (set to the loop's body-blocks by translate-theta) so a
+;;     Term:cond arm that jumps back to the header shows up as a
+;;     boundary terminator, and the new `reach-set-reaches-stop?`
+;;     helper classifies the arm that targets the header as the
+;;     continue arm.  The other arm — single-block or multi-block
+;;     ending in ret / throw — lowers to the exit sub-region of an
+;;     asymmetric Gamma installed inside the Theta body.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, any early-exit inside a Theta loop body,
-;;     or a loop header with multiple back-edges) error from
-;;     cfg->rvsdg;
+;;     (switch, try/catch, or a loop header with multiple back-
+;;     edges) error from cfg->rvsdg;
 ;;     `java-compile-class` catches each exception per method rather
 ;;     than aborting the whole class.
 ;;
@@ -121,7 +129,8 @@
                  gamma-early-exit-asymmetric
                  gamma-early-exit-multi-block-arm
                  gamma-early-exit-inside-gamma-single-block
-                 gamma-early-exit-inside-gamma-multi-block)
+                 gamma-early-exit-inside-gamma-multi-block
+                 gamma-early-exit-inside-theta-single-block
+                 gamma-early-exit-inside-theta-multi-block)
     'deferred  '(switch-recovery kappa-recovery
-                 gamma-early-exit-inside-theta
                  multi-latch-loops)))

@@ -879,6 +879,152 @@
     (check-not-false (memq 'ISTORE exit-ops)
                      "multi-block exit sub-region should contain the first block's ISTORE"))
 
+  ;; ----- early-exit inside Theta body: single-block exit arm -----
+  (test-case "single-block early-exit inside Theta body"
+    ;; while (slot1 != 0) {
+    ;;   if (slot0 == 0) return 42;   // single-block early exit
+    ;;   slot1 = slot1 - 1;
+    ;; }
+    ;; return slot0;
+    ;;
+    ;; The inner Term:cond sits inside the loop body; one arm is a
+    ;; single block ending in Term:ret.  translate-segment (now with
+    ;; scope-aware arm-reach-set) classifies the cond as asymmetric
+    ;; and installs an early-exit Gamma directly inside the Theta's
+    ;; body sub-region; the continue arm resumes toward the latch.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFNE "L_CONTINUE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EARLY_RET")
+                       (mk-insn 'BIPUSH 42)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_CONTINUE")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region has exactly one Theta and a final return.
+    (define thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length thetas) 1
+                  "parent region should contain exactly one Theta")
+    (check-not-false (memq 'return (node-ops r))
+                     "parent region should terminate with a return")
+    ;; The Theta's body must host exactly one inner Gamma (the early-
+    ;; exit); that Gamma's two sub-regions contain exactly one 'return
+    ;; sink in total.
+    (define body (Theta-region (car thetas)))
+    (define inner-gammas
+      (for/list ([kv (in-ordered-map (Region-node->value body))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length inner-gammas) 1
+                  "Theta body should host exactly one early-exit Gamma")
+    (define inner-subs (Gamma-regions (car inner-gammas)))
+    (define inner-return-count
+      (for/sum ([isub (in-list inner-subs)])
+        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+          (define v (cdr kv))
+          (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
+    (check-equal? inner-return-count 1
+                  "inner Gamma should host exactly one 'return sink"))
+
+  ;; ----- early-exit inside Theta body: multi-block exit arm -----
+  (test-case "multi-block early-exit inside Theta body"
+    ;; while (slot1 != 0) {
+    ;;   if (slot0 == 0) {
+    ;;     slot2 = 99;                // multi-block exit
+    ;;     return 42;
+    ;;   }
+    ;;   slot1 = slot1 - 1;
+    ;; }
+    ;; return slot0;
+    ;;
+    ;; The exit arm now spans two blocks (L_EXIT_A -> L_EXIT_B).
+    ;; The scoped arm-reach-set stops at the back-edge into L_HEAD
+    ;; (outside body-blocks) and `reach-set-reaches-stop?` classifies
+    ;; the continue arm by its Term:jump-to-header boundary terminator.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFNE "L_CONTINUE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT_A")
+                       (mk-insn 'BIPUSH 99)
+                       (mk-insn 'ISTORE 2)
+                       (mk-insn 'GOTO "L_EXIT_B")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT_B")
+                       (mk-insn 'BIPUSH 42)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_CONTINUE")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(III)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length thetas) 1
+                  "parent region should contain exactly one Theta")
+    (define body (Theta-region (car thetas)))
+    (define inner-gammas
+      (for/list ([kv (in-ordered-map (Region-node->value body))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length inner-gammas) 1
+                  "Theta body should host exactly one early-exit Gamma")
+    (define inner-subs (Gamma-regions (car inner-gammas)))
+    (define inner-return-count
+      (for/sum ([isub (in-list inner-subs)])
+        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+          (define v (cdr kv))
+          (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
+    (check-equal? inner-return-count 1
+                  "inner Gamma should host exactly one 'return sink")
+    ;; The exit sub-region must span both exit blocks: the first
+    ;; block's ISTORE (slot2 = 99) lives alongside the return sink.
+    (define exit-sub
+      (for/or ([isub (in-list inner-subs)])
+        (define ops
+          (for/list ([kv (in-ordered-map (Region-node->value isub))])
+            (define v (cdr kv))
+            (cond [(Simple? v) (Simple-op v)] [else 'other])))
+        (and (memq 'return ops) isub)))
+    (check-not-false exit-sub)
+    (define exit-ops
+      (for/list ([kv (in-ordered-map (Region-node->value exit-sub))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    (check-not-false (memq 'ISTORE exit-ops)
+                     "multi-block exit sub-region should contain the first block's ISTORE"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

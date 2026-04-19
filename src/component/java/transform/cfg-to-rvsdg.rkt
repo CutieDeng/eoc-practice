@@ -57,13 +57,24 @@
 ;;     invariant inputs.  A `Simple 'not` node flips polarity when
 ;;     the body sits on the else-arm.
 ;;
+;;     An early-exit (single-block or multi-block) sitting INSIDE a
+;;     Theta loop body is also tolerated: `arm-reach-set` respects
+;;     `current-arm-scope` (set by translate-theta to the loop's
+;;     body-blocks), so a Term:cond arm whose successor crosses the
+;;     back-edge into the loop header appears as a boundary edge.
+;;     The helper `reach-set-reaches-stop?` probes arm terminators
+;;     to classify the arm whose immediate successor is stop-bid
+;;     (= the loop header) as the continue arm; the other arm —
+;;     internally contained within body-blocks and ending in
+;;     ret / throw — becomes the exit sub-region of an asymmetric
+;;     Gamma installed inside the Theta's body region.  The
+;;     existing asymmetric-Gamma dispatch is reused verbatim; no
+;;     Theta-body-specific code path is needed.
+;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
-;;   - early-exit inside a Theta loop body (the shared-set trick
-;;     covers Gamma arms but not loop bodies — a Theta body arm that
-;;     contains an early exit would need the exit projected out of
-;;     the body region and routed around the loop)
 ;;   - try/catch (Kappa recovery)
+;;   - loop headers with multiple back-edges (multi-latch loops)
 ;;
 ;; Each of the above raises with a self-identifying error.
 ;;
@@ -276,9 +287,9 @@
            (define then-reach (arm-reach-set cfg then-bid))
            (define else-reach (arm-reach-set cfg else-bid))
            (define then-reaches-stop?
-             (and stop-bid (ordered-map-ref then-reach stop-bid #f) #t))
+             (reach-set-reaches-stop? cfg then-reach stop-bid))
            (define else-reaches-stop?
-             (and stop-bid (ordered-map-ref else-reach stop-bid #f) #t))
+             (reach-set-reaches-stop? cfg else-reach stop-bid))
            (cond
              [(and stop-bid
                    (not (eq? then-reaches-stop? else-reaches-stop?))
@@ -489,7 +500,11 @@
 ;; Forward reach-set from start-bid, walking only via Term:jump and
 ;; Term:cond successors.  Blocks whose terminator is something else
 ;; (ret / throw / switch / #f) are included as leaves but not
-;; expanded.  Returns an ordered-map used as a set of BlockId -> #t.
+;; expanded.  Respects `current-arm-scope`: successors outside the
+;; active scope are treated as boundary edges and not included in
+;; the walk (typical inside a Theta body, where scope=body-blocks
+;; and a Term:jump to the loop header crosses the back-edge).
+;; Returns an ordered-map used as a set of BlockId -> #t.
 (define (arm-reach-set cfg start-bid)
   (let loop ([work (list start-bid)]
              [seen (ordered-map-empty block-id-compare)])
@@ -500,6 +515,7 @@
        (define rest (cdr work))
        (cond
          [(ordered-map-ref seen b #f) (loop rest seen)]
+         [(not (arm-scope-contains? b)) (loop rest seen)]
          [else
           (define seen* (ordered-map-set seen b #t))
           (define succs
@@ -508,6 +524,24 @@
               [(Term:cond _ tb eb) (list tb eb)]
               [_ '()]))
           (loop (append succs rest) seen*)])])))
+
+;; True iff some block in `reach-set` has an immediate successor
+;; equal to `stop-bid`, or the reach-set itself contains `stop-bid`.
+;; Needed because `arm-reach-set` stops at scope boundaries, so under
+;; a scoped walk `stop-bid` (typically outside the scope) never lands
+;; in the set directly — we must probe the boundary terminators.  At
+;; top level (scope=#f) the direct lookup succeeds and this degrades
+;; to the classic membership check.
+(define (reach-set-reaches-stop? cfg reach-set stop-bid)
+  (and stop-bid
+       (or (ordered-map-ref reach-set stop-bid #f)
+           (for/or ([kv (in-ordered-map reach-set)])
+             (match (CfgBlock-terminator (cfg-get-block cfg (car kv)))
+               [(Term:jump n) (equal? n stop-bid)]
+               [(Term:cond _ tb eb)
+                (or (equal? tb stop-bid) (equal? eb stop-bid))]
+               [_ #f])))
+       #t))
 
 ;; Every block in the reach-set has a terminator that is either
 ;; internal to the arm (Term:jump / Term:cond) or is a ret / throw
@@ -1203,7 +1237,7 @@
                          sub2 sub-var->out2)))
   (unless (eq? body-payload #f)
     (error 'translate-theta
-           "loop body payload ~s unsupported (ret/throw inside loop not yet lowered)"
+           "loop body reached a top-level ret/throw (payload=~s) before closing the back-edge; guarded early-exits should have lowered via an asymmetric Gamma inside the body"
            body-payload))
 
   ;; Iteration predicate (see translate-theta docstring).
