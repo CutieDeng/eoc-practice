@@ -638,17 +638,28 @@
   (define pred-var (Term:cond-cond header-term))
   (define then-bid (Term:cond-then-target header-term))
   (define else-bid (Term:cond-else-target header-term))
-  (define-values (body-is-then? exit-arm-bid)
+  ;; Pick the body-arm by walking each cond arm forward via Term:jump
+  ;; until we either hit the latch (= body) or a non-jump terminator
+  ;; (= exit).  For single-block bodies this reduces to the old
+  ;; `(equal? arm-bid latch-bid)` check; for multi-block bodies one
+  ;; or more Term:jump-only blocks separate the cond from the latch.
+  (define-values (body-is-then? body-entry-bid exit-arm-bid)
     (cond
-      [(equal? then-bid latch-bid) (values #t else-bid)]
-      [(equal? else-bid latch-bid) (values #f then-bid)]
-      [else (error 'translate-theta
-                   "neither cond arm equals latch ~a (then=~a else=~a) -- multi-block loop body not yet supported"
-                   latch-bid then-bid else-bid)]))
+      [(body-arm-reaches-latch? cfg then-bid latch-bid)
+       (values #t then-bid else-bid)]
+      [(body-arm-reaches-latch? cfg else-bid latch-bid)
+       (values #f else-bid then-bid)]
+      [else
+       (error 'translate-theta
+              "neither cond arm reaches latch ~a via a Term:jump chain (then=~a else=~a)"
+              latch-bid then-bid else-bid)]))
 
-  ;; Translate the body block, stopping at the back-edge into header.
+  ;; Translate the body block(s), stopping at the back-edge into
+  ;; header.  translate-segment walks the Term:jump chain from
+  ;; body-entry-bid through the latch and naturally stops at header
+  ;; (= back-edge target = stop-bid).
   (define-values (sub3 sub-var->out3 body-payload)
-    (translate-segment cfg latch-bid header-bid sub2 sub-var->out2 #f))
+    (translate-segment cfg body-entry-bid header-bid sub2 sub-var->out2 #f))
   (unless (eq? body-payload #f)
     (error 'translate-theta
            "loop body payload ~s unsupported (ret/throw inside loop not yet lowered)"
