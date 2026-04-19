@@ -88,8 +88,9 @@
 
 (define (jvm-method->cfg method)
   (define mbb (jvm-method->bbs method))
+  (define exceptions (JvmMethodBBs-exceptions mbb))
   (define handler-labels
-    (for/fold ([s (set)]) ([e (in-pvector (JvmMethodBBs-exceptions mbb))])
+    (for/fold ([s (set)]) ([e (in-pvector exceptions)])
       (set-add s (JvmExceptionEntry-handler e))))
 
   ;; Step 1: allocate a vertex-id per BB
@@ -100,25 +101,85 @@
       (define-values (g* vid) (graph-add-vertex g))
       (values g* (ordered-map-set m lbl vid))))
 
+  ;; Label -> order-index map, so covering-ranges can be expressed in
+  ;; block ordinals rather than label strings.  End-of-method is
+  ;; represented by the sentinel `n` (= number of blocks).
+  (define block-order (JvmMethodBBs-order mbb))
+  (define n-blocks (pvector-length block-order))
+  (define label->order
+    (for/fold ([m (ordered-map-empty string-compare)])
+              ([lbl (in-pvector block-order)]
+               [i (in-naturals)])
+      (ordered-map-set m lbl i)))
+
+  ;; Resolve each JvmExceptionEntry to BlockId-based ranges.  Entries
+  ;; whose start or handler label cannot be mapped to a BB are
+  ;; skipped with an error: the JVM verifier guarantees label-aligned
+  ;; try ranges, so an unmappable entry indicates a broken fixture.
+  (define exception-table-bids
+    (for/pvector ([e (in-pvector exceptions)])
+      (define start-lbl (JvmExceptionEntry-start e))
+      (define end-lbl (JvmExceptionEntry-end e))
+      (define handler-lbl (JvmExceptionEntry-handler e))
+      (define catch-type (JvmExceptionEntry-catch-type e))
+      (define start-bid
+        (or (ordered-map-ref label->bid start-lbl #f)
+            (error 'jvm-method->cfg
+                   "exception table start-label ~s has no BB" start-lbl)))
+      (define handler-bid
+        (or (ordered-map-ref label->bid handler-lbl #f)
+            (error 'jvm-method->cfg
+                   "exception table handler-label ~s has no BB" handler-lbl)))
+      ;; end-label is exclusive; it may or may not correspond to a BB.
+      ;; When it does, store that BlockId; when it doesn't (e.g. range
+      ;; ends at method-end), store #f.
+      (define end-bid (ordered-map-ref label->bid end-lbl #f))
+      (list start-bid end-bid handler-bid catch-type)))
+
+  ;; For each entry, derive a half-open [start-order, end-order)
+  ;; block-ordinal window.  Matches the JVM try-range semantics.
+  (define entry-windows
+    (for/pvector ([rec (in-pvector exception-table-bids)]
+                  [e (in-pvector exceptions)])
+      (define start-ord (ordered-map-ref label->order
+                                         (JvmExceptionEntry-start e) #f))
+      (define end-ord
+        (or (ordered-map-ref label->order (JvmExceptionEntry-end e) #f)
+            n-blocks))
+      (list start-ord end-ord (caddr rec) (cadddr rec))))
+
   ;; Step 2: reserve VarIds 0..max-local for JVM local slots,
   ;; then allocate fresh VarIds starting above that range.
   (define max-local (scan-max-local method))
   (define vc0 (add1 max-local))
 
-  ;; Step 3: translate each BB
+  ;; Step 3: translate each BB, annotating its info with the list of
+  ;; covering handlers in declaration order.
   (define-values (blocks-map vc-final)
     (for/fold ([bm (ordered-map-empty block-id-compare)] [vc vc0])
-              ([lbl (in-pvector (JvmMethodBBs-order mbb))])
+              ([lbl (in-pvector block-order)]
+               [i (in-naturals)])
       (define jvmbb (ordered-map-ref (JvmMethodBBs-blocks mbb) lbl #f))
       (define bid (ordered-map-ref label->bid lbl #f))
       (define entry-h (if (set-member? handler-labels lbl) 1 0))
+      (define covering
+        (for/pvector ([w (in-pvector entry-windows)]
+                      #:when (and (<= (car w) i) (< i (cadr w))))
+          (cons (cadddr w) (caddr w))))  ; (catch-type . handler-bid)
       (define-values (cfg-block vc*)
         (translate-block jvmbb bid entry-h vc label->bid))
-      (values (ordered-map-set bm bid cfg-block) vc*)))
+      (define cfg-block*
+        (cond
+          [(= 0 (pvector-length covering)) cfg-block]
+          [else
+           (struct-copy CfgBlock cfg-block
+             [info (ordered-map-set (CfgBlock-info cfg-block)
+                                    'java/covering-handlers covering)])]))
+      (values (ordered-map-set bm bid cfg-block*) vc*)))
 
   ;; Step 4: wire edges
   (define graph-final
-    (for/fold ([g graph0]) ([lbl (in-pvector (JvmMethodBBs-order mbb))])
+    (for/fold ([g graph0]) ([lbl (in-pvector block-order)])
       (define jvmbb (ordered-map-ref (JvmMethodBBs-blocks mbb) lbl #f))
       (define src (ordered-map-ref label->bid lbl #f))
       (for/fold ([g g]) ([s (in-pvector (JvmBB-successors jvmbb))])
@@ -137,11 +198,13 @@
 
   (define local-count (max (add1 max-local) param-n))
   (define info0
-    (ordered-map-set
-      (ordered-map-set
-        (ordered-map-empty symbol-compare)
-        'java/param-count param-n)
-      'java/max-local local-count))
+    (let* ([m (ordered-map-empty symbol-compare)]
+           [m (ordered-map-set m 'java/param-count param-n)]
+           [m (ordered-map-set m 'java/max-local local-count)])
+      (cond
+        [(> (pvector-length exception-table-bids) 0)
+         (ordered-map-set m 'java/exception-table exception-table-bids)]
+        [else m])))
 
   (Cfg graph-final
        blocks-map

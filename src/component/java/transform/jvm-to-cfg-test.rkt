@@ -182,4 +182,81 @@
     ;; edges: L1452126962→L931919113, L931919113→L764977973 (GOTO),
     ;;        L1607521710→L381259350 (fall), L381259350→L764977973 (fall)
     ;; L764977973 is terminal.  Total 4 edges.
-    (check-equal? (graph-edge-count (Cfg-graph cfg)) 4)))
+    (check-equal? (graph-edge-count (Cfg-graph cfg)) 4))
+
+  ;; ----- synthetic try/catch: exception table preserved on Cfg.info -----
+  (test-case "try/catch preserves exception-table in Cfg.info"
+    ;; try { return arg0; } catch (RuntimeException e) { return -1; }
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER"
+                                "java/lang/RuntimeException"))
+                 #:desc "(I)I"))
+    (define cfg (jvm-method->cfg m))
+    (define info (Cfg-info cfg))
+    (define table (ordered-map-ref info 'java/exception-table #f))
+    (check-pred (lambda (x) (and x (> (pvector-length x) 0)))
+                table
+                "Cfg.info should carry 'java/exception-table")
+    (check-equal? (pvector-length table) 1)
+    (define rec (pvector-ref table 0))
+    ;; (list start-bid end-bid handler-bid catch-type); end-label ==
+    ;; handler-label here, so end-bid = handler-bid.
+    (check-pred BlockId? (car rec) "start-bid is a BlockId")
+    (check-pred BlockId? (caddr rec) "handler-bid is a BlockId")
+    (check-equal? (cadddr rec) "java/lang/RuntimeException"))
+
+  (test-case "try/catch: covered block carries covering-handlers annotation"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER"
+                                "java/lang/RuntimeException"))
+                 #:desc "(I)I"))
+    (define cfg (jvm-method->cfg m))
+    (define entry (Cfg-entry cfg))
+    (define entry-blk (ordered-map-ref (Cfg-blocks cfg) entry #f))
+    (define covering
+      (ordered-map-ref (CfgBlock-info entry-blk) 'java/covering-handlers #f))
+    (check-pred (lambda (x) (and x (= 1 (pvector-length x))))
+                covering
+                "try block should carry one covering handler")
+    (define pair (pvector-ref covering 0))
+    (check-equal? (car pair) "java/lang/RuntimeException"
+                  "covering pair's catch-type")
+    (check-pred BlockId? (cdr pair) "covering pair's handler-bid")
+    ;; Handler block itself is excluded from its own try range.
+    (define handler-bid (cdr pair))
+    (define handler-blk (ordered-map-ref (Cfg-blocks cfg) handler-bid #f))
+    (check-equal? (ordered-map-ref (CfgBlock-info handler-blk)
+                                   'java/covering-handlers #f)
+                  #f
+                  "handler block is not covered by its own try range"))
+
+  (test-case "method without try/catch has no exception-table key"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define cfg (jvm-method->cfg m))
+    (check-equal? (ordered-map-ref (Cfg-info cfg) 'java/exception-table #f)
+                  #f)
+    ;; And no block carries covering-handlers.
+    (for ([kv (in-ordered-map (Cfg-blocks cfg))])
+      (check-equal? (ordered-map-ref (CfgBlock-info (cdr kv))
+                                     'java/covering-handlers #f)
+                    #f))))
