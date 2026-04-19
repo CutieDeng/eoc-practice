@@ -38,12 +38,14 @@
 ;;     materialised as nested Gamma / Theta nodes inside the sub-
 ;;     region just as they would be in any other region context).
 ;;     When the inner cond sitting INSIDE a standard diamond arm has
-;;     exactly one single-block Term:ret / Term:throw arm (and the
-;;     other arm continues to the outer join), the outer arm-walk
-;;     skips past the exit via `arm-advance`, and the inner cond
-;;     lowers as an asymmetric early-exit Gamma inside the outer
-;;     arm's sub-region through the normal translate-segment
-;;     recursion.
+;;     one arm (single-block or multi-block) whose reach-set never
+;;     rejoins the outer search's shared territory, the outer arm-
+;;     walk skips past that exit subtree via `arm-advance` (which
+;;     consults a `current-shared-set` installed by translate-gamma)
+;;     and the inner cond lowers as an asymmetric early-exit Gamma
+;;     inside the outer arm's sub-region.  The dispatch decides
+;;     asymmetric-multi-block vs terminal vs standard by inspecting
+;;     whether `stop-bid` is in exactly one arm's forward reach.
 ;;
 ;;   - A single natural loop is lowered to a Theta node.  The header
 ;;     must end in Term:cond; one arm leads to the latch (continue)
@@ -57,12 +59,10 @@
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
-;;   - multi-block early-exit nested inside another Gamma arm or a
-;;     Theta loop body (single-block inner early-exits inside a Gamma
-;;     arm are handled; multi-block inner exit reach-sets still hit
-;;     the "neither arm is single-block exit" fall-through and would
-;;     need the outer arm-walk to project the inner reach-set away
-;;     from the outer join search)
+;;   - early-exit inside a Theta loop body (the shared-set trick
+;;     covers Gamma arms but not loop bodies — a Theta body arm that
+;;     contains an early exit would need the exit projected out of
+;;     the body region and routed around the loop)
 ;;   - try/catch (Kappa recovery)
 ;;
 ;; Each of the above raises with a self-identifying error.
@@ -105,6 +105,17 @@
 (define (arm-scope-contains? bid)
   (define scope (current-arm-scope))
   (or (not scope) (ordered-map-ref scope bid #f)))
+
+;; During `translate-gamma`'s find-branch-join walk, this parameter
+;; holds the forward-reach intersection of the two outer arms (i.e.
+;; the set of blocks reachable from both then-bid and else-bid).
+;; Any block B whose full forward-reach is disjoint from this set is
+;; an "exit subtree" — from the outer walk's perspective it can
+;; never rejoin the shared territory, so `arm-advance` should treat
+;; it like a single-block Term:ret / Term:throw leaf and skip past
+;; it.  #f (default) disables the check; translate-gamma sets it to
+;; a concrete set before calling find-branch-join.
+(define current-shared-set (make-parameter #f))
 
 ;; Map of every loop header in the CFG to its Theta-Ctx.  Set once
 ;; per `cfg->rvsdg` invocation; consulted by `translate-segment`
@@ -251,14 +262,38 @@
                                               region1 var->out1))
            (translate-segment cfg continue-bid stop-bid region2 var->out2)]
           [else
-           ;; Neither arm is a single-block exit.  Before falling
-           ;; back to the diamond path, check whether this is actually
-           ;; a multi-block terminal Gamma: both arms' reach-sets end
-           ;; exclusively in ret/throw and the two reach-sets are
-           ;; disjoint (i.e. they never merge at a common join).
+           ;; Neither arm is a single-block exit.  Classify via
+           ;; forward reach-sets plus the active stop-bid:
+           ;;   - Exactly one arm reaches stop-bid → multi-block
+           ;;     asymmetric early-exit: lower the non-continuing arm
+           ;;     as the exit sub-region, resume translate-segment
+           ;;     from the continuing arm.  Requires disjoint reach-
+           ;;     sets so the exit arm doesn't accidentally share
+           ;;     blocks with the continue arm.
+           ;;   - Neither reaches stop-bid, reach-sets disjoint, all
+           ;;     leaves ret/throw → multi-block terminal Gamma.
+           ;;   - Otherwise → standard diamond.
            (define then-reach (arm-reach-set cfg then-bid))
            (define else-reach (arm-reach-set cfg else-bid))
+           (define then-reaches-stop?
+             (and stop-bid (ordered-map-ref then-reach stop-bid #f) #t))
+           (define else-reaches-stop?
+             (and stop-bid (ordered-map-ref else-reach stop-bid #f) #t))
            (cond
+             [(and stop-bid
+                   (not (eq? then-reaches-stop? else-reaches-stop?))
+                   (arm-leaves-all-ret-throw? cfg then-reach)
+                   (arm-leaves-all-ret-throw? cfg else-reach)
+                   (reach-sets-disjoint? then-reach else-reach))
+              ;; Multi-block asymmetric early-exit: exactly one arm
+              ;; reaches stop-bid (the continue arm); the other arm's
+              ;; reach is internal and ret/throw-only.
+              (define-values (region2 var->out2 continue-bid)
+                (translate-asymmetric-exit-gamma cfg pred
+                                                 then-bid (not then-reaches-stop?)
+                                                 else-bid (not else-reaches-stop?)
+                                                 region1 var->out1))
+              (translate-segment cfg continue-bid stop-bid region2 var->out2)]
              [(and (arm-leaves-all-ret-throw? cfg then-reach)
                    (arm-leaves-all-ret-throw? cfg else-reach)
                    (reach-sets-disjoint? then-reach else-reach))
@@ -346,15 +381,27 @@
 ;; Returns (values region var->out join-bid) where join-bid is the
 ;; block the caller should continue translating from.
 (define (translate-gamma cfg cond-bid pred then-bid else-bid region var->out)
-  (define join-bid (find-branch-join cfg then-bid else-bid))
-  (when (or (equal? join-bid then-bid) (equal? join-bid else-bid))
-    (error 'translate-gamma
-           "empty branch (then=~a else=~a join=~a) not yet supported"
-           then-bid else-bid join-bid))
-  (define then-pred (arm-last-before-join cfg then-bid join-bid))
-  (define else-pred (arm-last-before-join cfg else-bid join-bid))
-  (define then-blocks (arm-blocks-set cfg then-bid join-bid))
-  (define else-blocks (arm-blocks-set cfg else-bid join-bid))
+  ;; Compute the pair of full forward-reaches and their intersection
+  ;; once, up-front.  The intersection ("shared set") is installed on
+  ;; `current-shared-set` so that every helper that walks the arms —
+  ;; `find-branch-join`, `arm-last-before-join`, `arm-blocks-set` —
+  ;; can recognise multi-block exit subtrees nested inside either
+  ;; arm and skip past them while searching for the outer join.
+  (define then-full-reach (arm-reach-set cfg then-bid))
+  (define else-full-reach (arm-reach-set cfg else-bid))
+  (define shared-set (reach-set-intersection then-full-reach else-full-reach))
+  (define-values (join-bid then-pred else-pred then-blocks else-blocks)
+    (parameterize ([current-shared-set shared-set])
+      (define jb (find-branch-join cfg then-bid else-bid))
+      (when (or (equal? jb then-bid) (equal? jb else-bid))
+        (error 'translate-gamma
+               "empty branch (then=~a else=~a join=~a) not yet supported"
+               then-bid else-bid jb))
+      (values jb
+              (arm-last-before-join cfg then-bid jb)
+              (arm-last-before-join cfg else-bid jb)
+              (arm-blocks-set cfg then-bid jb)
+              (arm-blocks-set cfg else-bid jb))))
 
   (define join-blk (cfg-get-block cfg join-bid))
   (define phis (CfgBlock-phis join-blk))
@@ -475,6 +522,12 @@
 (define (reach-sets-disjoint? s1 s2)
   (for/and ([kv (in-ordered-map s1)])
     (not (ordered-map-ref s2 (car kv) #f))))
+
+(define (reach-set-intersection s1 s2)
+  (for/fold ([s (ordered-map-empty block-id-compare)])
+            ([kv (in-ordered-map s1)]
+             #:when (ordered-map-ref s2 (car kv) #f))
+    (ordered-map-set s (car kv) #t)))
 
 ;; Walk every block in the arm's reach-set and collect parent-scope
 ;; VarIds read by any VfInsn input or by the block's terminator
@@ -702,14 +755,37 @@
      (cond
        [(not (and (arm-scope-contains? tb) (arm-scope-contains? eb))) #f]
        [else
-        (define tb-exit? (terminal-block? (cfg-get-block cfg tb)))
-        (define eb-exit? (terminal-block? (cfg-get-block cfg eb)))
+        (define tb-exit? (arm-is-exit? cfg tb))
+        (define eb-exit? (arm-is-exit? cfg eb))
         (cond
           [(and tb-exit? eb-exit?) #f]
           [tb-exit? eb]
           [eb-exit? tb]
           [else (find-branch-join cfg tb eb)])])]
     [_ #f]))
+
+;; A block B counts as an "exit" from the outer walk's perspective
+;; if advancing into B's forward-reach will never rejoin the shared
+;; territory.  Two cases:
+;;   - Single-block terminal: Term:ret / Term:throw block.
+;;   - Multi-block exit: B's full forward-reach is entirely ret/throw
+;;     leaves AND the reach is disjoint from `current-shared-set`
+;;     (the pair of outer-arm reaches' intersection).  The shared
+;;     set must be active — outside a translate-gamma context this
+;;     case degrades to `#f`, which matches the pre-existing single-
+;;     block-only behavior.
+(define (arm-is-exit? cfg bid)
+  (or (terminal-block? (cfg-get-block cfg bid))
+      (arm-is-multi-block-exit? cfg bid)))
+
+(define (arm-is-multi-block-exit? cfg bid)
+  (define shared (current-shared-set))
+  (cond
+    [(not shared) #f]
+    [else
+     (define reach (arm-reach-set cfg bid))
+     (and (arm-leaves-all-ret-throw? cfg reach)
+          (reach-sets-disjoint? reach shared))]))
 
 ;; Walk the then-arm forward (via arm-advance), then walk the else-arm
 ;; until we hit a bid visited on the then-arm.  That bid is the Gamma

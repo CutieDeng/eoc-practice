@@ -34,14 +34,19 @@
 ;;     terminal Gamma: each sub-region is built by recursing into
 ;;     translate-segment and installing the returned ret / throw
 ;;     payload as the sub-region's sink.  An early-exit sitting
-;;     INSIDE a standard diamond's arm is also tolerated as long as
-;;     it is single-block (Term:ret / Term:throw): the outer arm-
-;;     walk skips past the exit via arm-advance, and the inner cond
-;;     lowers naturally as an asymmetric early-exit Gamma inside the
-;;     outer arm's sub-region.
+;;     INSIDE a standard diamond's arm — single-block or multi-
+;;     block — is also tolerated: translate-gamma precomputes each
+;;     outer arm's full forward-reach, derives the shared set (their
+;;     intersection), and passes it via `current-shared-set`, which
+;;     lets `arm-advance` recognise any exit subtree whose reach is
+;;     disjoint from the shared set and skip past it to find the
+;;     outer join.  Inside the outer arm's sub-region, the inner
+;;     cond lowers via the asymmetric early-exit path: the dispatch
+;;     checks whether the active stop-bid lies in exactly one arm's
+;;     reach-set; if so the other arm's reach-set becomes the exit
+;;     sub-region (possibly spanning many blocks).
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, multi-block early-exit nested inside
-;;     another Gamma arm, any early-exit inside a Theta loop body,
+;;     (switch, try/catch, any early-exit inside a Theta loop body,
 ;;     or a loop header with multiple back-edges) error from
 ;;     cfg->rvsdg;
 ;;     `java-compile-class` catches each exception per method rather
@@ -115,8 +120,8 @@
                  gamma-early-exit-both-arms
                  gamma-early-exit-asymmetric
                  gamma-early-exit-multi-block-arm
-                 gamma-early-exit-inside-gamma-single-block)
+                 gamma-early-exit-inside-gamma-single-block
+                 gamma-early-exit-inside-gamma-multi-block)
     'deferred  '(switch-recovery kappa-recovery
-                 gamma-early-exit-inside-region-multi-block
                  gamma-early-exit-inside-theta
                  multi-latch-loops)))
