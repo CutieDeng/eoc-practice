@@ -27,11 +27,17 @@
 ;;     to an asymmetric early-exit Gamma: the exit sub-region owns
 ;;     the return / throw sink while the continue sub-region is a no-
 ;;     op; translate-segment then resumes from the continuing
-;;     branch's block in the outer region.
+;;     branch's block in the outer region.  If instead both arms are
+;;     multi-block yet each arm's reach-set (walked over Term:jump /
+;;     Term:cond) contains only ret / throw leaves AND the two
+;;     reach-sets are disjoint, the cond lowers as a multi-block
+;;     terminal Gamma: each sub-region is built by recursing into
+;;     translate-segment and installing the returned ret / throw
+;;     payload as the sub-region's sink.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, multi-block early-exit arms, early-exit
-;;     nested inside another Gamma / Theta, or a loop header with
-;;     multiple back-edges) error from cfg->rvsdg;
+;;     (switch, try/catch, early-exit nested inside another Gamma /
+;;     Theta, or a loop header with multiple back-edges) error from
+;;     cfg->rvsdg;
 ;;     `java-compile-class` catches each exception per method rather
 ;;     than aborting the whole class.
 ;;
@@ -101,8 +107,8 @@
                  theta-multi-block-body theta-gamma-inside-body
                  nested-thetas theta-inside-gamma
                  gamma-early-exit-both-arms
-                 gamma-early-exit-asymmetric)
+                 gamma-early-exit-asymmetric
+                 gamma-early-exit-multi-block-arm)
     'deferred  '(switch-recovery kappa-recovery
-                 gamma-early-exit-multi-block-arm
                  gamma-early-exit-inside-region
                  multi-latch-loops)))

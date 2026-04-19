@@ -604,6 +604,88 @@
     (check-not-false (memq 'return (node-ops r))
                      "parent region should still have a top-level return from L_END"))
 
+  ;; ----- Gamma early-exit: multi-block arms (terminal Gamma) -----
+  (test-case "multi-block exit arms both end in ret → terminal Gamma"
+    ;; int m(int x, int y) {
+    ;;   if (x == 0) {                            // L_THEN arm (multi-block)
+    ;;     if (y > 0) return y;                   //   inner cond, both branches ret
+    ;;     else       return -y;
+    ;;   } else {                                 // L_ELSE arm (multi-block)
+    ;;     if (y > 0) return y * 2;               //   inner cond, both branches ret
+    ;;     else       return y * 3;
+    ;;   }
+    ;; }
+    ;;
+    ;; Both outer arms' reach-sets contain an inner Term:cond plus two
+    ;; ret blocks.  Reach-sets are disjoint (no shared join) → the
+    ;; outer cond must lower as a terminal Gamma whose two sub-regions
+    ;; each host an inner terminal Gamma and install their own
+    ;; returns internally.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_THEN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFLE "L_ELSE_NEG")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE_POS")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'IMUL)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE_NEG")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'IMUL)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFLE "L_THEN_NEG")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN_POS")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN_NEG")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'INEG)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region holds exactly one outer Gamma.
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "parent region should contain exactly one outer Gamma")
+    ;; No top-level return at the parent — both arms terminate inside.
+    (check-false (memq 'return (node-ops r))
+                 "multi-block terminal Gamma should not leak a top-level return")
+    (define outer-gamma (car gammas))
+    (define sub-regions (Gamma-regions outer-gamma))
+    (check-equal? (length sub-regions) 2)
+    ;; Each outer sub-region must itself host exactly one inner Gamma
+    ;; (the nested if/else) and at least one 'return sink reachable
+    ;; through one of its own sub-regions.
+    (for ([sub (in-list sub-regions)]
+          [which (in-list '(then else))])
+      (define inner-gammas
+        (for/list ([kv (in-ordered-map (Region-node->value sub))]
+                   #:when (Gamma? (cdr kv)))
+          (cdr kv)))
+      (check-equal? (length inner-gammas) 1
+                    (format "outer ~a sub-region should host one inner Gamma" which))
+      (define inner-sub-regions (Gamma-regions (car inner-gammas)))
+      (define inner-return-count
+        (for/sum ([ir (in-list inner-sub-regions)])
+          (for/sum ([kv (in-ordered-map (Region-node->value ir))])
+            (define v (cdr kv))
+            (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
+      (check-equal? inner-return-count 2
+                    (format "inner Gamma in ~a arm should hold two 'return sinks"
+                            which))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

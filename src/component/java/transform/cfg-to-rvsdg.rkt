@@ -29,6 +29,14 @@
 ;;     Gamma: the exit sub-region owns the return / throw sink while
 ;;     the continue sub-region is a no-op; translate-segment resumes
 ;;     from the continuing branch's block in the outer region.
+;;     A Term:cond whose two arms each span multiple blocks but whose
+;;     reach-sets are disjoint and contain only ret/throw leaves also
+;;     lowers to a terminal Gamma; each multi-block sub-region is
+;;     built by recursing into translate-segment with stop-bid=#f and
+;;     installing the resulting payload's ret / throw sink inside the
+;;     sub-region (any inner diamonds / loops within the exit arm are
+;;     materialised as nested Gamma / Theta nodes inside the sub-
+;;     region just as they would be in any other region context).
 ;;
 ;;   - A single natural loop is lowered to a Theta node.  The header
 ;;     must end in Term:cond; one arm leads to the latch (continue)
@@ -42,10 +50,11 @@
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
-;;   - Multi-block early-exit arms (an arm that walks several blocks
-;;     before its terminating Term:ret / Term:throw)
 ;;   - early-exit Gamma nested inside another Gamma arm or a Theta
-;;     loop body
+;;     loop body (detection sits in the outer region's cond
+;;     dispatch; a cond sitting inside a Gamma arm still sees the
+;;     join block as a converging sibling rather than a "disjoint
+;;     exit")
 ;;   - try/catch (Kappa recovery)
 ;;
 ;; Each of the above raises with a self-identifying error.
@@ -216,8 +225,7 @@
         (define else-term? (terminal-block? else-blk))
         (cond
           [(and then-term? else-term?)
-           ;; Both arms exit (Term:ret / Term:throw).  Lower as a
-           ;; Gamma whose sub-regions each terminate internally.
+           ;; Both arms are single-block exits (Term:ret / Term:throw).
            (translate-terminal-gamma cfg pred then-bid else-bid
                                      region1 var->out1)]
           [(or then-term? else-term?)
@@ -235,14 +243,31 @@
                                               region1 var->out1))
            (translate-segment cfg continue-bid stop-bid region2 var->out2)]
           [else
-           (define-values (region2 var->out2 join-bid)
-             (translate-gamma cfg start-bid pred then-bid else-bid
-                              region1 var->out1))
+           ;; Neither arm is a single-block exit.  Before falling
+           ;; back to the diamond path, check whether this is actually
+           ;; a multi-block terminal Gamma: both arms' reach-sets end
+           ;; exclusively in ret/throw and the two reach-sets are
+           ;; disjoint (i.e. they never merge at a common join).
+           (define then-reach (arm-reach-set cfg then-bid))
+           (define else-reach (arm-reach-set cfg else-bid))
            (cond
-             [join-bid
-              (translate-segment cfg join-bid stop-bid region2 var->out2)]
+             [(and (arm-leaves-all-ret-throw? cfg then-reach)
+                   (arm-leaves-all-ret-throw? cfg else-reach)
+                   (reach-sets-disjoint? then-reach else-reach))
+              ;; Multi-block terminal Gamma: build each sub-region by
+              ;; recursing into translate-segment until it hits its
+              ;; own ret / throw payload.
+              (translate-terminal-gamma cfg pred then-bid else-bid
+                                        region1 var->out1)]
              [else
-              (values region2 var->out2 #f)])])]
+              (define-values (region2 var->out2 join-bid)
+                (translate-gamma cfg start-bid pred then-bid else-bid
+                                 region1 var->out1))
+              (cond
+                [join-bid
+                 (translate-segment cfg join-bid stop-bid region2 var->out2)]
+                [else
+                 (values region2 var->out2 #f)])])])]
        [(Term:switch _ _ _)
         (error 'translate-segment
                "Term:switch at ~a not yet supported" start-bid)]
@@ -383,37 +408,85 @@
 ;; Terminal Gamma (gamma-early-exit, both arms terminate)
 ;; ============================================================
 ;;
-;; Scope: each arm is a single CfgBlock whose terminator is Term:ret
-;; or Term:throw.  No phis on either arm's block.  No common join.
+;; Scope: each arm's reach-set (walked forward over Term:jump /
+;; Term:cond successors) has only Term:ret / Term:throw as leaf
+;; terminators, and the two reach-sets are disjoint.  Single-block
+;; arms (reach-set = {arm-bid}) are the common Java case; multi-block
+;; arms carry internal Term:jump chains or nested Term:cond diamonds,
+;; all ultimately terminating in ret/throw.  No phis on either arm's
+;; entry block.
 ;;
 ;; The Gamma has 0 outputs.  Each sub-region:
 ;;   - region-arg(0, n-ctx) producer mirrors ctx-vars.
-;;   - the arm block's VfInsns are translated.
-;;   - install-return / install-throw materialises the terminator
-;;     directly inside the sub-region.
-;; No region-result node is emitted; the return / throw is the
-;; sub-region's sink.
+;;   - translate-segment is invoked with stop-bid=#f so the arm's
+;;     entire reach-set is walked recursively (inner diamonds emit
+;;     nested Gamma nodes inside the sub-region; inner loops emit
+;;     Theta nodes; further exit patterns stay internal).
+;;   - install-return / install-throw materialises the final sink
+;;     using the payload returned by translate-segment.  If the arm
+;;     already ended via a nested terminal Gamma ('already-terminated
+;;     payload), no additional sink is installed.
 
 (define (terminal-block? blk)
   (define t (CfgBlock-terminator blk))
   (or (Term:ret? t) (Term:throw? t)))
 
-;; Walk both arm blocks once; collect every parent-scope VarId read
-;; by any VfInsn input or by the block's terminator (Term:ret values
-;; / Term:throw exception), excluding VarIds locally defined in that
-;; same block (phi outputs + VfInsn outputs).  Returns an ordered-map
-;; used as a set of VarId -> #t.
-(define (collect-terminal-arm-ctx cfg parent-var->out arm-bids)
-  (define (block-locals blk)
-    (define s0
-      (for/fold ([s (ordered-map-empty var-id-compare)])
-                ([phi (in-pvector (CfgBlock-phis blk))])
-        (ordered-map-set s (PhiInsn-output phi) #t)))
-    (for/fold ([s s0]) ([insn (in-pvector (CfgBlock-insns blk))])
-      (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
-                         #:when (VarId? o))
-        (ordered-map-set s o #t))))
-  (define (consider x locals acc)
+;; Forward reach-set from start-bid, walking only via Term:jump and
+;; Term:cond successors.  Blocks whose terminator is something else
+;; (ret / throw / switch / #f) are included as leaves but not
+;; expanded.  Returns an ordered-map used as a set of BlockId -> #t.
+(define (arm-reach-set cfg start-bid)
+  (let loop ([work (list start-bid)]
+             [seen (ordered-map-empty block-id-compare)])
+    (cond
+      [(null? work) seen]
+      [else
+       (define b (car work))
+       (define rest (cdr work))
+       (cond
+         [(ordered-map-ref seen b #f) (loop rest seen)]
+         [else
+          (define seen* (ordered-map-set seen b #t))
+          (define succs
+            (match (CfgBlock-terminator (cfg-get-block cfg b))
+              [(Term:jump n) (list n)]
+              [(Term:cond _ tb eb) (list tb eb)]
+              [_ '()]))
+          (loop (append succs rest) seen*)])])))
+
+;; Every block in the reach-set has a terminator that is either
+;; internal to the arm (Term:jump / Term:cond) or is a ret / throw
+;; leaf.  Rejects switch / unreachable / #f leaves because they
+;; cannot be materialised as a Gamma-arm sink.
+(define (arm-leaves-all-ret-throw? cfg reach-set)
+  (for/and ([kv (in-ordered-map reach-set)])
+    (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
+    (or (Term:jump? t) (Term:cond? t)
+        (Term:ret? t) (Term:throw? t))))
+
+(define (reach-sets-disjoint? s1 s2)
+  (for/and ([kv (in-ordered-map s1)])
+    (not (ordered-map-ref s2 (car kv) #f))))
+
+;; Walk every block in the arm's reach-set and collect parent-scope
+;; VarIds read by any VfInsn input or by the block's terminator
+;; (Term:ret values, Term:throw exception, Term:cond predicate),
+;; excluding VarIds locally defined anywhere in the arm (union of phi
+;; outputs + VfInsn outputs across the reach-set).  Returns an
+;; ordered-map used as a set of VarId -> #t.
+(define (collect-arm-ctx cfg parent-var->out reach-set)
+  (define locals
+    (for/fold ([s (ordered-map-empty var-id-compare)])
+              ([kv (in-ordered-map reach-set)])
+      (define blk (cfg-get-block cfg (car kv)))
+      (define s1
+        (for/fold ([s s]) ([phi (in-pvector (CfgBlock-phis blk))])
+          (ordered-map-set s (PhiInsn-output phi) #t)))
+      (for/fold ([s s1]) ([insn (in-pvector (CfgBlock-insns blk))])
+        (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
+                           #:when (VarId? o))
+          (ordered-map-set s o #t)))))
+  (define (consider x acc)
     (cond
       [(and (VarId? x)
             (not (ordered-map-ref locals x #f))
@@ -421,27 +494,36 @@
        (ordered-map-set acc x #t)]
       [else acc]))
   (for/fold ([acc (ordered-map-empty var-id-compare)])
-            ([bid (in-list arm-bids)])
-    (define blk (cfg-get-block cfg bid))
-    (define locals (block-locals blk))
+            ([kv (in-ordered-map reach-set)])
+    (define blk (cfg-get-block cfg (car kv)))
     (define acc1
       (for/fold ([a acc]) ([insn (in-pvector (CfgBlock-insns blk))])
         (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
-          (consider x locals a))))
+          (consider x a))))
     (define term-reads
       (match (CfgBlock-terminator blk)
         [(Term:ret vs) vs]
         [(Term:throw v) (pvector v)]
+        [(Term:cond p _ _) (pvector p)]
         [_ (pvector-empty)]))
     (for/fold ([a acc1]) ([x (in-pvector term-reads)])
-      (consider x locals a))))
+      (consider x a))))
 
-(define (build-terminal-arm-region cfg branch-bid ctx-vars which)
+;; Build a sub-region for an exit arm.  Works for single-block arms
+;; (reach-set of size 1, entry block ends in Term:ret / Term:throw)
+;; and for multi-block arms (reach-set contains Term:jump / Term:cond
+;; internal blocks in addition to ret / throw leaves).  Calls
+;; translate-segment with stop-bid=#f so the arm's entire control
+;; flow lowers inside the sub-region; the returned payload selects
+;; the sink to install.  No phis are allowed on the arm's entry
+;; block (other arm preds are filtered by the dispatch's disjointness
+;; check).
+(define (build-exit-arm-region cfg branch-bid ctx-vars which)
   (define n-ctx (pvector-length ctx-vars))
-  (define blk (cfg-get-block cfg branch-bid))
-  (unless (= 0 (pvector-length (CfgBlock-phis blk)))
-    (error 'build-terminal-arm-region
-           "terminal arm ~a (~a) has phis, not yet supported"
+  (define entry-blk (cfg-get-block cfg branch-bid))
+  (unless (= 0 (pvector-length (CfgBlock-phis entry-blk)))
+    (error 'build-exit-arm-region
+           "exit arm ~a (~a) entry block has phis, not yet supported"
            branch-bid which))
   (define sub0 (region-empty))
   (define-values (sub1 _arg-nid _arg-ins arg-outs)
@@ -451,27 +533,34 @@
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector arg-outs)])
       (ordered-map-set m v oid)))
-  (define-values (sub2 sub-var->out2)
-    (translate-insns (CfgBlock-insns blk) sub1 sub-var->out))
-  (match (CfgBlock-terminator blk)
-    [(Term:ret vs)  (install-return sub2 sub-var->out2 vs)]
-    [(Term:throw v) (install-throw  sub2 sub-var->out2 v)]
-    [other (error 'build-terminal-arm-region
-                  "expected Term:ret or Term:throw at ~a, got ~s"
-                  branch-bid other)]))
+  (define-values (sub2 sub-var->out2 payload)
+    (translate-segment cfg branch-bid #f sub1 sub-var->out))
+  (match payload
+    [(cons 'ret vs)      (install-return sub2 sub-var->out2 vs)]
+    [(cons 'throw v)     (install-throw  sub2 sub-var->out2 v)]
+    ['already-terminated sub2]
+    [other (error 'build-exit-arm-region
+                  "exit arm ~a (~a) did not terminate with ret/throw: payload=~s"
+                  branch-bid which other)]))
 
 ;; Returns (values region var->out 'already-terminated).  Caller
 ;; treats the terminal-Gamma as the segment's terminator and stops
 ;; translating further blocks.
 (define (translate-terminal-gamma cfg pred then-bid else-bid region var->out)
+  (define then-reach (arm-reach-set cfg then-bid))
+  (define else-reach (arm-reach-set cfg else-bid))
+  (define then-ctx (collect-arm-ctx cfg var->out then-reach))
+  (define else-ctx (collect-arm-ctx cfg var->out else-reach))
   (define ctx-set
-    (collect-terminal-arm-ctx cfg var->out (list then-bid else-bid)))
+    (for/fold ([acc then-ctx])
+              ([kv (in-ordered-map else-ctx)])
+      (ordered-map-set acc (car kv) #t)))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
-  (define then-region (build-terminal-arm-region cfg then-bid ctx-vars 'then))
-  (define else-region (build-terminal-arm-region cfg else-bid ctx-vars 'else))
+  (define then-region (build-exit-arm-region cfg then-bid ctx-vars 'then))
+  (define else-region (build-exit-arm-region cfg else-bid ctx-vars 'else))
 
   (define gamma-val (Gamma (list then-region else-region)))
 
@@ -540,13 +629,13 @@
   (define exit-bid     (if then-exits? then-bid else-bid))
   (define continue-bid (if then-exits? else-bid then-bid))
 
-  (define ctx-set
-    (collect-terminal-arm-ctx cfg var->out (list exit-bid)))
+  (define exit-reach (arm-reach-set cfg exit-bid))
+  (define ctx-set (collect-arm-ctx cfg var->out exit-reach))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
-  (define exit-region (build-terminal-arm-region cfg exit-bid ctx-vars 'exit))
+  (define exit-region (build-exit-arm-region cfg exit-bid ctx-vars 'exit))
   (define noop-region (build-noop-arm-region n-ctx))
 
   ;; Place sub-regions in [then, else] order so the raw predicate
