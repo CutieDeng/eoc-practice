@@ -686,6 +686,93 @@
                     (format "inner Gamma in ~a arm should hold two 'return sinks"
                             which))))
 
+  ;; ----- Gamma early-exit: inner single-block early-exit inside
+  ;; an outer standard diamond arm -----
+  (test-case "inner single-block early-exit inside outer diamond arm"
+    ;; int m(int x, int y) {
+    ;;   if (y > 0) {
+    ;;     if (x == 0) return 42;      // inner asymmetric early-exit
+    ;;     y = y * 2;                  //   continues inside outer-then
+    ;;   } else {
+    ;;     y = 10;                     // outer-else
+    ;;   }
+    ;;   return y;
+    ;; }
+    ;;
+    ;; Outer cond is a standard diamond whose join is L_END (both outer
+    ;; arms converge through either a ret/throw or a fallthrough that
+    ;; reaches L_END).  The inner cond inside the outer-then arm has
+    ;; ONE single-block early-exit leaf (L_RET42) and ONE continuing
+    ;; arm (L_CONT) that reaches the outer join.  The outer walk must
+    ;; skip past the inner exit to find L_END, and the inner cond
+    ;; lowers as an asymmetric early-exit Gamma inside the outer-then
+    ;; sub-region.  Parent region keeps its own top-level return for
+    ;; L_END's IRETURN of the merged y.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFLE "L_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_THEN")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFNE "L_CONT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_RET42")
+                       (mk-insn 'BIPUSH 42)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_CONT")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'IMUL)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_END")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'BIPUSH 10)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'CUTIEDENG-LABEL "L_END")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region: exactly one outer Gamma + top-level return from
+    ;; L_END.  The inner Gamma lives inside the outer-then sub-region,
+    ;; not at the parent.
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "parent region should contain exactly one outer Gamma")
+    (check-not-false (memq 'return (node-ops r))
+                     "parent region should keep its top-level return from L_END")
+    ;; Outer Gamma has two sub-regions; exactly one of them hosts an
+    ;; inner Gamma, and that inner Gamma has exactly one exit sub-
+    ;; region with a 'return sink (asymmetric early-exit shape).
+    (define outer (car gammas))
+    (define sub-regions (Gamma-regions outer))
+    (check-equal? (length sub-regions) 2)
+    (define (region-inner-gammas sub)
+      (for/list ([kv (in-ordered-map (Region-node->value sub))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (define inner-counts (map (lambda (s) (length (region-inner-gammas s))) sub-regions))
+    (check-equal? (sort inner-counts <) '(0 1)
+                  "exactly one outer sub-region should host the inner Gamma")
+    (define inner-g
+      (for/or ([sub (in-list sub-regions)])
+        (define igs (region-inner-gammas sub))
+        (and (pair? igs) (car igs))))
+    (check-not-false inner-g "inner Gamma not found")
+    (define inner-subs (Gamma-regions inner-g))
+    (check-equal? (length inner-subs) 2)
+    (define inner-return-count
+      (for/sum ([isub (in-list inner-subs)])
+        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+          (define v (cdr kv))
+          (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
+    (check-equal? inner-return-count 1
+                  "inner asymmetric Gamma should host exactly one 'return sink"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

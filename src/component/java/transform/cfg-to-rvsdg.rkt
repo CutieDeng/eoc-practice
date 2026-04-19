@@ -37,6 +37,13 @@
 ;;     sub-region (any inner diamonds / loops within the exit arm are
 ;;     materialised as nested Gamma / Theta nodes inside the sub-
 ;;     region just as they would be in any other region context).
+;;     When the inner cond sitting INSIDE a standard diamond arm has
+;;     exactly one single-block Term:ret / Term:throw arm (and the
+;;     other arm continues to the outer join), the outer arm-walk
+;;     skips past the exit via `arm-advance`, and the inner cond
+;;     lowers as an asymmetric early-exit Gamma inside the outer
+;;     arm's sub-region through the normal translate-segment
+;;     recursion.
 ;;
 ;;   - A single natural loop is lowered to a Theta node.  The header
 ;;     must end in Term:cond; one arm leads to the latch (continue)
@@ -50,11 +57,12 @@
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
-;;   - early-exit Gamma nested inside another Gamma arm or a Theta
-;;     loop body (detection sits in the outer region's cond
-;;     dispatch; a cond sitting inside a Gamma arm still sees the
-;;     join block as a converging sibling rather than a "disjoint
-;;     exit")
+;;   - multi-block early-exit nested inside another Gamma arm or a
+;;     Theta loop body (single-block inner early-exits inside a Gamma
+;;     arm are handled; multi-block inner exit reach-sets still hit
+;;     the "neither arm is single-block exit" fall-through and would
+;;     need the outer arm-walk to project the inner reach-set away
+;;     from the outer join search)
 ;;   - try/catch (Kappa recovery)
 ;;
 ;; Each of the above raises with a self-identifying error.
@@ -674,15 +682,33 @@
 ;; advanced (ret / throw / switch / unreachable, or — when
 ;; `current-arm-scope` is set — when the next bid would lie outside
 ;; that scope).
+;;
+;; Special case for early-exit-inside-region: if the Term:cond has
+;; exactly one arm that is a single-block Term:ret / Term:throw (and
+;; the other arm is not), advance through the non-exit arm rather
+;; than trying to converge the two.  When translate-segment later
+;; visits this block, its own Term:cond dispatch lowers the inner
+;; cond as an asymmetric early-exit Gamma inside the outer arm's
+;; sub-region, so the outer walk just needs to skip past the exit
+;; arm to find the outer join.  A Term:cond where both arms are
+;; single-block exits still returns #f (the outer arm is dead past
+;; this point, and any attempt to use that arm in a standard diamond
+;; will error later with a clear message).
 (define (arm-advance cfg bid)
   (define term (CfgBlock-terminator (cfg-get-block cfg bid)))
   (match term
     [(Term:jump n) (and (arm-scope-contains? n) n)]
     [(Term:cond _ tb eb)
      (cond
-       [(and (arm-scope-contains? tb) (arm-scope-contains? eb))
-        (find-branch-join cfg tb eb)]
-       [else #f])]
+       [(not (and (arm-scope-contains? tb) (arm-scope-contains? eb))) #f]
+       [else
+        (define tb-exit? (terminal-block? (cfg-get-block cfg tb)))
+        (define eb-exit? (terminal-block? (cfg-get-block cfg eb)))
+        (cond
+          [(and tb-exit? eb-exit?) #f]
+          [tb-exit? eb]
+          [eb-exit? tb]
+          [else (find-branch-join cfg tb eb)])])]
     [_ #f]))
 
 ;; Walk the then-arm forward (via arm-advance), then walk the else-arm
@@ -748,6 +774,8 @@
        (match term
          [(Term:jump n) (walk n v2)]
          [(Term:cond _ tb eb) (walk eb (walk tb v2))]
+         [(Term:ret _) v2]
+         [(Term:throw _) v2]
          [_ (error 'arm-blocks-set
                    "unsupported arm-internal terminator ~s at ~a"
                    term bid)])]))

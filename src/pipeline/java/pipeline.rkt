@@ -33,10 +33,16 @@
 ;;     reach-sets are disjoint, the cond lowers as a multi-block
 ;;     terminal Gamma: each sub-region is built by recursing into
 ;;     translate-segment and installing the returned ret / throw
-;;     payload as the sub-region's sink.
+;;     payload as the sub-region's sink.  An early-exit sitting
+;;     INSIDE a standard diamond's arm is also tolerated as long as
+;;     it is single-block (Term:ret / Term:throw): the outer arm-
+;;     walk skips past the exit via arm-advance, and the inner cond
+;;     lowers naturally as an asymmetric early-exit Gamma inside the
+;;     outer arm's sub-region.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, early-exit nested inside another Gamma /
-;;     Theta, or a loop header with multiple back-edges) error from
+;;     (switch, try/catch, multi-block early-exit nested inside
+;;     another Gamma arm, any early-exit inside a Theta loop body,
+;;     or a loop header with multiple back-edges) error from
 ;;     cfg->rvsdg;
 ;;     `java-compile-class` catches each exception per method rather
 ;;     than aborting the whole class.
@@ -108,7 +114,9 @@
                  nested-thetas theta-inside-gamma
                  gamma-early-exit-both-arms
                  gamma-early-exit-asymmetric
-                 gamma-early-exit-multi-block-arm)
+                 gamma-early-exit-multi-block-arm
+                 gamma-early-exit-inside-gamma-single-block)
     'deferred  '(switch-recovery kappa-recovery
-                 gamma-early-exit-inside-region
+                 gamma-early-exit-inside-region-multi-block
+                 gamma-early-exit-inside-theta
                  multi-latch-loops)))
