@@ -245,6 +245,26 @@
   ;; Allocate entry-stack VarIds
   (define-values (init-stack vc1) (alloc-stack entry-h vc))
 
+  ;; For exception-handler entries (entry-h > 0) the JVM supplies the
+  ;; exception reference on the operand stack at height 1; cross-block
+  ;; stack consistency is enforced by the verifier.  To keep the SSA
+  ;; form complete -- every VarId must have a defining VfInsn or
+  ;; PhiInsn -- we synthesise one `'java/exception-ref` producer per
+  ;; entry-stack slot.  Inputs are empty, the outputs are exactly the
+  ;; freshly-allocated init-stack VarIds.  Downstream Kappa lowering
+  ;; reinterprets these producers as the handler-region's region-arg
+  ;; exception-ref output; before that they lower to harmless
+  ;; `Simple 'java/exception-ref` nodes in cfg-to-rvsdg.
+  (define entry-producer-pv
+    (cond
+      [(zero? entry-h) (pvector-empty)]
+      [else
+       (for/pvector ([v (in-pvector init-stack)])
+         (VfInsn 'java/exception-ref
+                 (pvector-empty)
+                 (pvector-cons-right (pvector-empty) v)
+                 #f #f))]))
+
   (define insns-pv (JvmBB-insns jvmbb))
   (define n (pvector-length insns-pv))
 
@@ -256,7 +276,7 @@
 
   ;; Walk body instructions
   (define-values (vf-pv stack-out vc2)
-    (for/fold ([pv (pvector-empty)] [stack init-stack] [vc vc1])
+    (for/fold ([pv entry-producer-pv] [stack init-stack] [vc vc1])
               ([i (in-range body-count)])
       (define insn (pvector-ref insns-pv i))
       (define-values (vf stack* vc*) (translate-insn insn stack vc))

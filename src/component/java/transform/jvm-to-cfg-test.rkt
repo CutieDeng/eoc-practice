@@ -246,6 +246,55 @@
                   #f
                   "handler block is not covered by its own try range"))
 
+  (test-case "try/catch: handler block begins with a synthetic 'java/exception-ref producer"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER"
+                                "java/lang/RuntimeException"))
+                 #:desc "(I)I"))
+    (define cfg (jvm-method->cfg m))
+    ;; Locate the handler block via the exception-table entry.
+    (define table (ordered-map-ref (Cfg-info cfg) 'java/exception-table #f))
+    (define handler-bid (caddr (pvector-ref table 0)))
+    (define handler-blk (ordered-map-ref (Cfg-blocks cfg) handler-bid #f))
+    (check-not-false handler-blk)
+    (define insns (CfgBlock-insns handler-blk))
+    (check-true (> (pvector-length insns) 0)
+                "handler block should have at least the synthetic producer + ASTORE body")
+    (define first-insn (pvector-ref insns 0))
+    (check-equal? (VfInsn-op first-insn) 'java/exception-ref
+                  "handler block's first insn should be the synthetic exception-ref producer")
+    (check-equal? (pvector-length (VfInsn-inputs first-insn)) 0
+                  "exception-ref producer takes no inputs")
+    (check-equal? (pvector-length (VfInsn-outputs first-insn)) 1
+                  "exception-ref producer produces exactly one output (stack height 1)")
+    ;; The producer's output is consumed as the first ASTORE's input.
+    (define astore (pvector-ref insns 1))
+    (check-equal? (VfInsn-op astore) 'ASTORE)
+    (check-equal? (pvector-ref (VfInsn-inputs astore) 0)
+                  (pvector-ref (VfInsn-outputs first-insn) 0)
+                  "ASTORE's first input is the exception-ref producer's output"))
+
+  (test-case "non-handler blocks do not carry a synthetic exception-ref producer"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define cfg (jvm-method->cfg m))
+    (for ([kv (in-ordered-map (Cfg-blocks cfg))])
+      (define insns (CfgBlock-insns (cdr kv)))
+      (for ([insn (in-pvector insns)])
+        (check-false (eq? (VfInsn-op insn) 'java/exception-ref)
+                     "no block should synthesize an exception-ref in a try-free method"))))
+
   (test-case "method without try/catch has no exception-table key"
     (define m
       (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
