@@ -54,9 +54,18 @@
 ;;     continue arm.  The other arm — single-block or multi-block
 ;;     ending in ret / throw — lowers to the exit sub-region of an
 ;;     asymmetric Gamma installed inside the Theta body.
+;;     A loop header with exactly two back-edges is also handled: the
+;;     back-edges are collected into the Theta-Ctx's `latches` ordered
+;;     -map, and translate-theta dispatches to
+;;     `translate-theta-two-latch-body`, which recognises a 2-arm
+;;     diamond (body Term:jump chain → Term:cond whose two arms each
+;;     close back to the header via exactly one of the latches) and
+;;     lowers the diamond as a merge Gamma installed inside the Theta
+;;     body region; the Gamma's outputs become the Theta's phi
+;;     results.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, or a loop header with multiple back-
-;;     edges) error from cfg->rvsdg;
+;;     (switch, try/catch, or a loop header with 3+ back-edges) error
+;;     from cfg->rvsdg;
 ;;     `java-compile-class` catches each exception per method rather
 ;;     than aborting the whole class.
 ;;
@@ -131,6 +140,6 @@
                  gamma-early-exit-inside-gamma-single-block
                  gamma-early-exit-inside-gamma-multi-block
                  gamma-early-exit-inside-theta-single-block
-                 gamma-early-exit-inside-theta-multi-block)
-    'deferred  '(switch-recovery kappa-recovery
-                 multi-latch-loops)))
+                 gamma-early-exit-inside-theta-multi-block
+                 multi-latch-loops-two-arm-diamond)
+    'deferred  '(switch-recovery kappa-recovery)))

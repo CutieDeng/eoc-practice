@@ -1025,6 +1025,139 @@
     (check-not-false (memq 'ISTORE exit-ops)
                      "multi-block exit sub-region should contain the first block's ISTORE"))
 
+  ;; ----- multi-latch loop: 2-arm diamond, both arms distinct latches -----
+  (test-case "2-latch diamond while-loop lowers to a Theta with a merge Gamma in its body"
+    ;; while (slot1 != 0) {
+    ;;   if (slot0 == 0) { slot1 = slot1 - 1; }   ; latch 1
+    ;;   else            { slot1 = slot1 - 2; }   ; latch 2
+    ;; }
+    ;; return slot1;
+    ;;
+    ;; Two back-edges share the header L_HEAD: one from L_THEN and
+    ;; one from L_ELSE.  The body-entry cond fans out to these two
+    ;; latches, and `translate-theta-two-latch-body` must materialise
+    ;; a merge Gamma inside the Theta's body so that both arms'
+    ;; contributions to slot1 collapse into a single region-result.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region: exactly one Theta + final return.
+    (define thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length thetas) 1
+                  "parent region should contain exactly one Theta")
+    (check-not-false (memq 'return (node-ops r)))
+    ;; Theta body: exactly one inner Gamma (the latch merge).
+    (define body (Theta-region (car thetas)))
+    (define merges
+      (for/list ([kv (in-ordered-map (Region-node->value body))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length merges) 1
+                  "Theta body should host exactly one merge Gamma")
+    (define merge-g (car merges))
+    (define merge-subs (Gamma-regions merge-g))
+    (check-equal? (length merge-subs) 2
+                  "merge Gamma should have two sub-regions (one per latch)")
+    ;; Each merge sub-region must contain an ISUB + an ISTORE and a
+    ;; region-result (but no 'return sink).
+    (for ([sub (in-list merge-subs)] [i (in-naturals)])
+      (define ops
+        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+          (define v (cdr kv))
+          (cond [(Simple? v) (Simple-op v)] [else 'other])))
+      (check-not-false (memq 'ISUB ops)
+                       (format "merge sub-region ~a missing ISUB" i))
+      (check-not-false (memq 'ISTORE ops)
+                       (format "merge sub-region ~a missing ISTORE" i))
+      (check-false (memq 'return ops)
+                   (format "merge sub-region ~a should NOT contain a 'return" i))))
+
+  ;; ----- multi-latch loop: continue-style pure back-edge arm -----
+  (test-case "2-latch continue-style while-loop lowers to a Theta with a merge Gamma"
+    ;; while (slot1 != 0) {
+    ;;   if (slot0 != 0) { slot1 = slot1 - 1; }   ; fall-through latch
+    ;;   // else: plain continue (no body work, direct back-edge)
+    ;; }
+    ;; return slot1;
+    ;;
+    ;; L_CONT is a pure back-edge block (Term:jump only) and is still
+    ;; a valid latch: its only outgoing edge is the header jump.  The
+    ;; merge Gamma's "continue" sub-region is therefore nearly empty
+    ;; (region-arg + region-result) while the other arm carries the
+    ;; ISUB / ISTORE.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFNE "L_FT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_CONT")
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_FT")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length thetas) 1)
+    (define body (Theta-region (car thetas)))
+    (define merges
+      (for/list ([kv (in-ordered-map (Region-node->value body))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length merges) 1)
+    (define merge-subs (Gamma-regions (car merges)))
+    (check-equal? (length merge-subs) 2)
+    ;; Exactly one sub-region contains ISUB/ISTORE (the fall-through
+    ;; latch); the other is the pure-continue arm.
+    (define istores-per-sub
+      (for/list ([sub (in-list merge-subs)])
+        (for/sum ([kv (in-ordered-map (Region-node->value sub))])
+          (define v (cdr kv))
+          (if (and (Simple? v) (eq? (Simple-op v) 'ISTORE)) 1 0))))
+    (check-equal? (sort istores-per-sub <) '(0 1)
+                  "exactly one merge sub-region should host the fall-through ISTORE"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

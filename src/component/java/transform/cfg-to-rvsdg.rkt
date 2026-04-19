@@ -70,11 +70,27 @@
 ;;     Gamma installed inside the Theta's body region.  The
 ;;     existing asymmetric-Gamma dispatch is reused verbatim; no
 ;;     Theta-body-specific code path is needed.
+;;     A loop header with exactly two back-edges is handled by
+;;     `translate-theta-two-latch-body`: the body entry is allowed
+;;     to be a Term:jump chain that eventually dispatches via one
+;;     Term:cond whose two arms each close to the header via
+;;     exactly one distinct latch (per-arm scoped reach must be
+;;     disjoint and each arm's blocks must only exit through its
+;;     own latch or the header).  The diamond lowers to a merge
+;;     Gamma installed inside the Theta body region: the Gamma's
+;;     pred input is the dispatch Term:cond's var, the ctx inputs
+;;     are the union of both arms' live ctx vars, and the Gamma's
+;;     outputs (one per header phi) are produced by each sub-
+;;     region's region-result nodes, wired via pick-phi-source.
+;;     The resulting Gamma output VarIds then feed the Theta's
+;;     latch payload for every phi, so the single-latch and multi-
+;;     latch code paths share the same outer Theta shape.
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
 ;;   - try/catch (Kappa recovery)
-;;   - loop headers with multiple back-edges (multi-latch loops)
+;;   - loop headers with 3+ back-edges (only 1-latch and 2-latch
+;;     diamond loops are currently recognised)
 ;;
 ;; Each of the above raises with a self-identifying error.
 ;;
@@ -95,13 +111,15 @@
 ;; ============================================================
 ;;
 ;; Threaded through translate-segment so that the first entry into a
-;; loop header spawns a Theta.  We currently support at most one
-;; natural loop per CFG; the body from the header's body-arm to the
-;; latch may mix Term:jump steps with inner Gamma diamonds (each
-;; must converge before the latch).  The latch's back-edge closes
-;; to the header.
+;; loop header spawns a Theta.  The body from the header's body-arm
+;; to any latch may mix Term:jump steps with inner Gamma diamonds
+;; (each must converge before the latch).  Each latch's back-edge
+;; closes to the header.  `latches` is an ordered-map BlockId -> #t;
+;; a single-entry set covers the common single-latch case, a
+;; 2-entry set covers the 2-latch diamond pattern (e.g. an inner if
+;; whose two arms each `continue` via a distinct tail).
 ;;
-(struct Theta-Ctx (header latch) #:prefab)
+(struct Theta-Ctx (header latches) #:prefab)
 
 ;; Optional restriction on which BlockIds the arm-walking helpers
 ;; (`arm-advance`, `find-branch-join`, `arm-blocks-set`,
@@ -146,22 +164,25 @@
         (error 'cfg->rvsdg
                "ssa must publish 'java/ssa-param-names; run jvm-cfg->ssa first")))
 
-  ;; Detect loop structure.  Each back-edge becomes one entry in
-  ;; theta-ctxs (header-bid -> Theta-Ctx).  Multiple back-edges
-  ;; sharing a header (multi-latch loops, e.g. via `continue` from
-  ;; several paths) are still rejected; reducible nested loops are
-  ;; fine because each loop has a distinct header.
+  ;; Detect loop structure.  Each back-edge (latch . header)
+  ;; contributes its latch-bid to the header's Theta-Ctx latches
+  ;; set.  A reducible loop with a single latch produces a 1-entry
+  ;; set; a 2-arm continue-diamond (see translate-theta) produces a
+  ;; 2-entry set.  Nested loops have distinct headers and each gets
+  ;; its own ctx entry.
   (define back-edges (cfg-find-back-edges cfg))
   (define theta-ctxs
     (for/fold ([m (ordered-map-empty block-id-compare)])
               ([be (in-pvector back-edges)])
       (define latch (car be))
       (define header (cdr be))
-      (when (ordered-map-ref m header #f)
-        (error 'cfg->rvsdg
-               "loop header ~a has multiple back-edges (latches), not yet supported"
-               header))
-      (ordered-map-set m header (Theta-Ctx header latch))))
+      (define existing (ordered-map-ref m header #f))
+      (define latches
+        (cond
+          [existing (ordered-map-set (Theta-Ctx-latches existing) latch #t)]
+          [else (ordered-map-set (ordered-map-empty block-id-compare)
+                                 latch #t)]))
+      (ordered-map-set m header (Theta-Ctx header latches))))
 
   (define region0 (region-empty))
 
@@ -907,7 +928,7 @@
 ;; loops in them, and they would recurse indefinitely if asked to
 ;; "advance past" the latch (whose only successor is the header,
 ;; which in turn has a cond arm that re-enters the body).
-(define (theta-body-blocks cfg start latch header)
+(define (theta-body-blocks cfg start latches header)
   (let loop ([work (list start)] [s (ordered-map-empty block-id-compare)])
     (cond
       [(null? work) s]
@@ -920,7 +941,7 @@
          [else
           (define s* (ordered-map-set s b #t))
           (cond
-            [(equal? b latch)
+            [(ordered-map-ref latches b #f)
              ;; Latch included; its only outgoing edge goes to
              ;; header, which is the back-edge we refuse to cross.
              (loop rest s*)]
@@ -932,15 +953,15 @@
                  [_ '()]))
              (loop (append succs rest) s*)])])])))
 
-;; Body-arm check: starting from the cond-arm bid, do we reach the
-;; latch while remaining inside the body (i.e., never crossing the
-;; back-edge into `header`)?  Implemented as set-membership in
-;; `theta-body-blocks`, so it naturally tolerates inner Gamma
-;; diamonds just like the block-set walk.
-(define (body-arm-reaches-latch? cfg start latch header)
-  (and (ordered-map-ref
-        (theta-body-blocks cfg start latch header) latch #f)
-       #t))
+;; Body-arm check: starting from the cond-arm bid, do we reach any
+;; of the loop's latches while remaining inside the body (i.e.,
+;; never crossing the back-edge into `header`)?  Implemented as set-
+;; membership in `theta-body-blocks`, so it naturally tolerates
+;; inner Gamma diamonds just like the block-set walk.
+(define (body-arm-reaches-any-latch? cfg start latches header)
+  (define reach (theta-body-blocks cfg start latches header))
+  (for/or ([kv (in-ordered-map latches)])
+    (and (ordered-map-ref reach (car kv) #f) #t)))
 
 ;; ============================================================
 ;; Sub-region builder
@@ -1103,14 +1124,178 @@
              (for/list ([s (in-pvector srcs)]) s))))
 
 ;; ============================================================
+;; Multi-latch body: 2-arm diamond
+;; ============================================================
+;;
+;; Handles the common multi-latch pattern where two `continue`-like
+;; paths share the same loop header:
+;;
+;;     while (c) { ...; if (x) {...; continue;} else {...; continue;} }
+;;
+;; Structural requirement: walking body-entry-bid's Term:jump chain
+;; reaches a block whose Term:cond fans out to two distinct latches,
+;; each arm's scoped reach containing exactly one latch, the two
+;; reach-sets disjoint, and every boundary terminator closing back
+;; to `header-bid`.  Each arm becomes a sub-region of a Gamma whose
+;; outputs are the per-phi merged values; after the Gamma the body
+;; sub-var->out maps every header-phi-output VarId to the
+;; corresponding Gamma output.  Any other 2-latch shape (e.g. an
+;; arm ending in ret / throw, or more than two latches) is left to
+;; specialised paths (asymmetric-exit Gamma) or errors out.
+(define (translate-theta-two-latch-body cfg body-entry-bid header-bid
+                                        latches phis sub sub-var->out)
+  ;; Walk Term:jump chain from body-entry-bid, translating each
+  ;; block's insns, until we land on a Term:cond.  That cond is the
+  ;; diamond dispatch whose two arms each close via a distinct
+  ;; latch.
+  (define-values (dispatch-bid dispatch-term sub1 sub-var->out1)
+    (let loop ([bid body-entry-bid]
+               [s sub]
+               [sv sub-var->out])
+      (define blk (cfg-get-block cfg bid))
+      (unless (= 0 (pvector-length (CfgBlock-phis blk)))
+        (error 'translate-theta-two-latch-body
+               "body pre-dispatch block ~a has phis, not yet supported" bid))
+      (define-values (s* sv*)
+        (translate-insns (CfgBlock-insns blk) s sv))
+      (match (CfgBlock-terminator blk)
+        [(Term:jump n) (loop n s* sv*)]
+        [(and t (Term:cond _ _ _)) (values bid t s* sv*)]
+        [other
+         (error 'translate-theta-two-latch-body
+                "body pre-dispatch block ~a has unsupported terminator ~s"
+                bid other)])))
+
+  (define pred-var (Term:cond-cond dispatch-term))
+  (define then-bid (Term:cond-then-target dispatch-term))
+  (define else-bid (Term:cond-else-target dispatch-term))
+
+  ;; Per-arm scoped reach; each must cover exactly one of the two
+  ;; latches; reaches must be disjoint; every leaf terminator closes
+  ;; back to header-bid (no ret / throw / switch).
+  (define (arm-latch-for arm-bid which)
+    (define reach (arm-reach-set cfg arm-bid))
+    (define hits
+      (for/list ([kv (in-ordered-map reach)]
+                 #:when (ordered-map-ref latches (car kv) #f))
+        (car kv)))
+    (unless (= 1 (length hits))
+      (error 'translate-theta-two-latch-body
+             "~a arm (entry=~a, dispatch=~a) scoped reach contains ~a latches: ~s"
+             which arm-bid dispatch-bid (length hits) hits))
+    (values reach (car hits)))
+  (define-values (then-reach then-latch) (arm-latch-for then-bid 'then))
+  (define-values (else-reach else-latch) (arm-latch-for else-bid 'else))
+  (when (equal? then-latch else-latch)
+    (error 'translate-theta-two-latch-body
+           "both arms of dispatch ~a reach the same latch ~a; 2-latch diamond requires distinct latches"
+           dispatch-bid then-latch))
+  (unless (reach-sets-disjoint? then-reach else-reach)
+    (error 'translate-theta-two-latch-body
+           "arm reach-sets overlap at dispatch ~a; 2-latch diamond requires disjoint arms"
+           dispatch-bid))
+  (define (arm-closes-to-header? reach)
+    (for/and ([kv (in-ordered-map reach)])
+      (match (CfgBlock-terminator (cfg-get-block cfg (car kv)))
+        [(Term:jump n) (or (ordered-map-ref reach n #f)
+                           (equal? n header-bid))]
+        [(Term:cond _ tb eb) (and (ordered-map-ref reach tb #f)
+                                  (ordered-map-ref reach eb #f))]
+        [_ #f])))
+  (unless (and (arm-closes-to-header? then-reach)
+               (arm-closes-to-header? else-reach))
+    (error 'translate-theta-two-latch-body
+           "2-latch diamond arms at dispatch ~a must close back to header ~a only (no ret/throw)"
+           dispatch-bid header-bid))
+
+  ;; Unified ctx: union of the per-arm ctx-var sets, so each Gamma
+  ;; sub-region can share the same Gamma input layout.
+  (define then-ctx (collect-arm-ctx cfg sub-var->out1 then-reach))
+  (define else-ctx (collect-arm-ctx cfg sub-var->out1 else-reach))
+  (define combined-ctx-set
+    (for/fold ([s then-ctx]) ([kv (in-ordered-map else-ctx)])
+      (ordered-map-set s (car kv) #t)))
+  (define combined-ctx-vars
+    (for/pvector ([kv (in-ordered-map combined-ctx-set)]) (car kv)))
+  (define n-ctx (pvector-length combined-ctx-vars))
+  (define n-phis (pvector-length phis))
+
+  (define (build-arm arm-bid arm-latch-bid which)
+    (define arm0 (region-empty))
+    (define-values (arm1 _arg-nid _arg-ins arg-outs)
+      (region-add-node arm0 (Simple (list 'region-arg n-ctx)) 0 n-ctx))
+    (define arm-var->out
+      (for/fold ([m (ordered-map-empty var-id-compare)])
+                ([v (in-pvector combined-ctx-vars)]
+                 [oid (in-pvector arg-outs)])
+        (ordered-map-set m v oid)))
+    (define-values (arm2 arm-var->out2 payload)
+      (translate-segment cfg arm-bid header-bid arm1 arm-var->out))
+    (unless (eq? payload #f)
+      (error 'translate-theta-two-latch-body
+             "~a arm ~a did not close via back-edge (payload=~s)"
+             which arm-bid payload))
+    (define-values (arm3 _res-nid res-ins _res-outs)
+      (region-add-node arm2 (Simple (list 'region-result n-phis)) n-phis 0))
+    (for/fold ([r arm3])
+              ([phi (in-pvector phis)]
+               [iid (in-pvector res-ins)])
+      (define src-var (pick-phi-source phi arm-latch-bid which))
+      (define src-oid
+        (or (ordered-map-ref arm-var->out2 src-var #f)
+            (error 'translate-theta-two-latch-body
+                   "~a arm latch source ~a (phi-output ~a) undefined"
+                   which src-var (PhiInsn-output phi))))
+      (define-values (r* _w) (region-add-wire r src-oid iid))
+      r*))
+
+  (define then-region (build-arm then-bid then-latch 'then))
+  (define else-region (build-arm else-bid else-latch 'else))
+
+  ;; Install the merge Gamma in the body sub-region: 1 predicate +
+  ;; n-ctx inputs, n-phis outputs.
+  (define gamma-val (Gamma (list then-region else-region)))
+  (define-values (sub-g _gnid g-ins g-outs)
+    (region-add-node sub1 gamma-val (add1 n-ctx) n-phis))
+
+  (define pred-oid
+    (or (ordered-map-ref sub-var->out1 pred-var #f)
+        (error 'translate-theta-two-latch-body
+               "dispatch predicate ~a undefined" pred-var)))
+  (define-values (sub-p _pw)
+    (region-add-wire sub-g pred-oid (pvector-ref g-ins 0)))
+  (define sub-wired
+    (for/fold ([r sub-p])
+              ([v (in-pvector combined-ctx-vars)]
+               [i (in-naturals 1)])
+      (define src-oid
+        (or (ordered-map-ref sub-var->out1 v #f)
+            (error 'translate-theta-two-latch-body "ctx var ~a undefined" v)))
+      (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
+      r*))
+
+  ;; Bind each header-phi-output VarId to its Gamma output so the
+  ;; outer update-oids computation can look it up uniformly.
+  (define sub-var->out-final
+    (for/fold ([m sub-var->out1])
+              ([phi (in-pvector phis)]
+               [oid (in-pvector g-outs)])
+      (ordered-map-set m (PhiInsn-output phi) oid)))
+
+  (values sub-wired sub-var->out-final))
+
+;; ============================================================
 ;; Theta recovery (while-loop)
 ;; ============================================================
 ;;
-;; Scope: exactly one natural loop.  The header must end in
-;; Term:cond; one arm leads (possibly through Term:jump steps and/or
-;; inner convergent diamonds) to the latch, which jumps back to the
-;; header.  The other cond arm exits the loop.  Deviations raise
-;; self-identifying errors.
+;; Scope: a single natural loop.  The header must end in Term:cond;
+;; one arm leads (possibly through Term:jump steps and/or inner
+;; convergent diamonds) to one or more latches, each of which jumps
+;; back to the header.  The other cond arm exits the loop.  Single-
+;; latch loops use the straight translate-segment body walk;
+;; two-latch diamond loops (two `continue`-ing arms of an inner if)
+;; use `translate-theta-two-latch-body` to materialise a merge
+;; Gamma inside the body.  Deviations raise self-identifying errors.
 ;;
 ;; Sub-region layout:
 ;;   - `Simple '(region-arg N)` producer provides one output per
@@ -1130,7 +1315,8 @@
 ;; the exit-arm block and may hit a terminator there.
 (define (translate-theta cfg theta-ctx stop-bid region var->out)
   (define header-bid (Theta-Ctx-header theta-ctx))
-  (define latch-bid (Theta-Ctx-latch theta-ctx))
+  (define latches (Theta-Ctx-latches theta-ctx))
+  (define n-latches (ordered-map-count latches))
   (define header-blk (cfg-get-block cfg header-bid))
   (define phis (CfgBlock-phis header-blk))
 
@@ -1143,7 +1329,7 @@
       (ordered-map-set m (PhiInsn-output p) p)))
 
   ;; The header must end in Term:cond: one arm jumps (possibly via a
-  ;; chain of Term:jump blocks) to the latch and constitutes the loop
+  ;; chain of Term:jump blocks) to some latch and constitutes the loop
   ;; body; the other is the exit.  We resolve this up-front so that
   ;; collect-theta-ctx can see every body block's reads.
   (define header-term (CfgBlock-terminator header-blk))
@@ -1156,16 +1342,17 @@
   (define else-bid (Term:cond-else-target header-term))
   (define-values (body-is-then? body-entry-bid exit-arm-bid)
     (cond
-      [(body-arm-reaches-latch? cfg then-bid latch-bid header-bid)
+      [(body-arm-reaches-any-latch? cfg then-bid latches header-bid)
        (values #t then-bid else-bid)]
-      [(body-arm-reaches-latch? cfg else-bid latch-bid header-bid)
+      [(body-arm-reaches-any-latch? cfg else-bid latches header-bid)
        (values #f else-bid then-bid)]
       [else
        (error 'translate-theta
-              "neither cond arm reaches latch ~a without crossing back-edge (then=~a else=~a)"
-              latch-bid then-bid else-bid)]))
+              "neither cond arm reaches any latch of ~a without crossing back-edge (then=~a else=~a latches=~s)"
+              header-bid then-bid else-bid
+              (for/list ([kv (in-ordered-map latches)]) (car kv)))]))
   (define body-blocks
-    (theta-body-blocks cfg body-entry-bid latch-bid header-bid))
+    (theta-body-blocks cfg body-entry-bid latches header-bid))
 
   ;; Theta's inputs/outputs cover:
   ;;   (a) phi outputs at the header (loop-carried; always needed
@@ -1196,14 +1383,15 @@
 
   ;; For each carried var, derive the "entry" source var (value on
   ;; the first iteration's input to Theta).  Loop-carried: phi's
-  ;; non-latch source.  Invariant: the var itself.
+  ;; source whose predecessor-bid is not in `latches` (i.e. the pre-
+  ;; header feed).  Invariant: the var itself.
   (define entry-src-vars
     (for/pvector ([v (in-pvector carried-vars)])
       (define phi (ordered-map-ref phi-by-output v #f))
       (cond
         [phi
          (or (for/or ([s (in-pvector (PhiInsn-sources phi))])
-               (and (not (equal? (car s) latch-bid)) (cdr s)))
+               (and (not (ordered-map-ref latches (car s) #f)) (cdr s)))
              (error 'translate-theta
                     "phi ~a has no non-latch source" v))]
         [else v])))
@@ -1225,20 +1413,39 @@
   (define-values (sub2 sub-var->out2)
     (translate-insns (CfgBlock-insns header-blk) sub1 sub-var->out-init))
 
-  ;; Translate the body block(s), stopping at the back-edge into
-  ;; header.  translate-segment walks the Term:jump chain from
-  ;; body-entry-bid through the latch and naturally stops at header
-  ;; (= back-edge target = stop-bid).  We restrict the arm-walking
-  ;; helpers to body-blocks so any inner Gamma's `find-branch-join`
-  ;; cannot wander past the latch into the loop header.
-  (define-values (sub3 sub-var->out3 body-payload)
-    (parameterize ([current-arm-scope body-blocks])
-      (translate-segment cfg body-entry-bid header-bid
-                         sub2 sub-var->out2)))
-  (unless (eq? body-payload #f)
-    (error 'translate-theta
-           "loop body reached a top-level ret/throw (payload=~s) before closing the back-edge; guarded early-exits should have lowered via an asymmetric Gamma inside the body"
-           body-payload))
+  ;; Translate the body block(s), stopping at the back-edge(s) into
+  ;; header.  Single-latch: translate-segment walks the Term:jump
+  ;; chain from body-entry-bid through the latch and naturally stops
+  ;; at header (= stop-bid); latch-write values live in
+  ;; sub-var->out3 and feed update-oids via phi's latch-source.
+  ;; Multi-latch (currently: exactly 2 latches, 2-arm diamond): the
+  ;; body-entry block's Term:cond fans out to two arms whose scoped
+  ;; reach-sets each contain exactly one distinct latch.  Each arm
+  ;; becomes a sub-region of an inner Gamma whose outputs are the
+  ;; header phis' merged values; after the Gamma each phi-output
+  ;; VarId maps to the corresponding Gamma output.  In both cases we
+  ;; restrict the arm-walking helpers to body-blocks so any inner
+  ;; Gamma's `find-branch-join` cannot wander past a latch.
+  (define-values (sub3 sub-var->out3)
+    (cond
+      [(= n-latches 1)
+       (define latch-bid (for/or ([kv (in-ordered-map latches)]) (car kv)))
+       (define-values (s sv body-payload)
+         (parameterize ([current-arm-scope body-blocks])
+           (translate-segment cfg body-entry-bid header-bid sub2 sub-var->out2)))
+       (unless (eq? body-payload #f)
+         (error 'translate-theta
+                "loop body reached a top-level ret/throw (payload=~s) before closing the back-edge; guarded early-exits should have lowered via an asymmetric Gamma inside the body"
+                body-payload))
+       (values s sv)]
+      [(= n-latches 2)
+       (parameterize ([current-arm-scope body-blocks])
+         (translate-theta-two-latch-body cfg body-entry-bid header-bid
+                                         latches phis sub2 sub-var->out2))]
+      [else
+       (error 'translate-theta
+              "header ~a has ~a back-edges; currently only 1- and 2-latch loops are supported"
+              header-bid n-latches)]))
 
   ;; Iteration predicate (see translate-theta docstring).
   (define pred-oid
@@ -1255,14 +1462,18 @@
        (values s** (pvector-ref not-outs 0))]))
 
   ;; For each carried var, its "update" going back to the next
-  ;; iteration / exposed as Theta's output.  Loop-carried: the phi's
-  ;; latch source.  Invariant: the sub-region's own current value
-  ;; (which equals the region-arg output since nothing rebound it).
+  ;; iteration / exposed as Theta's output.  Single-latch: the phi's
+  ;; latch source lives in sub-var->out3 under the per-latch VarId.
+  ;; Multi-latch: the phi-output VarId itself has already been bound
+  ;; in sub-var->out3 to the merge-Gamma output.  Invariants: the
+  ;; sub-region's own current value (which equals the region-arg
+  ;; output since nothing rebound it).
   (define update-oids
     (for/pvector ([v (in-pvector carried-vars)])
       (define phi (ordered-map-ref phi-by-output v #f))
       (cond
-        [phi
+        [(and phi (= n-latches 1))
+         (define latch-bid (for/or ([kv (in-ordered-map latches)]) (car kv)))
          (define latch-var (pick-phi-source phi latch-bid 'latch))
          (or (ordered-map-ref sub-var->out3 latch-var #f)
              (error 'translate-theta "latch source ~a undefined" latch-var))]
