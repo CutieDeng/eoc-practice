@@ -89,6 +89,7 @@
          "../../frontend/java/reader.rkt"
          "../../component/java/transform/jvm-to-cfg.rkt"
          "../../component/java/transform/ssa-construct.rkt"
+         "../../component/java/transform/normalize-try-exits.rkt"
          "../../component/java/transform/cfg-to-rvsdg.rkt")
 
 (provide
@@ -110,7 +111,7 @@
   (jvm-cfg->ssa (jvm-method->cfg mth)))
 
 (define (java-method->rvsdg mth)
-  (cfg->rvsdg (jvm-cfg->ssa (jvm-method->cfg mth))))
+  (cfg->rvsdg (normalize-try-exits (jvm-cfg->ssa (jvm-method->cfg mth)))))
 
 ;; ============================================================
 ;; Class-level driver
@@ -143,7 +144,7 @@
     'name 'java
     'description "Java bytecode compilation pipeline"
     'status 'partial
-    'supported '(jvm-to-cfg ssa-construct linear-rvsdg
+    'supported '(jvm-to-cfg ssa-construct normalize-try-exits linear-rvsdg
                  gamma-recovery gamma-multi-block-arms
                  gamma-nested-diamonds theta-recovery
                  theta-multi-block-body theta-gamma-inside-body
