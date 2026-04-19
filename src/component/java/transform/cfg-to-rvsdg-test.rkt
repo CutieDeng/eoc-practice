@@ -1252,6 +1252,125 @@
         (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
     (check-equal? keys '(default 10 20)))
 
+  ;; ----- convergent TABLESWITCH -----
+  (test-case "convergent TABLESWITCH lowers to an N+1-arm Gamma with phi outputs"
+    ;; int v;
+    ;; switch (slot0) {
+    ;;   case 0: v = 10; break;
+    ;;   case 1: v = 20; break;
+    ;;   case 2: v = 30; break;
+    ;;   default: v = -1; break;
+    ;; }
+    ;; return v;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'TABLESWITCH
+                                0 2
+                                (list "L_DEFAULT" "L_C0" "L_C1" "L_C2"))
+                       (mk-insn 'CUTIEDENG-LABEL "L_C0")
+                       (mk-insn 'BIPUSH 10)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_C1")
+                       (mk-insn 'BIPUSH 20)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_C2")
+                       (mk-insn 'BIPUSH 30)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_DEFAULT")
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'CUTIEDENG-LABEL "L_JOIN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "parent region should contain exactly one Gamma")
+    (define subs (Gamma-regions (car gammas)))
+    (check-equal? (length subs) 4
+                  "Gamma should have 4 sub-regions (default + 3 cases)")
+    ;; Convergent: each arm writes v and falls through; no arm owns a
+    ;; 'return sink — the return lives in the outer region after the
+    ;; Gamma.
+    (for ([sub (in-list subs)] [i (in-naturals)])
+      (define ops
+        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+          (define v (cdr kv))
+          (cond [(Simple? v) (Simple-op v)] [else 'other])))
+      (check-false (memq 'return ops)
+                   (format "convergent arm ~a should not host 'return" i)))
+    ;; Outer region must still carry a return after the Gamma.
+    (check-not-false (memq 'return (node-ops r)))
+    ;; Keys in expected order (default, 0, 1, 2).
+    (define keys
+      (for/list ([sub (in-list subs)])
+        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+    (check-equal? keys '(default 0 1 2)))
+
+  ;; ----- convergent LOOKUPSWITCH -----
+  (test-case "convergent LOOKUPSWITCH lowers to a keyed Gamma with phi outputs"
+    ;; switch (slot0) {
+    ;;   case 10: v = 1; break;
+    ;;   case 20: v = 2; break;
+    ;;   default: v = 0; break;
+    ;; }
+    ;; return v;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'LOOKUPSWITCH
+                                "L_DEFAULT"
+                                (list 10 20)
+                                (list "L_C10" "L_C20"))
+                       (mk-insn 'CUTIEDENG-LABEL "L_C10")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_C20")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_DEFAULT")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'CUTIEDENG-LABEL "L_JOIN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1)
+    (define subs (Gamma-regions (car gammas)))
+    (check-equal? (length subs) 3)
+    ;; Return lives in outer region, not in any arm.
+    (check-not-false (memq 'return (node-ops r)))
+    (for ([sub (in-list subs)] [i (in-naturals)])
+      (define ops
+        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+          (define v (cdr kv))
+          (cond [(Simple? v) (Simple-op v)] [else 'other])))
+      (check-false (memq 'return ops)
+                   (format "convergent arm ~a should not host 'return" i)))
+    (define keys
+      (for/list ([sub (in-list subs)])
+        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+    (check-equal? keys '(default 10 20)))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

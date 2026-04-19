@@ -71,11 +71,17 @@
 ;;     key), preserving the key-to-arm correspondence in the RVSDG.
 ;;     The Gamma's predicate input is the raw switch value; the
 ;;     arm-index dispatch is left for a later pass / backend.
+;;     A convergent Term:switch — every target eventually rejoins a
+;;     common join block whose phis carry the per-arm merged values —
+;;     lowers via the same mechanics generalised to N+1 arms: each
+;;     arm is walked from its branch-bid to join-bid, the join's phis
+;;     become the Gamma's outputs, and translate-segment resumes from
+;;     the join block in the outer region.  Sub-region order and the
+;;     'java/switch-case-key encoding match the terminal variant.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (a convergent / non-terminal switch, try/catch, or a loop
-;;     header with 3+ back-edges) error from cfg->rvsdg;
-;;     `java-compile-class` catches each exception per method rather
-;;     than aborting the whole class.
+;;     (try/catch, or a loop header with 3+ back-edges) error from
+;;     cfg->rvsdg; `java-compile-class` catches each exception per
+;;     method rather than aborting the whole class.
 ;;
 ;; ============================================================
 
@@ -150,5 +156,6 @@
                  gamma-early-exit-inside-theta-single-block
                  gamma-early-exit-inside-theta-multi-block
                  multi-latch-loops-two-arm-diamond
-                 switch-recovery-terminal)
-    'deferred  '(switch-recovery-convergent kappa-recovery)))
+                 switch-recovery-terminal
+                 switch-recovery-convergent)
+    'deferred  '(kappa-recovery)))

@@ -98,10 +98,22 @@
 ;;     predicate input is the raw switch value and the 0-based
 ;;     arm-index dispatch is deferred to a later pass.
 ;;
+;;     A convergent Term:switch — every target eventually rejoins a
+;;     common join block whose phis carry the per-arm merged values —
+;;     lowers via `translate-convergent-switch`: the N+1 arms are
+;;     walked from each branch-bid to the shared join-bid using the
+;;     same find-branch-join / arm-last-before-join / arm-blocks-set
+;;     machinery as translate-gamma's convergent path, generalised
+;;     over a list of arms.  Ctx inputs are collected per-arm via
+;;     `collect-switch-arms-ctx` (N-arm generalisation of
+;;     collect-gamma-ctx); the join block's phis become the Gamma's
+;;     outputs, each arm's sub-region ending in a region-result that
+;;     picks the phi source corresponding to that arm's
+;;     arm-last-before-join predecessor.  Sub-region order and the
+;;     'java/switch-case-key encoding mirror the terminal variant;
+;;     translate-segment resumes from join-bid in the outer region.
+;;
 ;; Currently unsupported:
-;;   - Term:switch whose arms convergently rejoin a common
-;;     successor (only fully-terminal switches are lowered; a
-;;     convergent switch hits the generic Term:switch error path)
 ;;   - try/catch (Kappa recovery)
 ;;   - loop headers with 3+ back-edges (only 1-latch and 2-latch
 ;;     diamond loops are currently recognised)
