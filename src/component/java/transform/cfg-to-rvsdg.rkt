@@ -358,13 +358,26 @@
                 [else
                  (values region2 var->out2 #f)])])])]
        [(Term:switch value cases default-bid)
-        ;; Terminal-switch lowering: every target (default + each case
-        ;; in order) must be a ret/throw-only arm.  Lowered to an
-        ;; (N+1)-arm Gamma; sub-region order is [default, case_0, ...,
-        ;; case_{N-1}], each sub-region's Region.info carries
-        ;; 'java/switch-case-key → 'default or the integer case key.
-        (translate-terminal-switch cfg value cases default-bid
-                                   region1 var->out1)]
+        ;; Dispatch: terminal (all arms ret/throw-only, pairwise
+        ;; disjoint) vs convergent (arms rejoin a common join block
+        ;; that carries the phis).  Sub-region order is always
+        ;; [default, case_0, ..., case_{N-1}]; each sub-region's
+        ;; Region.info carries 'java/switch-case-key.
+        (define case-bids
+          (for/list ([kv (in-pvector cases)]) (cdr kv)))
+        (define all-bids (cons default-bid case-bids))
+        (define reaches
+          (for/list ([b (in-list all-bids)]) (arm-reach-set cfg b)))
+        (cond
+          [(and (andmap (lambda (r) (arm-leaves-all-ret-throw? cfg r)) reaches)
+                (reach-sets-all-pairwise-disjoint? reaches))
+           (translate-terminal-switch cfg value cases default-bid
+                                      region1 var->out1)]
+          [else
+           (define-values (region2 var->out2 join-bid)
+             (translate-convergent-switch cfg value cases default-bid
+                                          region1 var->out1))
+           (translate-segment cfg join-bid stop-bid region2 var->out2)])]
        [#f
         (values region1 var->out1 #f)])]))
 
@@ -597,6 +610,16 @@
   (for/and ([kv (in-ordered-map s1)])
     (not (ordered-map-ref s2 (car kv) #f))))
 
+(define (reach-sets-all-pairwise-disjoint? sets)
+  (let loop ([xs sets])
+    (cond
+      [(or (null? xs) (null? (cdr xs))) #t]
+      [else
+       (define head (car xs))
+       (and (for/and ([other (in-list (cdr xs))])
+              (reach-sets-disjoint? head other))
+            (loop (cdr xs)))])))
+
 (define (reach-set-intersection s1 s2)
   (for/fold ([s (ordered-map-empty block-id-compare)])
             ([kv (in-ordered-map s1)]
@@ -823,6 +846,152 @@
       r*))
 
   (values region3 var->out 'already-terminated))
+
+;; ============================================================
+;; Convergent switch → N+1 arm Gamma (with phi outputs)
+;; ============================================================
+;;
+;; Shape: every target of a Term:switch reaches a common join block,
+;; reusing the same mechanics as translate-gamma's convergent case
+;; generalised to N+1 arms.  Each arm is walked from its branch-bid
+;; to join-bid via arm-advance; the join block's phis become the
+;; Gamma's outputs, each arm contributes the phi source VarId
+;; corresponding to its arm-last-before-join predecessor.  Sub-
+;; region order is [default, case_0, ..., case_{n-1}]; each sub-
+;; region's Region.info records 'java/switch-case-key.  Caller
+;; resumes translate-segment from join-bid in the outer region.
+
+(define (translate-convergent-switch cfg value cases default-bid region var->out)
+  (define case-bids (for/list ([kv (in-pvector cases)]) (cdr kv)))
+  (define all-bids (cons default-bid case-bids))
+  (unless (>= (length all-bids) 2)
+    (error 'translate-convergent-switch
+           "switch has fewer than 2 arms; cannot form convergent join"))
+
+  ;; Per-arm full reach-sets; install intersection as the shared set
+  ;; so the arm-walking helpers recognise multi-block exit subtrees.
+  (define reaches
+    (for/list ([b (in-list all-bids)]) (arm-reach-set cfg b)))
+  (define shared-set
+    (for/fold ([s (car reaches)]) ([r (in-list (cdr reaches))])
+      (reach-set-intersection s r)))
+
+  (define-values (join-bid arm-preds arm-blocks-list)
+    (parameterize ([current-shared-set shared-set])
+      (define jb (find-branch-join cfg (car all-bids) (cadr all-bids)))
+      (when (for/or ([b (in-list all-bids)]) (equal? b jb))
+        (error 'translate-convergent-switch
+               "empty arm (one of ~s == join ~a) not yet supported"
+               all-bids jb))
+      (define preds
+        (for/list ([b (in-list all-bids)])
+          (arm-last-before-join cfg b jb)))
+      (define blocks-list
+        (for/list ([b (in-list all-bids)])
+          (arm-blocks-set cfg b jb)))
+      (values jb preds blocks-list)))
+
+  (define join-blk (cfg-get-block cfg join-bid))
+  (define phis (CfgBlock-phis join-blk))
+  (define n-phis (pvector-length phis))
+
+  ;; Context vars: union over all arms of parent-scope reads + per-arm
+  ;; phi source contributions.
+  (define ctx-set
+    (collect-switch-arms-ctx cfg var->out arm-blocks-list arm-preds phis))
+  (define ctx-vars
+    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+  (define n-ctx (pvector-length ctx-vars))
+
+  (define (build-tagged-branch-region bid arm-pred key-tag which)
+    (define base
+      (build-branch-region cfg bid arm-pred join-bid ctx-vars phis which))
+    (region-info-set base 'java/switch-case-key key-tag))
+
+  (define default-region
+    (build-tagged-branch-region default-bid (car arm-preds)
+                                'default 'switch-default))
+  (define case-regions
+    (for/list ([kv (in-pvector cases)]
+               [b (in-list case-bids)]
+               [p (in-list (cdr arm-preds))]
+               [i (in-naturals 0)])
+      (build-tagged-branch-region b p (car kv) (list 'switch-case i))))
+
+  (define sub-regions (cons default-region case-regions))
+  (define gamma-val (Gamma sub-regions))
+
+  ;; Install Gamma: 1 pred + n-ctx inputs, n-phis outputs.
+  (define-values (region1 _gnid g-ins g-outs)
+    (region-add-node region gamma-val (add1 n-ctx) n-phis))
+
+  (define pred-oid
+    (or (ordered-map-ref var->out value #f)
+        (error 'translate-convergent-switch
+               "undefined switch value ~a" value)))
+  (define-values (region2 _pw)
+    (region-add-wire region1 pred-oid (pvector-ref g-ins 0)))
+
+  (define region3
+    (for/fold ([r region2])
+              ([ctx-var (in-pvector ctx-vars)]
+               [i (in-naturals 1)])
+      (define src-oid
+        (or (ordered-map-ref var->out ctx-var #f)
+            (error 'translate-convergent-switch
+                   "undefined ctx var ~a" ctx-var)))
+      (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
+      r*))
+
+  ;; Bind join phi outputs to corresponding Gamma outputs.
+  (define var->out*
+    (for/fold ([m var->out])
+              ([phi (in-pvector phis)]
+               [oid (in-pvector g-outs)])
+      (ordered-map-set m (PhiInsn-output phi) oid)))
+
+  (values region3 var->out* join-bid))
+
+;; N-arm generalisation of collect-gamma-ctx: walks each arm's
+;; blocks + its phi source contribution.
+(define (collect-switch-arms-ctx cfg parent-var->out
+                                 arm-blocks-list arm-preds phis)
+  (define (arm-local-defs blocks)
+    (for/fold ([s (ordered-map-empty var-id-compare)])
+              ([kv (in-ordered-map blocks)])
+      (define blk (cfg-get-block cfg (car kv)))
+      (define s1
+        (for/fold ([s s]) ([phi (in-pvector (CfgBlock-phis blk))])
+          (ordered-map-set s (PhiInsn-output phi) #t)))
+      (for/fold ([s s1]) ([insn (in-pvector (CfgBlock-insns blk))])
+        (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
+                           #:when (VarId? o))
+          (ordered-map-set s o #t)))))
+  (define (walk-arm blocks arm-pred acc)
+    (define locals (arm-local-defs blocks))
+    (define acc*
+      (for/fold ([a acc])
+                ([kv (in-ordered-map blocks)])
+        (define insns (CfgBlock-insns (cfg-get-block cfg (car kv))))
+        (for/fold ([a a]) ([insn (in-pvector insns)])
+          (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
+            (cond
+              [(and (VarId? x)
+                    (not (ordered-map-ref locals x #f))
+                    (ordered-map-ref parent-var->out x #f))
+               (ordered-map-set a x #t)]
+              [else a])))))
+    (for/fold ([a acc*]) ([phi (in-pvector phis)])
+      (define src (pick-phi-source phi arm-pred 'switch-ctx))
+      (cond
+        [(and (VarId? src)
+              (ordered-map-ref parent-var->out src #f))
+         (ordered-map-set a src #t)]
+        [else a])))
+  (for/fold ([acc (ordered-map-empty var-id-compare)])
+            ([blocks (in-list arm-blocks-list)]
+             [p (in-list arm-preds)])
+    (walk-arm blocks p acc)))
 
 ;; ============================================================
 ;; Asymmetric early-exit Gamma (one arm exits, other continues)
