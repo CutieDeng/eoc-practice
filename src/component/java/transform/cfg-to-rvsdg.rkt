@@ -113,8 +113,34 @@
 ;;     'java/switch-case-key encoding mirror the terminal variant;
 ;;     translate-segment resumes from join-bid in the outer region.
 ;;
+;;     A `try { } catch { }` region — identified from
+;;     `'java/exception-table` (prepared by `normalize-try-exits` so
+;;     each window has at most one fall-through exit) — lowers to a
+;;     `Kappa` node via `translate-kappa-group`.  The try-region is
+;;     built by `translate-segment` scoped to the try's forward reach;
+;;     each handler-region uses `build-handler-region-entry` so the
+;;     `(+ n-ctx 1)`-th region-arg output is the exception-ref, and
+;;     `translate-vfinsn` resolves any `'java/exception-ref` producer
+;;     (synthesised by `jvm-method->cfg` at handler entry) to that
+;;     region-arg output via the `current-exn-out` parameter.  The
+;;     Kappa comes in two shapes — `'terminal` (M=0 outputs; every arm
+;;     ends in ret / throw; installed via `install-kappa-terminal`) and
+;;     `'convergent` (M = n_phis(join); every arm ends in `Term:jump
+;;     join-bid` and its `region-result` draws the per-arm phi-source
+;;     values; installed via `install-kappa-convergent`, after which
+;;     translate-segment resumes from the join block in the outer
+;;     region).  First-wins handler ordering is preserved: `handlers`
+;;     is a pvector of `(cons catch-type Region)` in declaration order
+;;     matching the exception-table's per-range entries.
+;;
 ;; Currently unsupported:
-;;   - try/catch (Kappa recovery)
+;;   - multi-range try windows (same try with overlapping / finally-
+;;     style entries; a single-start multi-end pattern errors out)
+;;   - nested try/catch (outer kappa's try-bids overlap inner try's
+;;     start-bid is not yet validated; works incidentally if regions
+;;     do not overlap, not yet exercised in tests)
+;;   - method-end try windows (exception-table end-bid = #f) — the
+;;     original ordinal range isn't recoverable post-normalize yet
 ;;   - loop headers with 3+ back-edges (only 1-latch and 2-latch
 ;;     diamond loops are currently recognised)
 ;;
@@ -207,6 +233,24 @@
 ;; without any caller having to thread the ctx map manually.
 (define current-theta-ctxs (make-parameter #f))
 
+;; Map of every try-entry BlockId in the CFG to its Kappa-Group.  Set
+;; once per `cfg->rvsdg` invocation from `'java/exception-table`;
+;; consulted by `translate-segment` so any try-entry landed on during
+;; recursion dispatches into translate-kappa-group in whichever region
+;; we currently inhabit (parent, Gamma arm, Theta body, ...).  #f
+;; (default) means no try/catch in the method.
+(define current-kappa-groups (make-parameter #f))
+
+;; OutputId of the currently-active handler region's exception-ref
+;; region-arg output.  Set by `translate-kappa-group` while walking a
+;; handler sub-region; consulted by `translate-vfinsn` to resolve
+;; `'java/exception-ref` producers (synthesised by `jvm-method->cfg`
+;; at handler entry) into the Kappa's exn-ref output rather than
+;; allocating a dead `Simple 'java/exception-ref` node.  #f means "not
+;; inside a handler region" — encountering the op under that default
+;; signals a structural error.
+(define current-exn-out (make-parameter #f))
+
 ;; ============================================================
 ;; Entry
 ;; ============================================================
@@ -251,10 +295,17 @@
                [oid (in-pvector param-outs)])
       (ordered-map-set m name oid)))
 
+  ;; Compute one Kappa-Group per try window in the exception-table.
+  ;; Empty map when the method has no try/catch.  translate-segment
+  ;; consults this map to dispatch into translate-kappa-group whenever
+  ;; it lands on a try-entry BlockId.
+  (define kappa-groups (compute-kappa-groups cfg))
+
   ;; 3. Translate starting at entry; stop-bid = #f means "until a
   ;;    terminator or unreachable".
   (define-values (region-final var->out-final payload)
-    (parameterize ([current-theta-ctxs theta-ctxs])
+    (parameterize ([current-theta-ctxs theta-ctxs]
+                   [current-kappa-groups kappa-groups])
       (translate-segment cfg (Cfg-entry cfg) #f region1 var->out-init)))
 
   ;; 4. Materialise Term:ret / Term:throw.  An 'already-terminated
@@ -288,10 +339,26 @@
 ;; lowered into a Theta in whichever region we currently inhabit.
 (define (translate-segment cfg start-bid stop-bid region var->out)
   (define ctxs (current-theta-ctxs))
+  (define kappas (current-kappa-groups))
   (define ctx-here (and ctxs (ordered-map-ref ctxs start-bid #f)))
+  (define kappa-here (and kappas (ordered-map-ref kappas start-bid #f)))
   (cond
     [(and stop-bid (equal? start-bid stop-bid))
      (values region var->out #f)]
+    [kappa-here
+     (define-values (region* var->out* kpayload)
+       (translate-kappa-group cfg start-bid kappa-here region var->out))
+     (cond
+       [(eq? kpayload 'already-terminated)
+        (values region* var->out* 'already-terminated)]
+       [(BlockId? kpayload)
+        ;; Convergent: resume translation from join-bid in the outer
+        ;; (caller's) region.
+        (translate-segment cfg kpayload stop-bid region* var->out*)]
+       [else
+        (error 'translate-segment
+               "unexpected payload ~s from translate-kappa-group at ~a"
+               kpayload start-bid)])]
     [ctx-here
      (translate-theta cfg ctx-here stop-bid region var->out)]
     [else
@@ -437,6 +504,37 @@
   (define n-in (pvector-length inputs))
   (define n-out (pvector-length outputs))
 
+  ;; Special case: `'java/exception-ref` is a synthetic single-output
+  ;; producer inserted by `jvm-method->cfg` at each handler block's
+  ;; entry (its outputs are the stack slots holding the caught
+  ;; exception reference).  Under Kappa lowering the handler runs
+  ;; inside a sub-region whose `(+ n-ctx 1)`-th region-arg output IS
+  ;; the exception reference, installed by translate-kappa-group via
+  ;; `current-exn-out`.  Rather than allocate a fresh
+  ;; `Simple 'java/exception-ref` node (dead) we rebind the insn's
+  ;; output VarId to the handler-region's exn-ref OutputId.
+  ;; Encountering this op outside a handler region is a structural
+  ;; error — the insn should only be reachable via translate-kappa-
+  ;; group's handler-region walk.
+  (cond
+    [(eq? op 'java/exception-ref)
+     (define exn-oid (current-exn-out))
+     (unless exn-oid
+       (error 'translate-vfinsn
+              "'java/exception-ref insn encountered outside a Kappa handler region"))
+     (unless (and (= n-in 0) (= n-out 1))
+       (error 'translate-vfinsn
+              "'java/exception-ref insn has unexpected arity (in=~a out=~a)"
+              n-in n-out))
+     (define out-var (pvector-ref outputs 0))
+     (unless (VarId? out-var)
+       (error 'translate-vfinsn
+              "'java/exception-ref output is not a VarId: ~s" out-var))
+     (values region (ordered-map-set var->out out-var exn-oid))]
+    [else
+     (translate-vfinsn/generic region var->out op inputs outputs n-in n-out)]))
+
+(define (translate-vfinsn/generic region var->out op inputs outputs n-in n-out)
   ;; Resolve each input: VarId lookup, or materialise a const node.
   (define-values (region1 input-outputs)
     (for/fold ([r region] [acc (pvector-empty)])
@@ -1847,6 +1945,448 @@
   ;; Continue translating from the exit-arm; the loop map lives in
   ;; the parameter so sibling / outer loops keep dispatching.
   (translate-segment cfg exit-arm-bid stop-bid region2 var->out*))
+
+;; ============================================================
+;; Kappa recovery (try/catch)
+;; ============================================================
+;;
+;; `compute-kappa-groups` runs once at cfg->rvsdg entry, producing an
+;; ordered-map[try-entry-BlockId -> Kappa-Group] keyed on each
+;; exception-table entry's start-bid.  Multiple handlers for the same
+;; (start-bid, end-bid) window are folded into a single group whose
+;; `handlers` pvector preserves declaration order (first-wins).  Each
+;; group's `try-bids` is computed from the original ordinal window
+;; [start-ord, end-ord), extended with any forwarding blocks
+;; normalize-try-exits inserted on exit paths; `kind` is `'terminal`
+;; when the window has no fall-through exit (all paths ret / throw)
+;; or `'convergent` when a single canonical exit-target exists (either
+;; a direct single successor or the joiner block normalize-try-exits
+;; created).  Multi-canonical-exit windows are rejected — the
+;; normalize-try-exits pre-pass is the chokepoint that guarantees ≤ 1.
+;;
+;; translate-kappa-group installs one Kappa node in the parent region,
+;; threading per-arm sub-regions through install-kappa-{terminal,
+;; convergent}.  Context inputs are the union of each arm's parent-
+;; scope VarId reads (collect-arm-ctx), augmented for the convergent
+;; kind with each arm's phi-source contribution at the join.
+
+(define (compute-kappa-groups cfg)
+  (define table (cfg-get-info cfg 'java/exception-table #f))
+  (cond
+    [(or (not table) (= (pvector-length table) 0))
+     (ordered-map-empty block-id-compare)]
+    [else
+     ;; Fold entries by start-bid, preserving declaration order of
+     ;; handlers within each start-bid.  A second entry with the same
+     ;; start-bid but a different end-bid would indicate a multi-range
+     ;; (finally-style) layout — rejected here as not yet supported.
+     (define by-start
+       (for/fold ([m (ordered-map-empty block-id-compare)])
+                 ([entry (in-pvector table)])
+         (match-define (list start-bid end-bid handler-bid catch-type) entry)
+         (define cur (ordered-map-ref m start-bid #f))
+         (cond
+           [cur
+            (match-define (list end0 handlers0) cur)
+            (unless (equal? end0 end-bid)
+              (error 'compute-kappa-groups
+                     "multi-range try at ~a (ends differ: ~s vs ~s) not yet supported"
+                     start-bid end0 end-bid))
+            (ordered-map-set m start-bid
+                             (list end-bid
+                                   (pvector-cons-right handlers0
+                                                       (cons catch-type handler-bid))))]
+           [else
+            (define handlers1
+              (pvector-cons-right (pvector-empty)
+                                  (cons catch-type handler-bid)))
+            (ordered-map-set m start-bid (list end-bid handlers1))])))
+     ;; Build each Kappa-Group.  window-bids is the original ordinal
+     ;; window; try-bids is window-bids extended with forwarding
+     ;; blocks that sit between the window and the joiner.
+     (for/fold ([acc (ordered-map-empty block-id-compare)])
+               ([kv (in-ordered-map by-start)])
+       (define start-bid (car kv))
+       (match-define (list end-bid handlers) (cdr kv))
+       (define window-bids (compute-kappa-window-bids cfg start-bid end-bid))
+       (define-values (kind join-bid) (classify-kappa-window cfg window-bids))
+       (define try-bids (extend-with-forwarding-blocks cfg window-bids join-bid))
+       (ordered-map-set acc start-bid
+                        (Kappa-Group try-bids handlers kind join-bid)))]))
+
+;; Re-derive the original [start-ord, end-ord) block-ordinal window
+;; from 'java/block-order.  After normalize-try-exits appends
+;; forwarding / joiner blocks to block-order, the first N entries are
+;; still the original ones, so an end-bid that resolves to an ordinal
+;; < append-point is valid.  `end-bid = #f` (try extending to method-
+;; end) is rejected here — the original method-length isn't recorded
+;; anywhere after the append, so we defer that case.
+(define (compute-kappa-window-bids cfg start-bid end-bid)
+  (define block-order
+    (or (cfg-get-info cfg 'java/block-order #f)
+        (error 'compute-kappa-window-bids
+               "Cfg.info missing 'java/block-order (run jvm-to-cfg first)")))
+  (define bid->ord
+    (for/fold ([m (ordered-map-empty block-id-compare)])
+              ([bid (in-pvector block-order)]
+               [i (in-naturals)])
+      (ordered-map-set m bid i)))
+  (define start-ord
+    (or (ordered-map-ref bid->ord start-bid #f)
+        (error 'compute-kappa-window-bids
+               "unmapped start-bid ~s" start-bid)))
+  (define end-ord
+    (cond
+      [end-bid
+       (or (ordered-map-ref bid->ord end-bid #f)
+           (error 'compute-kappa-window-bids
+                  "unmapped end-bid ~s" end-bid))]
+      [else
+       (error 'compute-kappa-window-bids
+              "try window at ~s has end-bid=#f (method-end); not yet supported"
+              start-bid)]))
+  (for/fold ([s (ordered-map-empty block-id-compare)])
+            ([bid (in-pvector block-order)]
+             [i (in-naturals)]
+             #:when (and (<= start-ord i) (< i end-ord)))
+    (ordered-map-set s bid #t)))
+
+;; Collect distinct out-of-window successors from every block in the
+;; window, canonicalising forwarding-block successors to their joiner.
+;; Returns (values kind join-bid) where kind is 'terminal (0 exits) or
+;; 'convergent (exactly 1 canonical exit).  More than one canonical
+;; exit is an error — normalize-try-exits should have collapsed them.
+(define (classify-kappa-window cfg window-bids)
+  (define direct-exits
+    (for/fold ([s (ordered-map-empty block-id-compare)])
+              ([kv (in-ordered-map window-bids)])
+      (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
+      (define succs
+        (match t
+          [(Term:jump n) (list n)]
+          [(Term:cond _ tb eb) (list tb eb)]
+          [(Term:switch _ cases default)
+           (cons default
+                 (for/list ([kv (in-pvector cases)]) (cdr kv)))]
+          [_ '()]))
+      (for/fold ([s s]) ([n (in-list succs)]
+                         #:unless (ordered-map-ref window-bids n #f))
+        (ordered-map-set s n #t))))
+  (define canonical-exits
+    (for/fold ([s (ordered-map-empty block-id-compare)])
+              ([kv (in-ordered-map direct-exits)])
+      (define bid (car kv))
+      (cond
+        [(forwarding-block? (cfg-get-block cfg bid))
+         (ordered-map-set s (Term:jump-target
+                             (CfgBlock-terminator (cfg-get-block cfg bid)))
+                          #t)]
+        [else (ordered-map-set s bid #t)])))
+  (cond
+    [(= 0 (ordered-map-count canonical-exits)) (values 'terminal #f)]
+    [(= 1 (ordered-map-count canonical-exits))
+     (values 'convergent
+             (for/or ([kv (in-ordered-map canonical-exits)]) (car kv)))]
+    [else
+     (error 'classify-kappa-window
+            "try window has ~a distinct canonical exits (post-normalize ≤ 1 expected): ~s"
+            (ordered-map-count canonical-exits)
+            (for/list ([kv (in-ordered-map canonical-exits)]) (car kv)))]))
+
+;; Structural recogniser for the selector-write forwarding block
+;; normalize-try-exits synthesises on Term:cond / Term:switch exit
+;; arms.  Shape: exactly one `'kappa-exit-sel` VfInsn followed by a
+;; Term:jump — the jump target is the kappa-joiner block.
+(define (forwarding-block? blk)
+  (and blk
+       (Term:jump? (CfgBlock-terminator blk))
+       (= 1 (pvector-length (CfgBlock-insns blk)))
+       (eq? 'kappa-exit-sel
+            (VfInsn-op (pvector-ref (CfgBlock-insns blk) 0)))))
+
+;; Extend window-bids with any forwarding block that sits on an exit
+;; arm between a window block and the joiner.  These blocks live
+;; outside the original ordinal window (normalize-try-exits appends
+;; them to block-order) but are logically part of the try-region for
+;; translation purposes — translate-segment scoped to try-bids needs
+;; to walk through them to reach the join / joiner.
+(define (extend-with-forwarding-blocks cfg window-bids join-bid)
+  (for/fold ([s window-bids]) ([kv (in-ordered-map window-bids)])
+    (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
+    (define succs
+      (match t
+        [(Term:jump n) (list n)]
+        [(Term:cond _ tb eb) (list tb eb)]
+        [(Term:switch _ cases default)
+         (cons default
+               (for/list ([kv (in-pvector cases)]) (cdr kv)))]
+        [_ '()]))
+    (for/fold ([s s]) ([n (in-list succs)])
+      (cond
+        [(ordered-map-ref s n #f) s]
+        [(and join-bid (equal? n join-bid)) s]
+        [(forwarding-block? (cfg-get-block cfg n))
+         (ordered-map-set s n #t)]
+        [else s]))))
+
+;; Forward reach-set from start-bid, stopping at stop-bid (if given)
+;; and at ret / throw / unreachable terminators.  Not scoped — used to
+;; discover a handler's internal structure before building its sub-
+;; region.  When stop-bid is #f the walk continues until every branch
+;; leafs out at a non-advanceable terminator; when stop-bid is set it
+;; is excluded from the result (the walk stops at but does not
+;; traverse through stop-bid).
+(define (kappa-forward-reach cfg start-bid stop-bid)
+  (let loop ([work (list start-bid)]
+             [s (ordered-map-empty block-id-compare)])
+    (cond
+      [(null? work) s]
+      [else
+       (define b (car work))
+       (define rest (cdr work))
+       (cond
+         [(and stop-bid (equal? b stop-bid)) (loop rest s)]
+         [(ordered-map-ref s b #f) (loop rest s)]
+         [else
+          (define s* (ordered-map-set s b #t))
+          (define succs
+            (match (CfgBlock-terminator (cfg-get-block cfg b))
+              [(Term:jump n) (list n)]
+              [(Term:cond _ tb eb) (list tb eb)]
+              [(Term:switch _ cases default)
+               (cons default
+                     (for/list ([kv (in-pvector cases)]) (cdr kv)))]
+              [_ '()]))
+          (loop (append succs rest) s*)])])))
+
+;; For a convergent Kappa arm, locate the single block whose
+;; terminator is `Term:jump join-bid` — that block is the phi-source
+;; predecessor at the join.  C3 handles only arms that converge via a
+;; single direct Term:jump (no inner diamonds reunifying at join);
+;; complex arm merges are deferred.  Errors if zero or multiple such
+;; blocks exist in the arm.
+(define (find-kappa-arm-pred cfg arm-reach join-bid which)
+  (define candidates
+    (for/fold ([acc '()])
+              ([kv (in-ordered-map arm-reach)])
+      (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
+      (cond
+        [(and (Term:jump? t) (equal? (Term:jump-target t) join-bid))
+         (cons (car kv) acc)]
+        [else acc])))
+  (cond
+    [(= 1 (length candidates)) (car candidates)]
+    [(= 0 (length candidates))
+     (error 'find-kappa-arm-pred
+            "~a arm does not reach join ~a via a direct Term:jump; complex arm merges not yet supported"
+            which join-bid)]
+    [else
+     (error 'find-kappa-arm-pred
+            "~a arm has multiple direct jumps to join ~a (~s); multi-source arm merges not yet supported"
+            which join-bid candidates)]))
+
+;; Build the try sub-region.  Terminal kind: translate-segment walks
+;; the try-bids scope installing its own ret / throw sink on the
+;; payload returned.  Convergent kind: the walk stops at join-bid and
+;; a `region-result n-phis` sink wires each phi's source-from-arm-pred
+;; VarId through.
+(define (build-kappa-try-region cfg start-bid try-bids ctx-vars
+                                kind join-bid arm-pred join-phis)
+  (define n-ctx (pvector-length ctx-vars))
+  (define n-phis (pvector-length join-phis))
+  (define sub0 (region-empty))
+  (define-values (sub1 arg-outs) (region-add-region-arg sub0 n-ctx))
+  (define sub-var->out
+    (for/fold ([m (ordered-map-empty var-id-compare)])
+              ([v (in-pvector ctx-vars)]
+               [oid (in-pvector arg-outs)])
+      (ordered-map-set m v oid)))
+  (parameterize ([current-arm-scope try-bids])
+    (cond
+      [(eq? kind 'terminal)
+       (define-values (sub2 sub-var->out2 payload)
+         (translate-segment cfg start-bid #f sub1 sub-var->out))
+       (match payload
+         [(cons 'ret vs)      (install-return sub2 sub-var->out2 vs)]
+         [(cons 'throw v)     (install-throw  sub2 sub-var->out2 v)]
+         ['already-terminated sub2]
+         [other
+          (error 'build-kappa-try-region
+                 "terminal try at ~a yielded non-ret/throw payload ~s"
+                 start-bid other)])]
+      [else
+       (define-values (sub2 sub-var->out2 payload)
+         (translate-segment cfg start-bid join-bid sub1 sub-var->out))
+       (unless (eq? payload #f)
+         (error 'build-kappa-try-region
+                "convergent try at ~a did not close via join ~a (payload=~s)"
+                start-bid join-bid payload))
+       (define result-src-vars
+         (for/pvector ([phi (in-pvector join-phis)])
+           (pick-phi-source phi arm-pred 'kappa-try)))
+       (define-values (sub3 res-ins) (region-add-region-result sub2 n-phis))
+       (for/fold ([r sub3])
+                 ([src-var (in-pvector result-src-vars)]
+                  [iid (in-pvector res-ins)])
+         (define src-oid
+           (or (ordered-map-ref sub-var->out2 src-var #f)
+               (error 'build-kappa-try-region
+                      "phi source ~a undefined in convergent try sub-region"
+                      src-var)))
+         (define-values (r* _w) (region-add-wire r src-oid iid))
+         r*)])))
+
+;; Build one handler sub-region.  The region-arg provides `n-ctx`
+;; context outputs plus an extra exception-ref output (the `(N+1)`-th)
+;; bound via `current-exn-out` so any `'java/exception-ref` VfInsn at
+;; the handler entry resolves to it.  Terminal kind installs
+;; ret / throw sinks from the payload; convergent kind stops at the
+;; join and wires each phi's arm-pred source into a region-result.
+(define (build-kappa-handler-region cfg handler-bid handler-reach ctx-vars
+                                    kind join-bid arm-pred join-phis)
+  (define n-ctx (pvector-length ctx-vars))
+  (define n-phis (pvector-length join-phis))
+  (define-values (sub1 ctx-outs exn-out) (build-handler-region-entry n-ctx))
+  (define sub-var->out-init
+    (for/fold ([m (ordered-map-empty var-id-compare)])
+              ([v (in-pvector ctx-vars)]
+               [oid (in-pvector ctx-outs)])
+      (ordered-map-set m v oid)))
+  (parameterize ([current-arm-scope handler-reach]
+                 [current-exn-out exn-out])
+    (cond
+      [(eq? kind 'terminal)
+       (define-values (sub2 sub-var->out2 payload)
+         (translate-segment cfg handler-bid #f sub1 sub-var->out-init))
+       (match payload
+         [(cons 'ret vs)      (install-return sub2 sub-var->out2 vs)]
+         [(cons 'throw v)     (install-throw  sub2 sub-var->out2 v)]
+         ['already-terminated sub2]
+         [other
+          (error 'build-kappa-handler-region
+                 "terminal handler at ~a yielded non-ret/throw payload ~s"
+                 handler-bid other)])]
+      [else
+       (define-values (sub2 sub-var->out2 payload)
+         (translate-segment cfg handler-bid join-bid sub1 sub-var->out-init))
+       (unless (eq? payload #f)
+         (error 'build-kappa-handler-region
+                "convergent handler at ~a did not close via join ~a (payload=~s)"
+                handler-bid join-bid payload))
+       (define result-src-vars
+         (for/pvector ([phi (in-pvector join-phis)])
+           (pick-phi-source phi arm-pred 'kappa-handler)))
+       (define-values (sub3 res-ins) (region-add-region-result sub2 n-phis))
+       (for/fold ([r sub3])
+                 ([src-var (in-pvector result-src-vars)]
+                  [iid (in-pvector res-ins)])
+         (define src-oid
+           (or (ordered-map-ref sub-var->out2 src-var #f)
+               (error 'build-kappa-handler-region
+                      "phi source ~a undefined in convergent handler sub-region"
+                      src-var)))
+         (define-values (r* _w) (region-add-wire r src-oid iid))
+         r*)])))
+
+;; Returns (values region* var->out* payload) where payload is either
+;; 'already-terminated (terminal Kappa) or join-bid (convergent; caller
+;; resumes from there).
+(define (translate-kappa-group cfg start-bid kappa-group region var->out)
+  (match-define (Kappa-Group try-bids handlers kind join-bid) kappa-group)
+
+  ;; Each arm's forward reach (try vs each handler) drives ctx
+  ;; collection.  Try-reach is try-bids itself (already expanded with
+  ;; forwarding blocks); handler-reach is an unscoped walk from the
+  ;; handler entry stopping at join-bid when convergent (so the phi
+  ;; values live in scope but the join block itself doesn't).
+  (define try-reach try-bids)
+  (define handler-reaches
+    (for/list ([h (in-pvector handlers)])
+      (kappa-forward-reach cfg (cdr h) join-bid)))
+
+  ;; Convergent kind: locate each arm's phi-source pred-bid.
+  (define join-phis
+    (cond
+      [(eq? kind 'convergent)
+       (CfgBlock-phis (cfg-get-block cfg join-bid))]
+      [else (pvector-empty)]))
+  (define n-phis (pvector-length join-phis))
+  (define try-arm-pred
+    (cond [(eq? kind 'convergent)
+           (find-kappa-arm-pred cfg try-reach join-bid 'try)]
+          [else #f]))
+  (define handler-arm-preds
+    (for/list ([h (in-pvector handlers)]
+               [reach (in-list handler-reaches)])
+      (cond [(eq? kind 'convergent)
+             (find-kappa-arm-pred cfg reach join-bid
+                                  (list 'handler (cdr h)))]
+            [else #f])))
+
+  ;; Ctx vars: union of parent-scope reads across every arm, plus
+  ;; (convergent) phi-source contributions from each arm-pred.
+  (define try-ctx (collect-arm-ctx cfg var->out try-reach))
+  (define handler-ctxs
+    (for/list ([reach (in-list handler-reaches)])
+      (collect-arm-ctx cfg var->out reach)))
+  (define ctx-set-base
+    (for/fold ([s try-ctx])
+              ([hctx (in-list handler-ctxs)])
+      (for/fold ([s s]) ([kv (in-ordered-map hctx)])
+        (ordered-map-set s (car kv) #t))))
+  (define (add-phi-srcs arm-pred acc)
+    (for/fold ([a acc]) ([phi (in-pvector join-phis)])
+      (define src (pick-phi-source phi arm-pred 'kappa-ctx))
+      (cond
+        [(and (VarId? src) (ordered-map-ref var->out src #f))
+         (ordered-map-set a src #t)]
+        [else a])))
+  (define ctx-set
+    (cond
+      [(eq? kind 'convergent)
+       (for/fold ([s (add-phi-srcs try-arm-pred ctx-set-base)])
+                 ([ap (in-list handler-arm-preds)])
+         (add-phi-srcs ap s))]
+      [else ctx-set-base]))
+  (define ctx-vars
+    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+
+  ;; Build each sub-region.
+  (define try-region
+    (build-kappa-try-region cfg start-bid try-bids ctx-vars
+                            kind join-bid try-arm-pred join-phis))
+  (define handlers-pv
+    (for/pvector ([h (in-pvector handlers)]
+                  [reach (in-list handler-reaches)]
+                  [ap (in-list handler-arm-preds)])
+      (define hr
+        (build-kappa-handler-region cfg (cdr h) reach ctx-vars
+                                    kind join-bid ap join-phis))
+      (cons (car h) hr)))
+
+  ;; Parent-side ctx producer outputs.
+  (define ctx-oids
+    (for/pvector ([v (in-pvector ctx-vars)])
+      (or (ordered-map-ref var->out v #f)
+          (error 'translate-kappa-group
+                 "ctx var ~a undefined in parent scope" v))))
+
+  ;; Install Kappa.
+  (cond
+    [(eq? kind 'terminal)
+     (define-values (region* _knid)
+       (install-kappa-terminal region ctx-oids try-region handlers-pv))
+     (values region* var->out 'already-terminated)]
+    [else
+     (define-values (region* _knid out-oids)
+       (install-kappa-convergent region ctx-oids try-region handlers-pv
+                                 n-phis))
+     (define var->out*
+       (for/fold ([m var->out])
+                 ([phi (in-pvector join-phis)]
+                  [oid (in-pvector out-oids)])
+         (ordered-map-set m (PhiInsn-output phi) oid)))
+     (values region* var->out* join-bid)]))
 
 ;; ============================================================
 ;; Terminator materialisation
