@@ -19,12 +19,16 @@
 ;;     every back-edge becomes an entry in a per-compilation header→
 ;;     Theta-Ctx map, and translate-segment consults that map on each
 ;;     block so headers encountered deep inside a sub-region still
-;;     lower into a Theta living in the surrounding region.
+;;     lower into a Theta living in the surrounding region.  A
+;;     Term:cond whose two arms are each a single block ending in
+;;     Term:ret / Term:throw lowers to a terminal Gamma whose two
+;;     sub-regions install their own return / throw sinks.
 ;;   - Methods whose control flow still exceeds lowering capacity
-;;     (switch, try/catch, early-exit inside a Gamma arm, or a loop
-;;     header with multiple back-edges) error from cfg->rvsdg;
-;;     `java-compile-class` catches each exception per method rather
-;;     than aborting the whole class.
+;;     (switch, try/catch, asymmetric early-exit, multi-block early-
+;;     exit arms, early-exit nested inside another Gamma / Theta, or
+;;     a loop header with multiple back-edges) error from
+;;     cfg->rvsdg; `java-compile-class` catches each exception per
+;;     method rather than aborting the whole class.
 ;;
 ;; ============================================================
 
@@ -90,6 +94,10 @@
                  gamma-recovery gamma-multi-block-arms
                  gamma-nested-diamonds theta-recovery
                  theta-multi-block-body theta-gamma-inside-body
-                 nested-thetas theta-inside-gamma)
+                 nested-thetas theta-inside-gamma
+                 gamma-early-exit-both-arms)
     'deferred  '(switch-recovery kappa-recovery
-                 gamma-early-exit multi-latch-loops)))
+                 gamma-early-exit-asymmetric
+                 gamma-early-exit-multi-block-arm
+                 gamma-early-exit-inside-region
+                 multi-latch-loops)))

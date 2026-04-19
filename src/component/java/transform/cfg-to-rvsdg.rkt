@@ -19,6 +19,12 @@
 ;;     feed the Gamma's outputs.
 ;;   - Term:ret / Term:throw yield synthetic `Simple 'return` /
 ;;     kernel `Throw` sink nodes in whichever region they appear.
+;;     A Term:cond whose two arms are each a single block ending in
+;;     Term:ret / Term:throw lowers to a Gamma whose sub-regions
+;;     each terminate internally (no region-result, 0 Gamma outputs);
+;;     translate-segment signals upward with payload
+;;     'already-terminated so cfg->rvsdg knows not to install another
+;;     return at the outer region.
 ;;
 ;;   - A single natural loop is lowered to a Theta node.  The header
 ;;     must end in Term:cond; one arm leads to the latch (continue)
@@ -32,9 +38,12 @@
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
-;;   - Nested / multiple natural loops
-;;   - Gamma arm with Term:ret / Term:throw / Term:switch before
-;;     reaching the outer join (early-exit patterns)
+;;   - Multi-block early-exit arms (an arm that walks several blocks
+;;     before its terminating Term:ret / Term:throw)
+;;   - Asymmetric early-exit (one arm terminates, the other rejoins
+;;     and continues past a notional join block)
+;;   - early-exit Gamma nested inside another Gamma arm or a Theta
+;;     loop body
 ;;   - try/catch (Kappa recovery)
 ;;
 ;; Each of the above raises with a self-identifying error.
@@ -132,12 +141,16 @@
     (parameterize ([current-theta-ctxs theta-ctxs])
       (translate-segment cfg (Cfg-entry cfg) #f region1 var->out-init)))
 
-  ;; 4. Materialise Term:ret / Term:throw.
+  ;; 4. Materialise Term:ret / Term:throw.  An 'already-terminated
+  ;; payload means a terminal Gamma at the top level has installed
+  ;; ret / throw inside each of its sub-regions, so the outer region
+  ;; needs no further sink node.
   (define region-done
     (match payload
-      [(cons 'ret vs)   (install-return region-final var->out-final vs)]
-      [(cons 'throw ex) (install-throw  region-final var->out-final ex)]
-      [_                region-final]))
+      [(cons 'ret vs)        (install-return region-final var->out-final vs)]
+      [(cons 'throw ex)      (install-throw  region-final var->out-final ex)]
+      ['already-terminated   region-final]
+      [_                     region-final]))
 
   (Lambda region-done))
 
@@ -195,14 +208,23 @@
        [(Term:unreachable)
         (values region1 var->out1 #f)]
        [(Term:cond pred then-bid else-bid)
-        (define-values (region2 var->out2 join-bid)
-          (translate-gamma cfg start-bid pred then-bid else-bid
-                           region1 var->out1))
+        (define then-blk (cfg-get-block cfg then-bid))
+        (define else-blk (cfg-get-block cfg else-bid))
         (cond
-          [join-bid
-           (translate-segment cfg join-bid stop-bid region2 var->out2)]
+          [(and (terminal-block? then-blk) (terminal-block? else-blk))
+           ;; Both arms exit (Term:ret / Term:throw).  Lower as a
+           ;; Gamma whose sub-regions each terminate internally.
+           (translate-terminal-gamma cfg pred then-bid else-bid
+                                     region1 var->out1)]
           [else
-           (values region2 var->out2 #f)])]
+           (define-values (region2 var->out2 join-bid)
+             (translate-gamma cfg start-bid pred then-bid else-bid
+                              region1 var->out1))
+           (cond
+             [join-bid
+              (translate-segment cfg join-bid stop-bid region2 var->out2)]
+             [else
+              (values region2 var->out2 #f)])])]
        [(Term:switch _ _ _)
         (error 'translate-segment
                "Term:switch at ~a not yet supported" start-bid)]
@@ -338,6 +360,129 @@
       (ordered-map-set m (PhiInsn-output phi) oid)))
 
   (values region3 var->out* join-bid))
+
+;; ============================================================
+;; Terminal Gamma (gamma-early-exit, both arms terminate)
+;; ============================================================
+;;
+;; Scope: each arm is a single CfgBlock whose terminator is Term:ret
+;; or Term:throw.  No phis on either arm's block.  No common join.
+;;
+;; The Gamma has 0 outputs.  Each sub-region:
+;;   - region-arg(0, n-ctx) producer mirrors ctx-vars.
+;;   - the arm block's VfInsns are translated.
+;;   - install-return / install-throw materialises the terminator
+;;     directly inside the sub-region.
+;; No region-result node is emitted; the return / throw is the
+;; sub-region's sink.
+
+(define (terminal-block? blk)
+  (define t (CfgBlock-terminator blk))
+  (or (Term:ret? t) (Term:throw? t)))
+
+;; Walk both arm blocks once; collect every parent-scope VarId read
+;; by any VfInsn input or by the block's terminator (Term:ret values
+;; / Term:throw exception), excluding VarIds locally defined in that
+;; same block (phi outputs + VfInsn outputs).  Returns an ordered-map
+;; used as a set of VarId -> #t.
+(define (collect-terminal-arm-ctx cfg parent-var->out arm-bids)
+  (define (block-locals blk)
+    (define s0
+      (for/fold ([s (ordered-map-empty var-id-compare)])
+                ([phi (in-pvector (CfgBlock-phis blk))])
+        (ordered-map-set s (PhiInsn-output phi) #t)))
+    (for/fold ([s s0]) ([insn (in-pvector (CfgBlock-insns blk))])
+      (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
+                         #:when (VarId? o))
+        (ordered-map-set s o #t))))
+  (define (consider x locals acc)
+    (cond
+      [(and (VarId? x)
+            (not (ordered-map-ref locals x #f))
+            (ordered-map-ref parent-var->out x #f))
+       (ordered-map-set acc x #t)]
+      [else acc]))
+  (for/fold ([acc (ordered-map-empty var-id-compare)])
+            ([bid (in-list arm-bids)])
+    (define blk (cfg-get-block cfg bid))
+    (define locals (block-locals blk))
+    (define acc1
+      (for/fold ([a acc]) ([insn (in-pvector (CfgBlock-insns blk))])
+        (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
+          (consider x locals a))))
+    (define term-reads
+      (match (CfgBlock-terminator blk)
+        [(Term:ret vs) vs]
+        [(Term:throw v) (pvector v)]
+        [_ (pvector-empty)]))
+    (for/fold ([a acc1]) ([x (in-pvector term-reads)])
+      (consider x locals a))))
+
+(define (build-terminal-arm-region cfg branch-bid ctx-vars which)
+  (define n-ctx (pvector-length ctx-vars))
+  (define blk (cfg-get-block cfg branch-bid))
+  (unless (= 0 (pvector-length (CfgBlock-phis blk)))
+    (error 'build-terminal-arm-region
+           "terminal arm ~a (~a) has phis, not yet supported"
+           branch-bid which))
+  (define sub0 (region-empty))
+  (define-values (sub1 _arg-nid _arg-ins arg-outs)
+    (region-add-node sub0 (Simple (list 'region-arg n-ctx)) 0 n-ctx))
+  (define sub-var->out
+    (for/fold ([m (ordered-map-empty var-id-compare)])
+              ([v (in-pvector ctx-vars)]
+               [oid (in-pvector arg-outs)])
+      (ordered-map-set m v oid)))
+  (define-values (sub2 sub-var->out2)
+    (translate-insns (CfgBlock-insns blk) sub1 sub-var->out))
+  (match (CfgBlock-terminator blk)
+    [(Term:ret vs)  (install-return sub2 sub-var->out2 vs)]
+    [(Term:throw v) (install-throw  sub2 sub-var->out2 v)]
+    [other (error 'build-terminal-arm-region
+                  "expected Term:ret or Term:throw at ~a, got ~s"
+                  branch-bid other)]))
+
+;; Returns (values region var->out 'already-terminated).  Caller
+;; treats the terminal-Gamma as the segment's terminator and stops
+;; translating further blocks.
+(define (translate-terminal-gamma cfg pred then-bid else-bid region var->out)
+  (define ctx-set
+    (collect-terminal-arm-ctx cfg var->out (list then-bid else-bid)))
+  (define ctx-vars
+    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+  (define n-ctx (pvector-length ctx-vars))
+
+  (define then-region (build-terminal-arm-region cfg then-bid ctx-vars 'then))
+  (define else-region (build-terminal-arm-region cfg else-bid ctx-vars 'else))
+
+  (define gamma-val (Gamma (list then-region else-region)))
+
+  ;; Install Gamma in parent: 1 predicate input + n-ctx ctx inputs,
+  ;; 0 outputs.
+  (define-values (region1 _gnid g-ins _g-outs)
+    (region-add-node region gamma-val (add1 n-ctx) 0))
+
+  ;; Wire predicate.
+  (define pred-oid
+    (or (ordered-map-ref var->out pred #f)
+        (error 'translate-terminal-gamma
+               "undefined predicate ~a" pred)))
+  (define-values (region2 _pw)
+    (region-add-wire region1 pred-oid (pvector-ref g-ins 0)))
+
+  ;; Wire ctx inputs.
+  (define region3
+    (for/fold ([r region2])
+              ([ctx-var (in-pvector ctx-vars)]
+               [i (in-naturals 1)])
+      (define src-oid
+        (or (ordered-map-ref var->out ctx-var #f)
+            (error 'translate-terminal-gamma
+                   "undefined ctx var ~a" ctx-var)))
+      (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
+      r*))
+
+  (values region3 var->out 'already-terminated))
 
 ;; Advance one step through an arm's control flow, recursively resolving
 ;; nested Term:cond blocks by finding their own diamond-joins.  Returns

@@ -495,6 +495,52 @@
     ;; Parent must still terminate with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Gamma early-exit: both arms terminate -----
+  (test-case "if (c) return X; else return Y; lowers to terminal Gamma"
+    ;; int m(int x) {
+    ;;   if (x == 0) return 42;
+    ;;   else        return x + 1;
+    ;; }
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_THEN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IADD)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN")
+                       (mk-insn 'BIPUSH 42)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains exactly one Gamma node.
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "parent region should contain exactly one terminal Gamma")
+    ;; Parent region must NOT install its own top-level return; the
+    ;; Gamma's two sub-regions each terminate internally.
+    (check-false (memq 'return (node-ops r))
+                 "terminal Gamma should not have a top-level return alongside it")
+    ;; Gamma has two sub-regions; each hosts its own Simple 'return.
+    (define gamma (car gammas))
+    (define sub-regions (Gamma-regions gamma))
+    (check-equal? (length sub-regions) 2)
+    (for ([sub (in-list sub-regions)]
+          [which (in-list '(then else))])
+      (define ops
+        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+          (define v (cdr kv))
+          (cond [(Simple? v) (Simple-op v)] [else 'other])))
+      (check-not-false (memq 'return ops)
+                       (format "~a sub-region missing 'return sink" which))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
