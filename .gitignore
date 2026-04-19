@@ -25,3 +25,5 @@ out/
 
 *.MD
 *.md
+!doc/
+!doc/*.md
