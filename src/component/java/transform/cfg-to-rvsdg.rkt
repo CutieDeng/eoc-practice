@@ -20,17 +20,18 @@
 ;;   - Term:ret / Term:throw yield synthetic `Simple 'return` /
 ;;     kernel `Throw` sink nodes in whichever region they appear.
 ;;
-;;   - A single natural loop with a one-block body is lowered to a
-;;     Theta node.  The header must end in Term:cond; one arm equals
-;;     the latch (continue) and the other is the exit.  All parent-
-;;     scope vars pass through as conservatively-closed loop-carried
-;;     or loop-invariant inputs.  A `Simple 'not` node flips polarity
-;;     when the body sits on the else-arm.
+;;   - A single natural loop is lowered to a Theta node.  The header
+;;     must end in Term:cond; one arm leads (possibly through a chain
+;;     of Term:jump-only blocks) to the latch (continue) and the other
+;;     is the exit.  All parent-scope vars pass through as
+;;     conservatively-closed loop-carried or loop-invariant inputs.  A
+;;     `Simple 'not` node flips polarity when the body sits on the
+;;     else-arm.
 ;;
 ;; Currently unsupported:
 ;;   - Term:switch (tablesswitch / lookupswitch)
 ;;   - Nested / multiple natural loops
-;;   - Loop body spanning more than one block
+;;   - Loop body containing its own Term:cond (Gamma inside Theta)
 ;;   - Gamma arm with Term:ret / Term:throw / Term:switch before
 ;;     reaching the outer join (early-exit patterns)
 ;;   - try/catch (Kappa recovery)
@@ -55,8 +56,9 @@
 ;;
 ;; Threaded through translate-segment so that the first entry into a
 ;; loop header spawns a Theta.  We currently support at most one
-;; natural loop per CFG with a single-block body whose back-edge
-;; closes to the header.
+;; natural loop per CFG; the body may span multiple blocks as long as
+;; they form a linear Term:jump chain from the header's body-arm to
+;; the latch, whose back-edge closes to the header.
 ;;
 (struct Theta-Ctx (header latch) #:prefab)
 
@@ -380,6 +382,37 @@
                    term bid)])]))
   (walk branch-bid (ordered-map-empty block-id-compare)))
 
+;; Walk a Theta cond-arm forward via Term:jump only, returning #t iff
+;; `target` is reachable.  Non-jump terminators or hitting a cycle
+;; before the target both fail.  Used by translate-theta to decide
+;; which arm is the loop body when an arm doesn't equal the latch
+;; directly but a linear chain of jump-only blocks sits between them.
+(define (body-arm-reaches-latch? cfg start target)
+  (let loop ([b start] [v (ordered-map-empty block-id-compare)])
+    (cond
+      [(equal? b target) #t]
+      [(ordered-map-ref v b #f) #f]
+      [else
+       (match (CfgBlock-terminator (cfg-get-block cfg b))
+         [(Term:jump n) (loop n (ordered-map-set v b #t))]
+         [_ #f])])))
+
+;; Ordered-set of every BlockId on the Term:jump chain from `start`
+;; through `target`, inclusive on both ends.  Caller must have
+;; verified reachability via `body-arm-reaches-latch?`; any non-jump
+;; terminator before `target` is an internal error.
+(define (theta-body-blocks cfg start target)
+  (let loop ([b start] [s (ordered-map-empty block-id-compare)])
+    (define s* (ordered-map-set s b #t))
+    (cond
+      [(equal? b target) s*]
+      [else
+       (match (CfgBlock-terminator (cfg-get-block cfg b))
+         [(Term:jump n) (loop n s*)]
+         [t (error 'theta-body-blocks
+                   "unexpected terminator ~s at ~a while walking to latch ~a"
+                   t b target)])])))
+
 ;; ============================================================
 ;; Sub-region builder
 ;; ============================================================
@@ -489,12 +522,15 @@
                       (ordered-map-empty var-id-compare))))
 
 ;; Collect parent-scope VarIds actually read inside the loop.  Walks
-;; both the header block and the latch block, tracking locally-defined
-;; outputs (including header phi outputs, which are local to the
-;; sub-region).  Any VfInsn input that is a VarId, not locally-defined
-;; in the block's prefix, and present in `parent-var->out` counts as a
-;; read.  Returns an ordered-map used as a set of VarId -> #t.
-(define (collect-theta-ctx cfg parent-var->out header-bid latch-bid phis)
+;; the header block and every block on the body chain (body-entry →
+;; ... → latch), tracking locally-defined outputs per block (seeded
+;; with header phi outputs, which are local to the sub-region).  Any
+;; VfInsn input that is a VarId, not locally-defined in the block's
+;; prefix, and present in `parent-var->out` counts as a read.
+;; `body-blocks` is an ordered-set of BlockIds (as produced by
+;; `theta-body-blocks`); a single-block body degenerates to just the
+;; latch entry.  Returns an ordered-map used as a set of VarId -> #t.
+(define (collect-theta-ctx cfg parent-var->out header-bid body-blocks phis)
   (define phi-out-set
     (for/fold ([m (ordered-map-empty var-id-compare)])
               ([p (in-pvector phis)])
@@ -520,9 +556,10 @@
             (ordered-map-set s o #t)))
         (values locals* a*)))
     acc*)
-  (walk-block latch-bid
-              (walk-block header-bid
-                          (ordered-map-empty var-id-compare))))
+  (for/fold ([acc (walk-block header-bid
+                              (ordered-map-empty var-id-compare))])
+            ([kv (in-ordered-map body-blocks)])
+    (walk-block (car kv) acc)))
 
 ;; Find the VarId contributed by `branch-bid` to a phi's sources.
 (define (pick-phi-source phi branch-bid which)
@@ -538,18 +575,20 @@
 ;; Theta recovery (while-loop)
 ;; ============================================================
 ;;
-;; Scope: exactly one natural loop, with a single-block body that
-;; jumps back to the header (the latch).  The header must end in
-;; Term:cond; one arm leads into the body (the latch), the other
-;; exits the loop.  Deviations raise self-identifying errors.
+;; Scope: exactly one natural loop.  The header must end in
+;; Term:cond; one arm leads (possibly via a chain of Term:jump-only
+;; blocks) to the latch, which jumps back to the header.  The other
+;; cond arm exits the loop.  Deviations raise self-identifying errors.
 ;;
 ;; Sub-region layout:
 ;;   - `Simple '(region-arg N)` producer provides one output per
 ;;     loop-carried phi (these mirror the Theta node's inputs).
 ;;   - Header's non-phi insns are translated in-region.
-;;   - Body block's insns are translated in-region via a scoped
-;;     translate-segment call with stop-bid=header (closing on the
-;;     back-edge).
+;;   - Body blocks' insns are translated in-region via a scoped
+;;     translate-segment call starting at the cond's body-arm and
+;;     with stop-bid=header; the Term:jump chain walks through any
+;;     intermediate body blocks and the latch before closing on the
+;;     back-edge.
 ;;   - `Simple '(region-result (+ N 1))` consumer takes (predicate,
 ;;     loop-carried-updates...); `Simple 'not` is inserted when the
 ;;     natural cond polarity would iterate on the wrong branch.
@@ -571,6 +610,30 @@
               ([p (in-pvector phis)])
       (ordered-map-set m (PhiInsn-output p) p)))
 
+  ;; The header must end in Term:cond: one arm jumps (possibly via a
+  ;; chain of Term:jump blocks) to the latch and constitutes the loop
+  ;; body; the other is the exit.  We resolve this up-front so that
+  ;; collect-theta-ctx can see every body block's reads.
+  (define header-term (CfgBlock-terminator header-blk))
+  (unless (Term:cond? header-term)
+    (error 'translate-theta
+           "header ~a must end in Term:cond for Theta lowering (got ~a)"
+           header-bid header-term))
+  (define pred-var (Term:cond-cond header-term))
+  (define then-bid (Term:cond-then-target header-term))
+  (define else-bid (Term:cond-else-target header-term))
+  (define-values (body-is-then? body-entry-bid exit-arm-bid)
+    (cond
+      [(body-arm-reaches-latch? cfg then-bid latch-bid)
+       (values #t then-bid else-bid)]
+      [(body-arm-reaches-latch? cfg else-bid latch-bid)
+       (values #f else-bid then-bid)]
+      [else
+       (error 'translate-theta
+              "neither cond arm reaches latch ~a via a Term:jump chain (then=~a else=~a)"
+              latch-bid then-bid else-bid)]))
+  (define body-blocks (theta-body-blocks cfg body-entry-bid latch-bid))
+
   ;; Theta's inputs/outputs cover:
   ;;   (a) phi outputs at the header (loop-carried; always needed
   ;;       because the body rebinds via them)
@@ -583,7 +646,7 @@
     (let* ([phi-outs
             (for/pvector ([p (in-pvector phis)]) (PhiInsn-output p))]
            [reads
-            (collect-theta-ctx cfg var->out header-bid latch-bid phis)]
+            (collect-theta-ctx cfg var->out header-bid body-blocks phis)]
            [seen
             (for/fold ([s (ordered-map-empty var-id-compare)])
                       ([v (in-pvector phi-outs)])
@@ -628,31 +691,6 @@
   ;; that produces the Term:cond predicate).
   (define-values (sub2 sub-var->out2)
     (translate-insns (CfgBlock-insns header-blk) sub1 sub-var->out-init))
-
-  ;; Identify continue / exit arms.
-  (define header-term (CfgBlock-terminator header-blk))
-  (unless (Term:cond? header-term)
-    (error 'translate-theta
-           "header ~a must end in Term:cond for Theta lowering (got ~a)"
-           header-bid header-term))
-  (define pred-var (Term:cond-cond header-term))
-  (define then-bid (Term:cond-then-target header-term))
-  (define else-bid (Term:cond-else-target header-term))
-  ;; Pick the body-arm by walking each cond arm forward via Term:jump
-  ;; until we either hit the latch (= body) or a non-jump terminator
-  ;; (= exit).  For single-block bodies this reduces to the old
-  ;; `(equal? arm-bid latch-bid)` check; for multi-block bodies one
-  ;; or more Term:jump-only blocks separate the cond from the latch.
-  (define-values (body-is-then? body-entry-bid exit-arm-bid)
-    (cond
-      [(body-arm-reaches-latch? cfg then-bid latch-bid)
-       (values #t then-bid else-bid)]
-      [(body-arm-reaches-latch? cfg else-bid latch-bid)
-       (values #f else-bid then-bid)]
-      [else
-       (error 'translate-theta
-              "neither cond arm reaches latch ~a via a Term:jump chain (then=~a else=~a)"
-              latch-bid then-bid else-bid)]))
 
   ;; Translate the body block(s), stopping at the back-edge into
   ;; header.  translate-segment walks the Term:jump chain from

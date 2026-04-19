@@ -283,6 +283,65 @@
     ;; Parent must still terminate with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Theta recovery: multi-block body -----
+  (test-case "while-loop lowers to a Theta node with multi-block body"
+    ;; slot0 = 0;
+    ;; while (slot1 != 0) {
+    ;;   slot0 = slot0 + 1;     ;; body_a
+    ;;   slot1 = slot1 - 1;     ;; body_b (latch, jumps back to head)
+    ;; }
+    ;; return slot0;
+    ;;
+    ;; An explicit GOTO between the two body portions forces a block
+    ;; split, so the loop body spans body_a and body_b — the body-arm
+    ;; must walk a Term:jump chain to reach the latch.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY_A")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IADD)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'GOTO "L_BODY_B")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY_B")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains exactly one Theta node.
+    (define thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length thetas) 1
+                  "parent region should contain exactly one Theta")
+    (define theta-sub (Theta-region (car thetas)))
+    ;; Both body blocks' arithmetic ops must appear inside the
+    ;; Theta's sub-region: IADD from body_a and ISUB from body_b.
+    (define sub-ops
+      (for/list ([kv (in-ordered-map (Region-node->value theta-sub))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    (check-not-false (memq 'IADD sub-ops)
+                     "IADD from body_a missing from Theta sub-region")
+    (check-not-false (memq 'ISUB sub-ops)
+                     "ISUB from body_b missing from Theta sub-region")
+    ;; Parent must still terminate with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
