@@ -147,6 +147,34 @@
 ;;
 (struct Theta-Ctx (header latches) #:prefab)
 
+;; ============================================================
+;; Kappa group (try/catch recovery scaffolding)
+;; ============================================================
+;;
+;; A `Kappa-Group` describes one try/catch region identified on the
+;; CFG side before RVSDG construction.  The actual construction is
+;; staged over C2–C4 and wired via `translate-segment` once the
+;; normalize-try-exits pre-pass is in place; for now the struct is
+;; a scaffolding type carrying exactly the data downstream code will
+;; need, without participating in the current translator.
+;;
+;; Fields:
+;;   try-bids     : ordered-map[BlockId -> #t] — blocks inside the
+;;                  half-open try window.  Handler blocks are
+;;                  excluded (they see the exception as a region-arg
+;;                  rather than a normal predecessor).
+;;   handlers     : pvector[(cons catch-type BlockId)] — ordered
+;;                  handler list in declaration order.  catch-type is
+;;                  a Java class-name string, or #f for catch-all.
+;;   kind         : 'terminal — every arm (try + each handler) ends
+;;                               in ret / throw; Kappa has 0 outputs.
+;;                  'convergent — every arm falls through to a common
+;;                                join block; Kappa has join-phi-count
+;;                                outputs.
+;;   join-bid     : BlockId or #f — the shared post-Kappa block when
+;;                  kind = 'convergent, #f when kind = 'terminal.
+(struct Kappa-Group (try-bids handlers kind join-bid) #:prefab)
+
 ;; Optional restriction on which BlockIds the arm-walking helpers
 ;; (`arm-advance`, `find-branch-join`, `arm-blocks-set`,
 ;; `arm-last-before-join`) are allowed to traverse.  A successor

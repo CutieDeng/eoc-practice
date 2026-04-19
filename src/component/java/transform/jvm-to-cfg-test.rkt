@@ -295,6 +295,38 @@
         (check-false (eq? (VfInsn-op insn) 'java/exception-ref)
                      "no block should synthesize an exception-ref in a try-free method"))))
 
+  (test-case "Cfg.info publishes 'java/block-order matching graph vertex count"
+    ;; Three blocks (entry cond / then / else), each must appear exactly
+    ;; once in block-order and every entry must be a BlockId that exists
+    ;; in Cfg.blocks.  Downstream passes rely on this as the canonical
+    ;; linearisation of the method's CFG.
+    (define m (mk-method
+                (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                      (mk-insn 'ILOAD 0)
+                      (mk-insn 'IFEQ "L2")
+                      (mk-insn 'CUTIEDENG-LABEL "L1")
+                      (mk-insn 'RETURN)
+                      (mk-insn 'CUTIEDENG-LABEL "L2")
+                      (mk-insn 'RETURN))
+                #:desc "(I)V"))
+    (define cfg (jvm-method->cfg m))
+    (define order (ordered-map-ref (Cfg-info cfg) 'java/block-order #f))
+    (check-not-false order "Cfg.info should carry 'java/block-order")
+    (check-equal? (pvector-length order) 3)
+    ;; Entry block must be the first element.
+    (check-equal? (pvector-ref order 0) (Cfg-entry cfg))
+    ;; Every listed BlockId resolves in Cfg.blocks.
+    (for ([bid (in-pvector order)])
+      (check-pred BlockId? bid)
+      (check-not-false (ordered-map-ref (Cfg-blocks cfg) bid #f)
+                       "block-order entry must exist in Cfg.blocks"))
+    ;; No duplicates.
+    (define seen (for/fold ([s (ordered-map-empty block-id-compare)])
+                           ([bid (in-pvector order)])
+                   (ordered-map-set s bid #t)))
+    (check-equal? (ordered-map-count seen) (pvector-length order)
+                  "block-order should list each BlockId exactly once"))
+
   (test-case "method without try/catch has no exception-table key"
     (define m
       (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")

@@ -29,7 +29,8 @@
   region-add-region-arg
   region-add-region-result
   build-handler-region-entry
-  install-kappa-terminal)
+  install-kappa-terminal
+  install-kappa-convergent)
 
 ;; ============================================================
 ;; Identifier comparators
@@ -209,3 +210,42 @@
       (define-values (r* _w) (region-add-wire r src dst))
       r*))
   (values parent2 knid))
+
+;; ============================================================
+;; Kappa installation (convergent shape: M > 0 outputs)
+;; ============================================================
+;;
+;; Install a Kappa node whose try-region and handler-regions all
+;; fall through to a shared join, producing M uniform output values.
+;; Every sub-region must already terminate internally in a
+;; `Simple '(region-result M)` consumer with M inputs wired to that
+;; region's per-arm outgoing values; this helper only allocates the
+;; Kappa node itself and threads parent-side ctx inputs.
+;;
+;; Arguments:
+;;   parent      : Region - the enclosing region
+;;   ctx-oids    : pvector[OutputId] - N producer outputs in `parent`
+;;                 that supply each sub-region's region-arg values
+;;   try-region  : Region - pre-built try body (region-arg has N
+;;                 outputs; body ends in `Simple '(region-result M)`)
+;;   handlers    : pvector[(cons catch-type Region)] - each handler
+;;                 has an (N+1)-output region-arg and ends in
+;;                 `Simple '(region-result M)`
+;;   n-out       : Natural = M - number of Kappa outputs; must match
+;;                 every sub-region's region-result port count
+;;
+;; Returns (values new-parent kappa-nid out-oids) where
+;;   out-oids : pvector[OutputId] of length M — the Kappa node's
+;;              output ports in `parent`, in allocation order.
+(define (install-kappa-convergent parent ctx-oids try-region handlers n-out)
+  (define n-ctx (pvector-length ctx-oids))
+  (define kappa-val (Kappa try-region handlers))
+  (define-values (parent1 knid k-ins k-outs)
+    (region-add-node parent kappa-val n-ctx n-out))
+  (define parent2
+    (for/fold ([r parent1])
+              ([src (in-pvector ctx-oids)]
+               [dst (in-pvector k-ins)])
+      (define-values (r* _w) (region-add-wire r src dst))
+      r*))
+  (values parent2 knid k-outs))

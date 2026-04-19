@@ -171,6 +171,83 @@
     (check-false  (car (pvector-ref hs 1))
                   "catch-all is signalled by #f catch-type"))
 
+  ;; Build a try-region that falls through with M region-result inputs
+  ;; wired from its N ctx region-arg outputs.  Requires M <= N so we can
+  ;; wire result-ins[i] <- ctx-outs[i]; sufficient for the current tests.
+  (define (mk-convergent-try-region n-ctx m-out)
+    (define r0 (region-empty))
+    (define-values (r1 ctx-outs) (region-add-region-arg r0 n-ctx))
+    (define-values (r2 res-ins) (region-add-region-result r1 m-out))
+    (for/fold ([r r2])
+              ([i (in-range m-out)])
+      (define-values (r* _w)
+        (region-add-wire r (pvector-ref ctx-outs i) (pvector-ref res-ins i)))
+      r*))
+
+  ;; Build a convergent handler-region that feeds its ctx args (and
+  ;; ignores the exception-ref) through to its region-result sink.
+  (define (mk-convergent-handler-region n-ctx m-out)
+    (define-values (r1 ctx-outs _exn-out) (build-handler-region-entry n-ctx))
+    (define-values (r2 res-ins) (region-add-region-result r1 m-out))
+    (for/fold ([r r2])
+              ([i (in-range m-out)])
+      (define-values (r* _w)
+        (region-add-wire r (pvector-ref ctx-outs i) (pvector-ref res-ins i)))
+      r*))
+
+  (test-case "install-kappa-convergent: allocates M outputs and wires N ctx inputs"
+    (define n-ctx 2)
+    (define m-out 2)
+    (define try-r (mk-convergent-try-region n-ctx m-out))
+    (define handler-r (mk-convergent-handler-region n-ctx m-out))
+    (define handlers
+      (pvector-cons-right (pvector-empty)
+                          (cons "java.lang.Exception" handler-r)))
+    (define parent0 (region-empty))
+    (define-values (parent1 _pid _pins param-outs)
+      (region-add-node parent0 (Simple 'param) 0 n-ctx))
+    (define ctx-oids
+      (for/pvector ([o (in-pvector param-outs)]) o))
+    (define-values (parent2 knid out-oids)
+      (install-kappa-convergent parent1 ctx-oids try-r handlers m-out))
+    (define kappa (first-kappa parent2))
+    (check-pred Kappa? kappa)
+    (define kin-info (ordered-map-ref (Region-node->input parent2) knid))
+    (define kout-info (ordered-map-ref (Region-node->output parent2) knid))
+    (check-equal? (cdr kin-info) n-ctx "convergent Kappa should take N ctx inputs")
+    (check-equal? (cdr kout-info) m-out "convergent Kappa should surface M outputs")
+    (check-equal? (pvector-length out-oids) m-out)
+    (for ([o (in-pvector out-oids)]) (check-pred OutputId? o))
+    ;; N wires from param to Kappa's ctx ports.
+    (check-equal? (ordered-map-count (Region-wire->input parent2)) n-ctx))
+
+  (test-case "install-kappa-convergent: zero-ctx still produces M outputs"
+    (define m-out 1)
+    (define try-r
+      (let-values ([(r _ins) (region-add-region-result
+                              (let-values ([(r1 _outs)
+                                            (region-add-region-arg
+                                             (region-empty) 0)])
+                                r1)
+                              m-out)])
+        ;; The region-result's one input is left unwired; parent-side
+        ;; shape is still valid for the purposes of this builder test.
+        r))
+    (define handler-r
+      (let-values ([(r1 _ctx-outs _exn-out) (build-handler-region-entry 0)])
+        (let-values ([(r2 _ins) (region-add-region-result r1 m-out)])
+          r2)))
+    (define handlers
+      (pvector-cons-right (pvector-empty) (cons #f handler-r)))
+    (define parent0 (region-empty))
+    (define-values (parent1 knid out-oids)
+      (install-kappa-convergent parent0 (pvector-empty) try-r handlers m-out))
+    (check-equal? (pvector-length out-oids) m-out)
+    (define kin-info (ordered-map-ref (Region-node->input parent1) knid))
+    (check-equal? (cdr kin-info) 0
+                  "zero-ctx convergent Kappa should have 0 input ports")
+    (check-equal? (ordered-map-count (Region-wire->input parent1)) 0))
+
   (test-case "install-kappa-terminal: zero-ctx Kappa is permitted"
     (define try-r (mk-trivial-try-region 0))
     (define handler-r (mk-throw-handler-region 0))

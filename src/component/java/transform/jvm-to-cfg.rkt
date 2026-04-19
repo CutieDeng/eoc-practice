@@ -197,10 +197,19 @@
     (parse-method-descriptor (JvmMethod-descriptor method)))
 
   (define local-count (max (add1 max-local) param-n))
+  ;; Linearised BlockId order, matching the original JVM method's
+  ;; source-level block order.  Downstream passes (notably
+  ;; normalize-try-exits) need block ordinals to re-derive the
+  ;; half-open windows declared by the exception table; we publish
+  ;; the mapping once here rather than re-walking labels.
+  (define block-order-bids
+    (for/pvector ([lbl (in-pvector block-order)])
+      (ordered-map-ref label->bid lbl #f)))
   (define info0
     (let* ([m (ordered-map-empty symbol-compare)]
            [m (ordered-map-set m 'java/param-count param-n)]
-           [m (ordered-map-set m 'java/max-local local-count)])
+           [m (ordered-map-set m 'java/max-local local-count)]
+           [m (ordered-map-set m 'java/block-order block-order-bids)])
       (cond
         [(> (pvector-length exception-table-bids) 0)
          (ordered-map-set m 'java/exception-table exception-table-bids)]
