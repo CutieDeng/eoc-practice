@@ -192,13 +192,41 @@
 ;; Exception Nodes
 ;; ============================================================
 
-;; Kappa node: try-catch structure
-;; try-region: Region for try block
-;; handlers: list of exception handlers
+;; Kappa node: try-catch structure.
+;;
+;; Field shapes (contract):
+;;   try-region : Region containing the try body.  A `Throw` node
+;;                installed anywhere inside this region short-circuits
+;;                to handler selection; the thrown value is made
+;;                available to every handler-region as its extra
+;;                region-arg output (the exception-ref).  If the try
+;;                body can also fall through normally, its sink is a
+;;                `Simple '(region-result M)` whose input shape must
+;;                match every handler-region's region-result.
+;;
+;;   handlers   : pvector[(cons catch-type Region)]
+;;     catch-type : String  - Java exception class name (e.g.
+;;                            "java.lang.RuntimeException"), matched
+;;                            first-wins in list order, OR
+;;                  #f      - catch-all (finally-style), always last
+;;
+;; I/O convention for the Kappa node in its parent region:
+;;   inputs  : N ctx values, threaded as `Simple '(region-arg N)`
+;;             into both try-region and every handler-region.
+;;             Handler-regions additionally receive the exception-ref
+;;             as their (N+1)-th region-arg output.
+;;   outputs : M values, uniform across try-region (if it falls
+;;             through) and every handler-region.  A "terminal" Kappa
+;;             is the initial supported shape: try-region and all
+;;             handler-regions install their own ret / throw sink
+;;             internally, so M = 0 and the node carries no outputs.
 (struct Kappa (try-region handlers) #:prefab)
 
-;; Throw node: exception raise
-;; exn-tag: exception type tag
+;; Throw node: exception raise.  Acts as a region sink (1 input,
+;; 0 outputs) when installed inside a region.  The enclosing Kappa's
+;; try-region binding determines whether the throw is caught (Kappa's
+;; handlers take over) or propagates further (outer Lambda / Kappa).
+;; exn-tag : Symbol or #f - optional static tag metadata.
 (struct Throw (exn-tag) #:prefab)
 
 ;; ============================================================
