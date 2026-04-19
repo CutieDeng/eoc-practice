@@ -78,6 +78,13 @@
   (define scope (current-arm-scope))
   (or (not scope) (ordered-map-ref scope bid #f)))
 
+;; Map of every loop header in the CFG to its Theta-Ctx.  Set once
+;; per `cfg->rvsdg` invocation; consulted by `translate-segment`
+;; whenever it lands on a new BlockId, which is how nested loops and
+;; loops inside Gamma arms get dispatched into translate-theta
+;; without any caller having to thread the ctx map manually.
+(define current-theta-ctxs (make-parameter #f))
+
 ;; ============================================================
 ;; Entry
 ;; ============================================================
@@ -89,20 +96,22 @@
         (error 'cfg->rvsdg
                "ssa must publish 'java/ssa-param-names; run jvm-cfg->ssa first")))
 
-  ;; Detect loop structure.  At most one back-edge supported; nested
-  ;; or irreducible loops raise.
+  ;; Detect loop structure.  Each back-edge becomes one entry in
+  ;; theta-ctxs (header-bid -> Theta-Ctx).  Multiple back-edges
+  ;; sharing a header (multi-latch loops, e.g. via `continue` from
+  ;; several paths) are still rejected; reducible nested loops are
+  ;; fine because each loop has a distinct header.
   (define back-edges (cfg-find-back-edges cfg))
-  (define n-back-edges (pvector-length back-edges))
-  (define theta-ctx
-    (cond
-      [(= n-back-edges 0) #f]
-      [(= n-back-edges 1)
-       (define be (pvector-ref back-edges 0))
-       (Theta-Ctx (cdr be) (car be))]
-      [else
-       (error 'cfg->rvsdg
-              "multiple back-edges not yet supported: ~s"
-              (for/list ([e (in-pvector back-edges)]) e))]))
+  (define theta-ctxs
+    (for/fold ([m (ordered-map-empty block-id-compare)])
+              ([be (in-pvector back-edges)])
+      (define latch (car be))
+      (define header (cdr be))
+      (when (ordered-map-ref m header #f)
+        (error 'cfg->rvsdg
+               "loop header ~a has multiple back-edges (latches), not yet supported"
+               header))
+      (ordered-map-set m header (Theta-Ctx header latch))))
 
   (define region0 (region-empty))
 
@@ -120,7 +129,8 @@
   ;; 3. Translate starting at entry; stop-bid = #f means "until a
   ;;    terminator or unreachable".
   (define-values (region-final var->out-final payload)
-    (translate-segment cfg (Cfg-entry cfg) #f region1 var->out-init theta-ctx))
+    (parameterize ([current-theta-ctxs theta-ctxs])
+      (translate-segment cfg (Cfg-entry cfg) #f region1 var->out-init)))
 
   ;; 4. Materialise Term:ret / Term:throw.
   (define region-done
@@ -139,16 +149,22 @@
 ;; segment that hits stop-bid, or (cons 'ret pvector) / (cons
 ;; 'throw VarId) for one that ran into a function-level exit.
 ;;
-;; `theta-ctx` describes the currently-active loop (if any).  When
-;; `start-bid` equals the Theta header AND the caller did not pass
-;; stop-bid=header (which would catch back-edge closure first), we
-;; dispatch into translate-theta to build a Theta node.
-(define (translate-segment cfg start-bid stop-bid region var->out theta-ctx)
+;; The active loop map lives in `current-theta-ctxs` (set by
+;; cfg->rvsdg).  When `start-bid` matches one of the headers in that
+;; map AND the caller did not pass stop-bid=header (which would
+;; catch back-edge closure first), we dispatch into translate-theta.
+;; Nested loops, sibling loops, and loops inside Gamma arms all fall
+;; out for free: every recursive entry into translate-segment
+;; consults the same map, so any header encountered along the way is
+;; lowered into a Theta in whichever region we currently inhabit.
+(define (translate-segment cfg start-bid stop-bid region var->out)
+  (define ctxs (current-theta-ctxs))
+  (define ctx-here (and ctxs (ordered-map-ref ctxs start-bid #f)))
   (cond
     [(and stop-bid (equal? start-bid stop-bid))
      (values region var->out #f)]
-    [(and theta-ctx (equal? start-bid (Theta-Ctx-header theta-ctx)))
-     (translate-theta cfg theta-ctx stop-bid region var->out)]
+    [ctx-here
+     (translate-theta cfg ctx-here stop-bid region var->out)]
     [else
      (define blk (cfg-get-block cfg start-bid))
      (unless blk (error 'translate-segment "missing block ~a" start-bid))
@@ -171,7 +187,7 @@
      ;; Dispatch on the terminator.
      (match (CfgBlock-terminator blk)
        [(Term:jump nxt)
-        (translate-segment cfg nxt stop-bid region1 var->out1 theta-ctx)]
+        (translate-segment cfg nxt stop-bid region1 var->out1)]
        [(Term:ret ret-vs)
         (values region1 var->out1 (cons 'ret ret-vs))]
        [(Term:throw ex)
@@ -184,7 +200,7 @@
                            region1 var->out1))
         (cond
           [join-bid
-           (translate-segment cfg join-bid stop-bid region2 var->out2 theta-ctx)]
+           (translate-segment cfg join-bid stop-bid region2 var->out2)]
           [else
            (values region2 var->out2 #f)])]
        [(Term:switch _ _ _)
@@ -481,11 +497,13 @@
       (ordered-map-set m v oid)))
 
   ;; Translate the arm's chain of blocks.  translate-segment walks
-  ;; from branch-bid through Term:jump edges, stopping at join-bid,
-  ;; and feeds each block's var bindings forward.  theta-ctx is #f:
-  ;; nested loops within a Gamma arm are not yet supported.
+  ;; from branch-bid through Term:jump edges (and inner Gamma /
+  ;; Theta nodes) until it reaches join-bid.  The active loop map
+  ;; rides on `current-theta-ctxs`, so any loop header encountered
+  ;; inside this arm is lowered into a Theta living within this
+  ;; sub-region.
   (define-values (sub2 sub-var->out2 payload)
-    (translate-segment cfg branch-bid join-bid sub1 sub-var->out #f))
+    (translate-segment cfg branch-bid join-bid sub1 sub-var->out))
   (unless (eq? payload #f)
     (error 'build-branch-region
            "arm ~a reached non-join terminator (payload=~s) before join ~a"
@@ -748,7 +766,8 @@
   ;; cannot wander past the latch into the loop header.
   (define-values (sub3 sub-var->out3 body-payload)
     (parameterize ([current-arm-scope body-blocks])
-      (translate-segment cfg body-entry-bid header-bid sub2 sub-var->out2 #f)))
+      (translate-segment cfg body-entry-bid header-bid
+                         sub2 sub-var->out2)))
   (unless (eq? body-payload #f)
     (error 'translate-theta
            "loop body payload ~s unsupported (ret/throw inside loop not yet lowered)"
@@ -821,9 +840,9 @@
                [oid (in-pvector t-outs)])
       (ordered-map-set m v oid)))
 
-  ;; Continue translating from the exit-arm.  Only one loop supported,
-  ;; so no more theta-ctx beyond this point.
-  (translate-segment cfg exit-arm-bid stop-bid region2 var->out* #f))
+  ;; Continue translating from the exit-arm; the loop map lives in
+  ;; the parameter so sibling / outer loops keep dispatching.
+  (translate-segment cfg exit-arm-bid stop-bid region2 var->out*))
 
 ;; ============================================================
 ;; Terminator materialisation

@@ -411,6 +411,90 @@
     ;; Parent must still terminate with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Theta recovery: nested loops -----
+  (test-case "nested while-loops lower to nested Theta nodes"
+    ;; slot0 = 0;
+    ;; while (slot1 != 0) {         ;; outer header
+    ;;   slot2 = 3;
+    ;;   while (slot2 != 0) {       ;; inner header
+    ;;     slot0 += 1;
+    ;;     slot2 -= 1;              ;; inner latch
+    ;;   }
+    ;;   slot1 -= 1;                ;; outer latch
+    ;; }
+    ;; return slot0;
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_HEAD")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IFEQ "L_OUTER_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_BODY")
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'ISTORE 2)
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_HEAD")
+                       (mk-insn 'ILOAD 2)
+                       (mk-insn 'IFEQ "L_INNER_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_BODY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'IADD)
+                       (mk-insn 'ISTORE 0)
+                       (mk-insn 'ILOAD 2)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 2)
+                       (mk-insn 'GOTO "L_INNER_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_EXIT")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISUB)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_OUTER_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_EXIT")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN))
+                 #:desc "(II)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains exactly one (outer) Theta node.
+    (define outer-thetas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length outer-thetas) 1
+                  "parent region should contain exactly one outer Theta")
+    (define outer-sub (Theta-region (car outer-thetas)))
+    ;; Outer Theta's sub-region hosts exactly one inner Theta plus
+    ;; the outer-latch ISUB.
+    (define inner-thetas
+      (for/list ([kv (in-ordered-map (Region-node->value outer-sub))]
+                 #:when (Theta? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length inner-thetas) 1
+                  "outer Theta body should contain exactly one inner Theta")
+    (define outer-sub-ops
+      (for/list ([kv (in-ordered-map (Region-node->value outer-sub))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    (check-not-false (memq 'ISUB outer-sub-ops)
+                     "outer-latch ISUB missing from outer Theta sub-region")
+    ;; Inner Theta's sub-region hosts the IADD (slot0 += 1) and the
+    ;; inner-latch ISUB (slot2 -= 1).
+    (define inner-sub (Theta-region (car inner-thetas)))
+    (define inner-sub-ops
+      (for/list ([kv (in-ordered-map (Region-node->value inner-sub))])
+        (define v (cdr kv))
+        (cond [(Simple? v) (Simple-op v)] [else 'other])))
+    (check-not-false (memq 'IADD inner-sub-ops)
+                     "IADD missing from inner Theta sub-region")
+    (check-not-false (memq 'ISUB inner-sub-ops)
+                     "inner-latch ISUB missing from inner Theta sub-region")
+    ;; Parent must still terminate with a return.
+    (check-not-false (memq 'return (node-ops r))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
