@@ -149,4 +149,39 @@
     (check-true (no-duplicate-defs? cfg1))
     (for ([bid (in-list (cfg-all-block-ids cfg1))])
       (check-equal? (pvector-length (CfgBlock-phis (cfg-get-block cfg1 bid)))
-                    0))))
+                    0)))
+
+  ;; ----- fixture test(): try/catch handler block reachable only via
+  ;; exception edges -----
+  ;;
+  ;; The handler block is graph-unreachable from entry through ordinary
+  ;; terminators.  Pre-C4 SSA never visited the handler subtree, so its
+  ;; VfInsn inputs/outputs kept pre-SSA VarIds (ids within the local-slot
+  ;; range).  C4 added exception-augmented predecessors to the SSA
+  ;; driver, so the handler is now covered by rename: every output VarId
+  ;; across the CFG must be unique AND no handler-block VfInsn input may
+  ;; reference a pre-SSA local-slot VarId (id < local-count).
+  (test-case "fixture test(): handler block is SSA-renamed"
+    (define klass (read-jvm-class-file fixture-class-transform))
+    (define test-m
+      (for/or ([mth (JvmClass-methods klass)])
+        (and (equal? (JvmMethod-name mth) "test") mth)))
+    (check-not-false test-m)
+    (define cfg0 (jvm-method->cfg test-m))
+    (define cfg1 (jvm-cfg->ssa cfg0))
+    (check-true (no-duplicate-defs? cfg1))
+    (define local-count (cfg-get-info cfg1 'java/max-local 0))
+    (define table (cfg-get-info cfg1 'java/exception-table #f))
+    (check-not-false table "fixture must have an exception table")
+    ;; For every handler block in the table, its VfInsn inputs must all
+    ;; be either non-VarId literals or SSA-range VarIds (id >= local-count).
+    (for ([entry (in-pvector table)])
+      (define handler-bid (caddr entry))
+      (define blk (cfg-get-block cfg1 handler-bid))
+      (check-not-false blk)
+      (for ([insn (in-pvector (CfgBlock-insns blk))])
+        (for ([in (in-pvector (VfInsn-inputs insn))])
+          (when (VarId? in)
+            (check-true (>= (VarId-id in) local-count)
+                        (format "handler ~a insn ~a reads un-renamed local ~a"
+                                handler-bid (VfInsn-op insn) in))))))))

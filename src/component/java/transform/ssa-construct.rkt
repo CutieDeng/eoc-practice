@@ -18,8 +18,25 @@
 ;;   3. Rename by dominator-tree DFS: each def gets a fresh VarId;
 ;;      uses consult a per-variable stack of current names.
 ;;
+;; Handler blocks are graph-unreachable from the method entry via
+;; normal CFG terminators (a throw inside a try-range is the only
+;; route), so we run the *entire* SSA pipeline — dominance, phi
+;; placement, rename — on an *exception-augmented* predecessor/
+;; successor closure pair.  For each exception-table entry
+;; (start-bid end-bid handler-bid _) we treat every block in the
+;; half-open ordinal window [start-ord, end-ord) as an additional
+;; predecessor of the handler (and symmetrically, the handler as an
+;; additional successor of every try-range block).  This lets
+;; dominator-tree DFS visit handler blocks, places phis at handlers
+;; for locals live into them, and patches handler phi sources from
+;; every try-range predecessor during rename.  The original
+;; terminators — and therefore the CFG's runtime semantics — are
+;; untouched; only the graph abstraction fed to the SSA algorithms
+;; is augmented.
+;;
 ;; Input : Cfg produced by `jvm-method->cfg` (info carries
-;;         'java/max-local, 'java/param-count).
+;;         'java/max-local, 'java/param-count, optionally
+;;         'java/exception-table + 'java/block-order).
 ;; Output: Cfg with φ nodes in block.phis; all VfInsn inputs/outputs
 ;;         and terminator VarIds renamed into strict SSA.
 ;;
@@ -29,6 +46,7 @@
          "../../../kernel/ir/cfg/types.rkt"
          "../../../component/cfg/utils/graph-ops.rkt"
          "../../../component/cfg/analysis/dominance.rkt"
+         "../../../driver/dominance/dominance.rkt"
          (except-in "../../../kernel/data/data.rkt" integer-compare))
 
 (provide jvm-cfg->ssa)
@@ -46,10 +64,109 @@
      (cfg-set-info cfg 'java/ssa-param-names (pvector-empty))]
     [else
      (define entry-bid (Cfg-entry cfg))
-     (define cfg-phis (insert-phis cfg local-count entry-bid))
-     (define idom (cfg-compute-idom cfg-phis))
-     (define dom-tree (cfg-compute-dominator-tree cfg-phis))
-     (rename-vars cfg-phis local-count entry-bid idom dom-tree)]))
+     ;; Compute exception-augmented preds/succs closures.  They
+     ;; coincide with the plain closures when no exception table is
+     ;; present, so methods without try/catch pay no observable cost.
+     (define-values (aug-preds aug-succs)
+       (make-augmented-graph cfg))
+     (define cfg-phis (insert-phis cfg local-count entry-bid aug-preds))
+     (define idom (augmented-idom cfg-phis entry-bid aug-preds))
+     (define dom-tree (augmented-dom-tree cfg-phis idom))
+     (rename-vars cfg-phis local-count entry-bid idom dom-tree aug-succs)]))
+
+;; ============================================================
+;; Exception-augmented predecessor / successor closures
+;; ============================================================
+;;
+;; Returns (values preds-fn succs-fn):
+;;   preds-fn : BlockId -> pvector[BlockId]
+;;   succs-fn : BlockId -> pvector[BlockId]
+;; Each wraps the base terminator-derived closure with exception
+;; edges extracted from the 'java/exception-table + 'java/block-order
+;; info keys.  The ordering convention: exception-predecessors are
+;; appended AFTER the normal preds (preserving existing phi source
+;; ordering for non-handler blocks); exception-successors are
+;; appended AFTER the normal succs.  Duplicate entries are
+;; suppressed so a try-range block that already branches to its
+;; handler doesn't receive two edges.
+(define (make-augmented-graph cfg)
+  (define base-preds (cfg-make-predecessors cfg))
+  (define base-succs (cfg-make-successors cfg))
+  (define-values (exn-preds exn-succs) (compute-exception-edges cfg))
+  (values
+    (lambda (bid)
+      (define base (base-preds bid))
+      (define extra (ordered-map-ref exn-preds bid (pvector-empty)))
+      (pvector-extend-unique base extra))
+    (lambda (bid)
+      (define base (base-succs bid))
+      (define extra (ordered-map-ref exn-succs bid (pvector-empty)))
+      (pvector-extend-unique base extra))))
+
+;; Build (values exn-preds exn-succs) maps from the exception table.
+;; Handlers without an exception table (ordinary methods) yield two
+;; empty maps, making the augmented closures degenerate to the base
+;; closures.
+(define (compute-exception-edges cfg)
+  (define table (cfg-get-info cfg 'java/exception-table #f))
+  (define block-order (cfg-get-info cfg 'java/block-order #f))
+  (cond
+    [(or (not table) (not block-order)) (values (ordered-map-empty block-id-compare)
+                                                (ordered-map-empty block-id-compare))]
+    [else
+     (define n (pvector-length block-order))
+     ;; ordinal lookup: BlockId -> int
+     (define ord-of
+       (for/fold ([m (ordered-map-empty block-id-compare)])
+                 ([i (in-range n)])
+         (ordered-map-set m (pvector-ref block-order i) i)))
+     (for/fold ([preds (ordered-map-empty block-id-compare)]
+                [succs (ordered-map-empty block-id-compare)])
+               ([entry (in-pvector table)])
+       (define start-bid (car entry))
+       (define end-bid (cadr entry))
+       (define handler-bid (caddr entry))
+       (define start-ord (ordered-map-ref ord-of start-bid #f))
+       (define end-ord (if end-bid (ordered-map-ref ord-of end-bid #f) n))
+       (cond
+         [(or (not start-ord) (not end-ord)) (values preds succs)]
+         [else
+          (for/fold ([pm preds] [sm succs])
+                    ([i (in-range start-ord end-ord)])
+            (define b (pvector-ref block-order i))
+            ;; handler gets b as extra predecessor
+            (define cur-p (ordered-map-ref pm handler-bid (pvector-empty)))
+            (define pm*
+              (if (pvector-member? cur-p b)
+                  pm
+                  (ordered-map-set pm handler-bid
+                                   (pvector-cons-right cur-p b))))
+            ;; b gets handler as extra successor
+            (define cur-s (ordered-map-ref sm b (pvector-empty)))
+            (define sm*
+              (if (pvector-member? cur-s handler-bid)
+                  sm
+                  (ordered-map-set sm b
+                                   (pvector-cons-right cur-s handler-bid))))
+            (values pm* sm*))]))]))
+
+;; Append elements of `extra` to `base`, skipping any already present.
+(define (pvector-extend-unique base extra)
+  (for/fold ([acc base]) ([x (in-pvector extra)])
+    (if (pvector-member? acc x) acc (pvector-cons-right acc x))))
+
+;; Driver-level dominance invoked with augmented predecessors.
+(define (augmented-idom cfg entry-bid aug-preds)
+  (define block-ids (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
+  (compute-idom block-id-compare block-ids entry-bid aug-preds))
+
+(define (augmented-dom-tree cfg idom)
+  (define block-ids (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
+  (compute-dominator-tree block-id-compare block-ids idom))
+
+(define (augmented-dominance-frontier cfg entry-bid aug-preds)
+  (define block-ids (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
+  (compute-dominance-frontier block-id-compare block-ids entry-bid aug-preds))
 
 ;; ============================================================
 ;; Phase 1: Phi placement
@@ -89,9 +206,9 @@
 ;; Insert empty phi nodes per iterated dominance frontier.
 ;; Returns a new CFG with `phis` populated.  Phi sources are empty
 ;; at this stage; the rename pass fills them in.
-(define (insert-phis cfg local-count entry-bid)
+(define (insert-phis cfg local-count entry-bid aug-preds)
   (define def-sites (collect-def-sites cfg local-count entry-bid))
-  (define dom-frontier (cfg-compute-dominance-frontier cfg))
+  (define dom-frontier (augmented-dominance-frontier cfg entry-bid aug-preds))
 
   ;; For each variable v, compute phi-placement blocks (IDF of defs).
   ;; Returns ordered-map BlockId -> pvector[VarId] of phis to insert.
@@ -113,7 +230,10 @@
   ;; Install phis into blocks.  Each phi's sources are a pvector of
   ;; (BlockId . VarId) pairs, placeholders filled during rename.  We
   ;; keep the predecessor order stable by querying it once here.
-  (define preds-of (cfg-make-predecessors cfg))
+  ;; `aug-preds` includes exception-edge predecessors for handler
+  ;; blocks — handler phis thus reserve one source slot per try-range
+  ;; block in addition to any ordinary in-edge predecessors.
+  (define preds-of aug-preds)
   (for/fold ([c cfg])
             ([kv (in-ordered-map phi-plan*)])
     (define bid (car kv))
@@ -202,7 +322,7 @@
     [(= (pvector-length s) 0) stacks]
     [else (ordered-map-set stacks v (pvector-take-left s (sub1 (pvector-length s))))]))
 
-(define (rename-vars cfg local-count entry-bid idom dom-tree)
+(define (rename-vars cfg local-count entry-bid idom dom-tree aug-succs)
   ;; Seed stacks with fresh names for each local slot at entry.
   (define vc0 (Cfg-var-cnt cfg))
   (define-values (init-stacks param-names vc1)
@@ -219,7 +339,7 @@
 
   ;; Run DFS; carry (cfg, stacks, vc).  Return final cfg + vc.
   (define-values (cfg-out _stk-out vc-out)
-    (rename-block cfg entry-bid init-stacks vc1 preds-of dom-tree local-count))
+    (rename-block cfg entry-bid init-stacks vc1 preds-of dom-tree local-count aug-succs))
 
   ;; Record the parameter VarIds so downstream passes (RVSDG lowering)
   ;; can recover which SSA names represent the entry-visible locals.
@@ -227,7 +347,7 @@
     (cfg-set-info cfg-out 'java/ssa-param-names param-names))
   (struct-copy Cfg cfg-with-info [var-cnt vc-out]))
 
-(define (rename-block cfg bid stacks vc preds-of dom-tree local-count)
+(define (rename-block cfg bid stacks vc preds-of dom-tree local-count aug-succs)
   (define blk (cfg-get-block cfg bid))
   (when (not blk)
     (error 'rename-block "missing block: ~a" bid))
@@ -292,16 +412,20 @@
   (define cfg1 (cfg-set-block cfg blk-renamed))
 
   ;; --- Step 4: patch successors' φ source slots. ---
+  ;; We walk AUGMENTED successors so exception-edge targets (handler
+  ;; blocks) receive phi-source updates for locals live at any point
+  ;; inside the try-range.  Ordinary successors come from the
+  ;; terminator; exception successors are appended by aug-succs.
   (define cfg2
     (for/fold ([c cfg1])
-              ([succ (in-pvector (terminator-successors new-term))])
+              ([succ (in-pvector (aug-succs bid))])
       (fill-phi-sources c succ bid stk2 local-count)))
 
   ;; --- Step 5: recurse into dominator-tree children. ---
   (define children (ordered-map-ref dom-tree bid (pvector-empty)))
   (define-values (cfg3 _stk-child vc3)
     (for/fold ([c cfg2] [s stk2] [v vc2]) ([ch (in-pvector children)])
-      (rename-block c ch s v preds-of dom-tree local-count)))
+      (rename-block c ch s v preds-of dom-tree local-count aug-succs)))
 
   ;; --- Step 6: pop names pushed in this block. ---
   ;; `stacks` parameter is the incoming-to-this-block state; we

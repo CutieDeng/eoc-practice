@@ -162,8 +162,9 @@
                  kappa-recovery-terminal
                  kappa-recovery-convergent
                  kappa-recovery-multi-handler
-                 kappa-recovery-catch-all)
+                 kappa-recovery-catch-all
+                 kappa-recovery-ssa-handler-rename
+                 kappa-recovery-join-chain-refinement)
     'deferred  '(kappa-recovery-multi-range
                  kappa-recovery-nested
-                 kappa-recovery-method-end
-                 ssa-handler-block-rename)))
+                 kappa-recovery-method-end)))

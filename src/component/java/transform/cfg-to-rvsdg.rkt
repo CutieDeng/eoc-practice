@@ -2003,16 +2003,84 @@
             (ordered-map-set m start-bid (list end-bid handlers1))])))
      ;; Build each Kappa-Group.  window-bids is the original ordinal
      ;; window; try-bids is window-bids extended with forwarding
-     ;; blocks that sit between the window and the joiner.
+     ;; blocks that sit between the window and the joiner, plus any
+     ;; trivial Term:jump chain walked by refine-kappa-join when the
+     ;; window's single fall-through exit is NOT itself the point
+     ;; where the handler path converges.  The JVM exception table
+     ;; scopes the try to the throwing instructions only, so the
+     ;; normal post-try continuation may live in blocks that sit
+     ;; outside the window but still on the try-success path between
+     ;; the window and the real (try/handler) merge.
      (for/fold ([acc (ordered-map-empty block-id-compare)])
                ([kv (in-ordered-map by-start)])
        (define start-bid (car kv))
        (match-define (list end-bid handlers) (cdr kv))
        (define window-bids (compute-kappa-window-bids cfg start-bid end-bid))
-       (define-values (kind join-bid) (classify-kappa-window cfg window-bids))
-       (define try-bids (extend-with-forwarding-blocks cfg window-bids join-bid))
+       (define-values (kind0 join-bid0) (classify-kappa-window cfg window-bids))
+       (define-values (kind join-bid chain-bids)
+         (refine-kappa-join cfg kind0 join-bid0 handlers))
+       (define try-bids0 (extend-with-forwarding-blocks cfg window-bids join-bid))
+       (define try-bids
+         (for/fold ([s try-bids0]) ([b (in-pvector chain-bids)])
+           (ordered-map-set s b #t)))
        (ordered-map-set acc start-bid
                         (Kappa-Group try-bids handlers kind join-bid)))]))
+
+;; When classify-kappa-window selects a fall-through exit X that is
+;; itself a trivial Term:jump forwarder (no VfInsns, no phis) into
+;; some downstream block Y, and Y happens to be reachable from every
+;; handler, the real try/handler merge is Y — not X.  Walk X forward
+;; through Term:jump trivials, stopping on the first block present in
+;; every handler's forward-reach.  Return the promoted join plus the
+;; chain of intermediate blocks (to be folded into try-bids).
+;;
+;; Preserves the initial classification when:
+;;   - kind is 'terminal (no join to refine)
+;;   - initial join is already on every handler-reach
+;;   - the chain hits a non-trivial block (phi, Term:cond, etc.)
+;;   - no handler-reach intersection is found within the walked chain
+(define (refine-kappa-join cfg kind initial-join handlers)
+  (define empty-chain (pvector-empty))
+  (cond
+    [(not (eq? kind 'convergent))
+     (values kind initial-join empty-chain)]
+    [else
+     ;; Forward-reach from each handler with no stop.
+     (define handler-reaches
+       (for/list ([h (in-pvector handlers)])
+         (kappa-forward-reach cfg (cdr h) #f)))
+     (define (in-all-handler-reaches? bid)
+       (for/and ([hr (in-list handler-reaches)])
+         (ordered-map-ref hr bid #f)))
+     (cond
+       [(in-all-handler-reaches? initial-join)
+        (values kind initial-join empty-chain)]
+       [else
+        ;; Walk forward through trivial Term:jump blocks (no phis, no
+        ;; VfInsns) until we hit a common block or a non-trivial one.
+        (let loop ([b initial-join]
+                   [chain empty-chain]
+                   [visited (ordered-map-empty block-id-compare)])
+          (cond
+            [(ordered-map-ref visited b #f)
+             ;; Cycle — give up, keep the original join.
+             (values kind initial-join empty-chain)]
+            [(in-all-handler-reaches? b)
+             (values kind b chain)]
+            [else
+             (define blk (cfg-get-block cfg b))
+             (cond
+               [(or (not blk)
+                    (> (pvector-length (CfgBlock-phis blk)) 0)
+                    (> (pvector-length (CfgBlock-insns blk)) 0))
+                (values kind initial-join empty-chain)]
+               [else
+                (match (CfgBlock-terminator blk)
+                  [(Term:jump n)
+                   (loop n
+                         (pvector-cons-right chain b)
+                         (ordered-map-set visited b #t))]
+                  [_ (values kind initial-join empty-chain)])])]))])]))
 
 ;; Re-derive the original [start-ord, end-ord) block-ordinal window
 ;; from 'java/block-order.  After normalize-try-exits appends
@@ -2214,15 +2282,41 @@
 ;; the handler entry resolves to it.  Arm kind (terminal vs convergent)
 ;; is decided from translate-segment's payload — a convergent-kind
 ;; Kappa tolerates a handler that ret / throws instead of joining.
+;;
+;; ssa-construct now augments the CFG graph with exception edges, so
+;; the handler block may carry phi nodes that merge locals across all
+;; try-range predecessors.  Kappa is fundamentally a throw-point-
+;; collapsing abstraction — it can only present one value per local to
+;; the handler — so we pick the phi source at `start-bid` (i.e., the
+;; SSA name reaching the try-range entry) as the conservative ctx
+;; value.  Each handler-entry phi output is pre-bound to the same
+;; region-arg output that its start-bid phi source is bound to, so
+;; translate-segment's phi-resolution check at the handler block
+;; succeeds and subsequent reads of the phi output route through the
+;; parent-scope ctx.
 (define (build-kappa-handler-region cfg start-bid handler-bid handler-reach
                                     ctx-vars kind join-bid join-phis)
   (define n-ctx (pvector-length ctx-vars))
   (define-values (sub1 ctx-outs exn-out) (build-handler-region-entry n-ctx))
-  (define sub-var->out-init
+  (define sub-var->out-ctx
     (for/fold ([m (ordered-map-empty var-id-compare)])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector ctx-outs)])
       (ordered-map-set m v oid)))
+  ;; Pre-bind handler-entry phi outputs to the ctx oid of their
+  ;; start-bid-side phi source.  If the source is not a ctx var
+  ;; (shouldn't happen — translate-kappa-group adds those sources to
+  ;; ctx before calling us), leave it unbound; translate-segment will
+  ;; surface the mismatch.
+  (define handler-phi-srcs (handler-entry-phi-start-srcs cfg handler-bid start-bid))
+  (define sub-var->out-init
+    (for/fold ([m sub-var->out-ctx])
+              ([pair (in-pvector handler-phi-srcs)])
+      (define out (car pair))
+      (define src (cdr pair))
+      (define src-oid (ordered-map-ref m src #f))
+      (cond [src-oid (ordered-map-set m out src-oid)]
+            [else m])))
   (define stop (and (eq? kind 'convergent) join-bid))
   (define-values (sub2 sub-var->out2 payload)
     (parameterize ([current-arm-scope handler-reach]
@@ -2234,6 +2328,20 @@
   (finish-kappa-sub-region/cfg cfg sub2 sub-var->out2 payload
                                handler-reach join-bid join-phis
                                (list 'kappa-handler handler-bid)))
+
+;; Return a pvector of (cons phi-output start-bid-phi-source) pairs
+;; for every phi at `handler-bid`.  Assumes ssa-construct placed
+;; phis there with exception-edge predecessors, so each phi carries
+;; a source slot keyed on every try-range block including start-bid.
+(define (handler-entry-phi-start-srcs cfg handler-bid start-bid)
+  (define blk (cfg-get-block cfg handler-bid))
+  (cond
+    [(not blk) (pvector-empty)]
+    [else
+     (for/pvector ([phi (in-pvector (CfgBlock-phis blk))])
+       (cons (PhiInsn-output phi)
+             (pick-phi-source phi start-bid
+                              (list 'kappa-handler-entry handler-bid))))]))
 
 ;; Remove the current Kappa-Group keyed on `start-bid` from the
 ;; active kappa-groups map while building its own sub-regions, so
@@ -2347,13 +2455,27 @@
             (ordered-map-set a src #t)]
            [else a]))]
       [else acc]))
-  (define ctx-set
+  (define ctx-set-with-join
     (cond
       [(eq? kind 'convergent)
        (for/fold ([s (add-phi-srcs try-arm-pred ctx-set-base)])
                  ([ap (in-list handler-arm-preds)])
          (add-phi-srcs ap s))]
       [else ctx-set-base]))
+  ;; Handler-entry phis (placed by ssa-construct on exception edges)
+  ;; need their start-bid-side source value to flow into the handler
+  ;; as ctx — that's the single "local at try entry" value Kappa
+  ;; exposes to each handler.
+  (define ctx-set
+    (for/fold ([s ctx-set-with-join])
+              ([h (in-pvector handlers)])
+      (define pairs (handler-entry-phi-start-srcs cfg (cdr h) start-bid))
+      (for/fold ([s s]) ([pair (in-pvector pairs)])
+        (define src (cdr pair))
+        (cond
+          [(and (VarId? src) (ordered-map-ref var->out src #f))
+           (ordered-map-set s src #t)]
+          [else s]))))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
 

@@ -1377,11 +1377,10 @@
   ;; ============================================================
   ;; These fixtures thread normalize-try-exits into the compile
   ;; pipeline so cfg->rvsdg sees each try window in canonical
-  ;; (≤ 1 fall-through exit) shape.  Handlers are crafted so they
-  ;; don't read locals defined outside the handler — otherwise the
-  ;; SSA-handler-block-rename gap (handler blocks are graph-
-  ;; unreachable, so ssa-construct never renames them) would surface
-  ;; as an "undefined VarId" error; fixing SSA is a pending C4 item.
+  ;; (≤ 1 fall-through exit) shape.  ssa-construct now processes
+  ;; handler blocks via exception-augmented predecessors, so handlers
+  ;; that read locals defined outside the handler SSA-rename
+  ;; correctly and Kappa lowering sees only SSA-range VarIds.
   (define (compile-method/kappa m)
     (cfg->rvsdg (normalize-try-exits (jvm-cfg->ssa (jvm-method->cfg m)))))
 
@@ -1523,6 +1522,35 @@
                  "handler region should not host a residual 'java/exception-ref node")
     ;; Outer region also shouldn't carry it.
     (check-false (memq 'java/exception-ref (node-ops r))))
+
+  ;; ----- Convergent Kappa: try-side fall-through past the window -----
+  ;;
+  ;; The JVM exception table scopes a try to the instructions that can
+  ;; throw (the ATHROW / call sites), not the full Java-source try
+  ;; block.  In common shapes, the window exit (the single block just
+  ;; past the try) is a trivial Term:jump forwarder that lands on the
+  ;; same join block the handler also reaches.  refine-kappa-join
+  ;; should walk that trivial chain and promote the forwarder's
+  ;; target as the real Kappa join; the Kappa then carries one output
+  ;; matching the join's local-merge phi.
+  (test-case "Kappa F: convergent join past a trivial forwarder (ClassTransform.test)"
+    (define klass (read-jvm-class-file fixture-class-transform))
+    (define test-m
+      (for/or ([mth (JvmClass-methods klass)])
+        (and (equal? (JvmMethod-name mth) "test") mth)))
+    (check-not-false test-m)
+    (define lam (compile-method/kappa test-m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define ks (all-kappa-nodes r))
+    (check-equal? (length ks) 1 "exactly one Kappa installed")
+    (define knid (car (first ks)))
+    (define k (cdr (first ks)))
+    ;; Convergent ⇒ at least one output (the local-2 phi merge).
+    (check-true (> (node-output-count r knid) 0)
+                "convergent Kappa must carry >=1 output from the join phi")
+    ;; Exactly one handler, matching the JVM table.
+    (check-equal? (pvector-length (Kappa-handlers k)) 1))
 
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
