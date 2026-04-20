@@ -166,5 +166,6 @@
                  kappa-recovery-ssa-handler-rename
                  kappa-recovery-join-chain-refinement
                  kappa-recovery-nested
-                 kappa-recovery-method-end)
-    'deferred  '(kappa-recovery-multi-range)))
+                 kappa-recovery-method-end
+                 kappa-recovery-multi-range)
+    'deferred  '()))

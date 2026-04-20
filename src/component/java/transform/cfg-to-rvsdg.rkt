@@ -134,21 +134,22 @@
 ;;     matching the exception-table's per-range entries.
 ;;
 ;; Currently unsupported:
-;;   - multi-range try windows (same try with overlapping / finally-
-;;     style entries; a single-start multi-end pattern errors out)
-;;   - nested try/catch (outer kappa's try-bids overlap inner try's
-;;     start-bid is not yet validated; works incidentally if regions
-;;     do not overlap, not yet exercised in tests)
-;;   - method-end try windows (exception-table end-bid = #f) — the
-;;     original ordinal range isn't recoverable post-normalize yet
 ;;   - loop headers with 3+ back-edges (only 1-latch and 2-latch
 ;;     diamond loops are currently recognised)
 ;;
-;; Each of the above raises with a self-identifying error.
+;; The kappa-recovery pipeline covers single-range, multi-handler,
+;; convergent-past-forwarder, method-end (end-bid=#f), nested
+;; try/catch at distinct start-bids, and multi-range (same-start
+;; different-end) layouts.  Multi-range materialises as a stack of
+;; Kappa-Groups under the shared start-bid key (outer first); the
+;; outer Kappa's try-region re-encounters start-bid with the outer
+;; popped and dispatches into the inner Kappa.  Each remaining
+;; unsupported shape raises with a self-identifying error.
 ;;
 ;; ============================================================
 
 (require racket/match
+         racket/list
          "../../../kernel/ir/cfg/types.rkt"
          "../../../kernel/ir/rvsdg/rvsdg.rkt"
          "../../../component/cfg/utils/graph-ops.rkt"
@@ -233,12 +234,19 @@
 ;; without any caller having to thread the ctx map manually.
 (define current-theta-ctxs (make-parameter #f))
 
-;; Map of every try-entry BlockId in the CFG to its Kappa-Group.  Set
-;; once per `cfg->rvsdg` invocation from `'java/exception-table`;
-;; consulted by `translate-segment` so any try-entry landed on during
-;; recursion dispatches into translate-kappa-group in whichever region
-;; we currently inhabit (parent, Gamma arm, Theta body, ...).  #f
-;; (default) means no try/catch in the method.
+;; Map of every try-entry BlockId in the CFG to a pvector of Kappa-
+;; Groups that all share that start-bid, sorted OUTER-FIRST (descending
+;; end-bid).  Set once per `cfg->rvsdg` invocation from
+;; `'java/exception-table`; consulted by `translate-segment` so any
+;; try-entry landed on during recursion dispatches into
+;; translate-kappa-group in whichever region we currently inhabit
+;; (parent, Gamma arm, Theta body, ...).  Multiple entries per start-
+;; bid arise from "same start, different end" exception-table entries
+;; (nested try/catch at the same bytecode position or finally-style
+;; range splits): the outer Kappa is materialised first and its try-
+;; region recursively encounters start-bid with the outer popped,
+;; dispatching into the inner group.  #f (default) means no try/catch
+;; in the method.
 (define current-kappa-groups (make-parameter #f))
 
 ;; OutputId of the currently-active handler region's exception-ref
@@ -341,7 +349,15 @@
   (define ctxs (current-theta-ctxs))
   (define kappas (current-kappa-groups))
   (define ctx-here (and ctxs (ordered-map-ref ctxs start-bid #f)))
-  (define kappa-here (and kappas (ordered-map-ref kappas start-bid #f)))
+  (define kappa-stack-here (and kappas (ordered-map-ref kappas start-bid #f)))
+  ;; Outer Kappa first (pvector is sorted descending by end-bid at
+  ;; compute-kappa-groups time).  A single Kappa-Group is wrapped in a
+  ;; length-1 pvector so this lookup is uniform across the common
+  ;; single-range case and the multi-range (nested) case.
+  (define kappa-here
+    (and kappa-stack-here
+         (> (pvector-length kappa-stack-here) 0)
+         (pvector-ref kappa-stack-here 0)))
   (cond
     [(and stop-bid (equal? start-bid stop-bid))
      (values region var->out #f)]
@@ -1976,31 +1992,26 @@
     [(or (not table) (= (pvector-length table) 0))
      (ordered-map-empty block-id-compare)]
     [else
-     ;; Fold entries by start-bid, preserving declaration order of
-     ;; handlers within each start-bid.  A second entry with the same
-     ;; start-bid but a different end-bid would indicate a multi-range
-     ;; (finally-style) layout — rejected here as not yet supported.
-     (define by-start
+     ;; Fold entries by (start-bid, end-bid), preserving declaration
+     ;; order of handlers within each distinct window.  Entries with
+     ;; the same (start, end) are merged into one Kappa with a multi-
+     ;; handler list (first-wins).  Entries with the same start but
+     ;; different end materialise as SEPARATE Kappa-Groups, sorted
+     ;; outer-first (descending end) under a single start-bid key —
+     ;; the outer Kappa's try-region physically contains the inner
+     ;; start-bid, so translate-segment re-dispatches into the inner
+     ;; Kappa once the outer pops itself via `kappa-groups-without`.
+     (define by-start-end
        (for/fold ([m (ordered-map-empty block-id-compare)])
                  ([entry (in-pvector table)])
          (match-define (list start-bid end-bid handler-bid catch-type) entry)
-         (define cur (ordered-map-ref m start-bid #f))
-         (cond
-           [cur
-            (match-define (list end0 handlers0) cur)
-            (unless (equal? end0 end-bid)
-              (error 'compute-kappa-groups
-                     "multi-range try at ~a (ends differ: ~s vs ~s) not yet supported"
-                     start-bid end0 end-bid))
-            (ordered-map-set m start-bid
-                             (list end-bid
-                                   (pvector-cons-right handlers0
-                                                       (cons catch-type handler-bid))))]
-           [else
-            (define handlers1
-              (pvector-cons-right (pvector-empty)
-                                  (cons catch-type handler-bid)))
-            (ordered-map-set m start-bid (list end-bid handlers1))])))
+         (define by-end (ordered-map-ref m start-bid #f))
+         (define by-end* (or by-end (ordered-map-empty block-id-or-false-compare)))
+         (define handlers0 (ordered-map-ref by-end* end-bid (pvector-empty)))
+         (define handlers1
+           (pvector-cons-right handlers0 (cons catch-type handler-bid)))
+         (ordered-map-set m start-bid
+                          (ordered-map-set by-end* end-bid handlers1))))
      ;; Build each Kappa-Group.  window-bids is the original ordinal
      ;; window; try-bids is window-bids extended with forwarding
      ;; blocks that sit between the window and the joiner, plus any
@@ -2012,19 +2023,65 @@
      ;; outside the window but still on the try-success path between
      ;; the window and the real (try/handler) merge.
      (for/fold ([acc (ordered-map-empty block-id-compare)])
-               ([kv (in-ordered-map by-start)])
+               ([kv (in-ordered-map by-start-end)])
        (define start-bid (car kv))
-       (match-define (list end-bid handlers) (cdr kv))
-       (define window-bids (compute-kappa-window-bids cfg start-bid end-bid))
-       (define-values (kind0 join-bid0) (classify-kappa-window cfg window-bids))
-       (define-values (kind join-bid chain-bids)
-         (refine-kappa-join cfg kind0 join-bid0 handlers))
-       (define try-bids0 (extend-with-forwarding-blocks cfg window-bids join-bid))
-       (define try-bids
-         (for/fold ([s try-bids0]) ([b (in-pvector chain-bids)])
-           (ordered-map-set s b #t)))
-       (ordered-map-set acc start-bid
-                        (Kappa-Group try-bids handlers kind join-bid)))]))
+       (define by-end (cdr kv))
+       ;; Collect (end-bid . handlers) pairs and sort outer-first.
+       ;; end-bid = #f (method-end) is the widest possible window, so
+       ;; it sorts as "outermost"; otherwise descending by the end
+       ;; block's ordinal.
+       (define entries
+         (for/list ([ekv (in-ordered-map by-end)])
+           (cons (car ekv) (cdr ekv))))
+       (define sorted-entries
+         (sort entries (kappa-end-outer-first? cfg)))
+       (define stack
+         (for/pvector ([pair (in-list sorted-entries)])
+           (define end-bid (car pair))
+           (define handlers (cdr pair))
+           (define window-bids (compute-kappa-window-bids cfg start-bid end-bid))
+           (define-values (kind0 join-bid0) (classify-kappa-window cfg window-bids))
+           (define-values (kind join-bid chain-bids)
+             (refine-kappa-join cfg kind0 join-bid0 handlers))
+           (define try-bids0 (extend-with-forwarding-blocks cfg window-bids join-bid))
+           (define try-bids
+             (for/fold ([s try-bids0]) ([b (in-pvector chain-bids)])
+               (ordered-map-set s b #t)))
+           (Kappa-Group try-bids handlers kind join-bid)))
+       (ordered-map-set acc start-bid stack))]))
+
+;; Comparator for block-id-or-#f keys used in compute-kappa-groups'
+;; inner by-end map.  Treats #f as LESS than any real bid so that
+;; iteration in ordered-map order yields #f first; the final stack
+;; ordering is produced by kappa-end-outer-first? below (which maps
+;; #f to +inf to put it outermost).
+(define (block-id-or-false-compare a b)
+  (cond
+    [(and (not a) (not b)) 0]
+    [(not a) -1]
+    [(not b)  1]
+    [else (block-id-compare a b)]))
+
+;; Returns a comparator on (cons end-bid handlers) pairs that orders
+;; the OUTER (widest) window first.  end-bid=#f (method-end) maps to
+;; +inf; otherwise use the end block's ordinal in 'java/block-order.
+;; Pairs that don't resolve compare equal (stable sort preserves
+;; declaration order for those).
+(define (kappa-end-outer-first? cfg)
+  (define block-order
+    (or (cfg-get-info cfg 'java/block-order #f)
+        (error 'kappa-end-outer-first? "Cfg.info missing 'java/block-order")))
+  (define bid->ord
+    (for/fold ([m (ordered-map-empty block-id-compare)])
+              ([bid (in-pvector block-order)]
+               [i (in-naturals)])
+      (ordered-map-set m bid i)))
+  (define (end-rank end-bid)
+    (cond
+      [(not end-bid) +inf.0]
+      [else (or (ordered-map-ref bid->ord end-bid #f) -inf.0)]))
+  (lambda (a b)
+    (> (end-rank (car a)) (end-rank (car b)))))
 
 ;; When classify-kappa-window selects a fall-through exit X that is
 ;; itself a trivial Term:jump forwarder (no VfInsns, no phis) into
@@ -2376,18 +2433,25 @@
              (pick-phi-source phi start-bid
                               (list 'kappa-handler-entry handler-bid))))]))
 
-;; Remove the current Kappa-Group keyed on `start-bid` from the
-;; active kappa-groups map while building its own sub-regions, so
+;; Pop the currently-active (outermost remaining) Kappa-Group from
+;; `start-bid`'s stack while building its own sub-regions, so
 ;; translate-segment landing back on `start-bid` inside the walk does
-;; not re-dispatch infinitely.  Other groups (nested / sibling trys)
-;; remain visible.  `gs` may be #f (no kappa-groups threading).
+;; not re-dispatch the same group infinitely.  Nested groups at the
+;; same start-bid (multi-range case) remain visible in tail position;
+;; sibling trys at other start-bids are untouched.  `gs` may be #f (no
+;; kappa-groups threading).
 (define (kappa-groups-without gs start-bid)
   (cond
     [(not gs) gs]
-    [(ordered-map-ref gs start-bid #f)
-     (define-values (gs* _) (ordered-map-delete gs start-bid))
-     gs*]
-    [else gs]))
+    [else
+     (define stack (ordered-map-ref gs start-bid #f))
+     (cond
+       [(not stack) gs]
+       [(<= (pvector-length stack) 1)
+        (define-values (gs* _) (ordered-map-delete gs start-bid))
+        gs*]
+       [else
+        (ordered-map-set gs start-bid (pvector-drop stack 1))])]))
 
 ;; Wrapper that threads `cfg` into the finisher so find-kappa-arm-pred
 ;; can locate the Term:jump predecessor when the arm converges.

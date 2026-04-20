@@ -1652,6 +1652,59 @@
     (check-equal? (car (pvector-ref (Kappa-handlers (car inner-ks)) 0))
                   "java/lang/NumberFormatException"))
 
+  ;; ----- I. Multi-range: nested try/catch sharing start-bid -----
+  ;;
+  ;; When Java source has a nested try/catch whose inner try begins at
+  ;; the exact same bytecode position as the outer (common for
+  ;; `try { try { ... } catch ... } catch ...` without preceding
+  ;; instructions), the JVM exception table lists two entries with
+  ;; identical start-bid but distinct end-bids.  C5's multi-range path
+  ;; materialises those as a STACK of Kappa-Groups under a single
+  ;; start-bid key (outer first); the outer Kappa's try-region
+  ;; recursively re-encounters the same start-bid with the outer
+  ;; popped and dispatches into the inner Kappa.
+  (test-case "Kappa I: multi-range same-start nested try/catch"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       ;; Inner: [L_TRY, L_INNER_HANDLER)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_INNER_HANDLER"
+                                "L_INNER_HANDLER"
+                                "java/lang/NumberFormatException")
+                       ;; Outer: [L_TRY, L_OUTER_HANDLER) — same start,
+                       ;; strictly wider end.
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_OUTER_HANDLER"
+                                "L_OUTER_HANDLER"
+                                "java/lang/Exception"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Outer region holds exactly the outer Kappa.
+    (define outer-ks (all-kappa-nodes r))
+    (check-equal? (length outer-ks) 1
+                  "outer region should host exactly one (outer) Kappa")
+    (define outer-k (cdr (first outer-ks)))
+    (check-equal? (car (pvector-ref (Kappa-handlers outer-k) 0))
+                  "java/lang/Exception")
+    ;; Outer's try-region contains the inner Kappa.
+    (define inner-ks (all-kappas (Kappa-try-region outer-k)))
+    (check-equal? (length inner-ks) 1
+                  "outer try-region should host the inner Kappa")
+    (check-equal? (car (pvector-ref (Kappa-handlers (car inner-ks)) 0))
+                  "java/lang/NumberFormatException"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
