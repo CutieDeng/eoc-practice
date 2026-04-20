@@ -1588,6 +1588,70 @@
     (check-equal? (car (pvector-ref (Kappa-handlers k) 0))
                   "java/lang/Exception"))
 
+  ;; ----- H. Nested try/catch -----
+  ;;
+  ;; Pseudo-Java:
+  ;;   try { try { return arg0; }
+  ;;         catch (NumberFormatException) { return -1; } }
+  ;;   catch (Exception) { return -1; }
+  ;;
+  ;; The JVM exception table holds two entries:
+  ;;   (inner) [L_INNER_TRY, L_INNER_HANDLER)     handler=L_INNER_HANDLER
+  ;;           catch-type=NumberFormatException
+  ;;   (outer) [L_INNER_TRY, L_OUTER_HANDLER)     handler=L_OUTER_HANDLER
+  ;;           catch-type=Exception
+  ;; The outer window legitimately contains the inner handler block
+  ;; (its code is still lexically inside the outer try).  C4b's
+  ;; handler-filter only kicks in for end-bid=#f windows, so the
+  ;; nested case is trusted verbatim and the outer Kappa's try-region
+  ;; carries the inner Kappa as a nested node.
+  (test-case "Kappa H: nested try/catch lowers to nested Kappas"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_OUTER_TRY")
+                       (mk-insn 'GOTO "L_INNER_TRY")
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_INNER_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_OUTER_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_INNER_TRY" "L_INNER_HANDLER"
+                                "L_INNER_HANDLER"
+                                "java/lang/NumberFormatException")
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_OUTER_TRY" "L_OUTER_HANDLER"
+                                "L_OUTER_HANDLER"
+                                "java/lang/Exception"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Outer region has exactly one Kappa (the outer try).
+    (define outer-ks (all-kappa-nodes r))
+    (check-equal? (length outer-ks) 1
+                  "outer region should host exactly the outer Kappa")
+    (define outer-k (cdr (first outer-ks)))
+    (define outer-k-nid (car (first outer-ks)))
+    ;; Outer is terminal (both arms IRETURN) ⇒ no outputs.
+    (check-equal? (node-output-count r outer-k-nid) 0)
+    ;; Outer's sole handler is Exception.
+    (check-equal? (pvector-length (Kappa-handlers outer-k)) 1)
+    (check-equal? (car (pvector-ref (Kappa-handlers outer-k) 0))
+                  "java/lang/Exception")
+    ;; Descend into outer's try-region — the inner Kappa lives there.
+    (define outer-try (Kappa-try-region outer-k))
+    (define inner-ks (all-kappas outer-try))
+    (check-equal? (length inner-ks) 1
+                  "outer try-region should host exactly the inner Kappa")
+    (check-equal? (car (pvector-ref (Kappa-handlers (car inner-ks)) 0))
+                  "java/lang/NumberFormatException"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
