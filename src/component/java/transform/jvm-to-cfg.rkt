@@ -209,7 +209,12 @@
     (let* ([m (ordered-map-empty symbol-compare)]
            [m (ordered-map-set m 'java/param-count param-n)]
            [m (ordered-map-set m 'java/max-local local-count)]
-           [m (ordered-map-set m 'java/block-order block-order-bids)])
+           [m (ordered-map-set m 'java/block-order block-order-bids)]
+           ;; Record the original block count so later passes
+           ;; (normalize-try-exits, compute-kappa-window-bids) can
+           ;; resolve end-bid=#f (method-end) try windows.
+           [m (ordered-map-set m 'java/original-block-count
+                               (pvector-length block-order-bids))])
       (cond
         [(> (pvector-length exception-table-bids) 0)
          (ordered-map-set m 'java/exception-table exception-table-bids)]

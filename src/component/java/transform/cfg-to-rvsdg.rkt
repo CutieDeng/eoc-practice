@@ -2103,6 +2103,13 @@
     (or (ordered-map-ref bid->ord start-bid #f)
         (error 'compute-kappa-window-bids
                "unmapped start-bid ~s" start-bid)))
+  ;; When end-bid=#f the original JVM range extends to method-end.
+  ;; jvm-to-cfg records the pre-normalize block count as
+  ;; 'java/original-block-count so later passes can resolve this
+  ;; without the full block-order being length-stable (normalize-try
+  ;; -exits appends forwarding / joiner blocks past the original
+  ;; tail).  Using the original count keeps those appended blocks
+  ;; out of the try window.
   (define end-ord
     (cond
       [end-bid
@@ -2110,14 +2117,40 @@
            (error 'compute-kappa-window-bids
                   "unmapped end-bid ~s" end-bid))]
       [else
-       (error 'compute-kappa-window-bids
-              "try window at ~s has end-bid=#f (method-end); not yet supported"
-              start-bid)]))
+       (or (cfg-get-info cfg 'java/original-block-count #f)
+           (error 'compute-kappa-window-bids
+                  "try window at ~s has end-bid=#f but Cfg.info lacks 'java/original-block-count"
+                  start-bid))]))
+  ;; For method-end ranges (end-bid=#f) the raw ordinal window may
+  ;; cover handler blocks that the JVM exception table excludes by
+  ;; convention; filter them out.  For explicit end-bid the window
+  ;; is trusted verbatim (nested try/catch: an outer window
+  ;; legitimately contains inner handler blocks, because an inner
+  ;; handler's code is still inside the outer try scope).
+  (define filter-handlers? (not end-bid))
+  (define handler-set (if filter-handlers?
+                          (exception-table-handler-set cfg)
+                          (ordered-map-empty block-id-compare)))
   (for/fold ([s (ordered-map-empty block-id-compare)])
             ([bid (in-pvector block-order)]
              [i (in-naturals)]
-             #:when (and (<= start-ord i) (< i end-ord)))
+             #:when (and (<= start-ord i) (< i end-ord)
+                         (not (and filter-handlers?
+                                   (ordered-map-ref handler-set bid #f)))))
     (ordered-map-set s bid #t)))
+
+;; Collect every handler-bid appearing in the exception table as an
+;; ordered-map (used as a set) for O(log n) membership tests.  Used
+;; by compute-kappa-window-bids to filter handler blocks out of
+;; method-end windows.
+(define (exception-table-handler-set cfg)
+  (define table (cfg-get-info cfg 'java/exception-table #f))
+  (cond
+    [(not table) (ordered-map-empty block-id-compare)]
+    [else
+     (for/fold ([s (ordered-map-empty block-id-compare)])
+               ([entry (in-pvector table)])
+       (ordered-map-set s (caddr entry) #t))]))
 
 ;; Collect distinct out-of-window successors from every block in the
 ;; window, canonicalising forwarding-block successors to their joiner.

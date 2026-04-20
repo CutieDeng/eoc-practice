@@ -1552,6 +1552,42 @@
     ;; Exactly one handler, matching the JVM table.
     (check-equal? (pvector-length (Kappa-handlers k)) 1))
 
+  ;; ----- G. Method-end try (end-bid = #f) -----
+  ;;
+  ;; The JVM allows a TRY-CATCH-BLOCK whose end-label is the
+  ;; method-end pseudo-position — in particular, the end-label may
+  ;; not correspond to any BB when it sits past the last real
+  ;; instruction.  compute-kappa-window-bids falls back to
+  ;; 'java/original-block-count and filters handler blocks out of
+  ;; the ordinal window.  Here the end-label "L_NEVER_EMITTED" is
+  ;; never declared as a CUTIEDENG-LABEL, so bb-construction leaves
+  ;; it unmapped and jvm-to-cfg stores end-bid=#f.
+  (test-case "Kappa G: method-end try (end-bid=#f) lowers"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 1)
+                       (mk-insn 'ICONST_M1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_NEVER_EMITTED" "L_HANDLER"
+                                "java/lang/Exception"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define ks (all-kappa-nodes r))
+    (check-equal? (length ks) 1 "exactly one Kappa installed for method-end try")
+    (define knid (car (first ks)))
+    (define k (cdr (first ks)))
+    ;; Both arms terminate (IRETURN) → terminal Kappa.
+    (check-equal? (node-output-count r knid) 0)
+    (check-equal? (pvector-length (Kappa-handlers k)) 1)
+    (check-equal? (car (pvector-ref (Kappa-handlers k) 0))
+                  "java/lang/Exception"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
