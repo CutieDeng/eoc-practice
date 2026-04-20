@@ -146,6 +146,7 @@
     'status 'partial
     'supported '(jvm-to-cfg ssa-construct normalize-try-exits linear-rvsdg
                  gamma-recovery gamma-multi-block-arms
+                 gamma-empty-branch
                  gamma-nested-diamonds theta-recovery
                  theta-multi-block-body theta-gamma-inside-body
                  nested-thetas theta-inside-gamma

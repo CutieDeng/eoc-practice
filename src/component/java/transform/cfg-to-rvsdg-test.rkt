@@ -141,6 +141,48 @@
     ;; And must finish with a return.
     (check-not-false (memq 'return (node-ops r))))
 
+  ;; ----- Gamma recovery: empty else-branch (if-without-else) -----
+  (test-case "IF with empty else lowers to a Gamma (one arm == join)"
+    ;; int y = 0;
+    ;; if (arg0 != 0) { y = 1; }   // no else
+    ;; /* intermediate */
+    ;; return y;
+    ;;
+    ;; The join block is a trivial Term:jump forwarder (not ret/throw)
+    ;; so this does NOT hit translate-asymmetric-exit-gamma; it goes
+    ;; through translate-gamma proper, where one arm-bid equals the
+    ;; join-bid.  translate-gamma's empty-arm fallback resolves that
+    ;; arm's phi-source predecessor to cond-bid.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFEQ "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_JOIN")
+                       (mk-insn 'GOTO "L_AFTER")
+                       (mk-insn 'CUTIEDENG-LABEL "L_AFTER")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Exactly one Gamma in the parent region.
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "empty-else IF should lower to exactly one Gamma")
+    ;; The Gamma has two sub-regions (one per arm).
+    (define g (car gammas))
+    (check-equal? (length (Gamma-regions g)) 2))
+
   ;; ----- Gamma recovery: multi-block arms -----
   (test-case "Gamma lowers with multi-block then-arm"
     ;; if (arg0) { t = 1; slot0 = 2; } else { slot0 = 3; } return slot0;

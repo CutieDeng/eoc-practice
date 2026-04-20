@@ -605,21 +605,29 @@
   ;; `find-branch-join`, `arm-last-before-join`, `arm-blocks-set` —
   ;; can recognise multi-block exit subtrees nested inside either
   ;; arm and skip past them while searching for the outer join.
+  ;;
+  ;; Empty-arm case: a `if (c) { body }` with no else compiles to a
+  ;; Term:cond whose "else" target IS the join block (cond-bid →
+  ;; then-bid, cond-bid → join-bid).  arm-pred for that empty arm is
+  ;; cond-bid itself (the single direct predecessor feeding the join),
+  ;; and arm-blocks is empty so collect-gamma-ctx picks up nothing
+  ;; from that side beyond the phi-source contribution.
   (define then-full-reach (arm-reach-set cfg then-bid))
   (define else-full-reach (arm-reach-set cfg else-bid))
   (define shared-set (reach-set-intersection then-full-reach else-full-reach))
   (define-values (join-bid then-pred else-pred then-blocks else-blocks)
     (parameterize ([current-shared-set shared-set])
       (define jb (find-branch-join cfg then-bid else-bid))
-      (when (or (equal? jb then-bid) (equal? jb else-bid))
-        (error 'translate-gamma
-               "empty branch (then=~a else=~a join=~a) not yet supported"
-               then-bid else-bid jb))
+      (define (arm-pred-for b) (if (equal? b jb) cond-bid
+                                   (arm-last-before-join cfg b jb)))
+      (define (arm-blocks-for b) (if (equal? b jb)
+                                     (ordered-map-empty block-id-compare)
+                                     (arm-blocks-set cfg b jb)))
       (values jb
-              (arm-last-before-join cfg then-bid jb)
-              (arm-last-before-join cfg else-bid jb)
-              (arm-blocks-set cfg then-bid jb)
-              (arm-blocks-set cfg else-bid jb))))
+              (arm-pred-for then-bid)
+              (arm-pred-for else-bid)
+              (arm-blocks-for then-bid)
+              (arm-blocks-for else-bid))))
 
   (define join-blk (cfg-get-block cfg join-bid))
   (define phis (CfgBlock-phis join-blk))
