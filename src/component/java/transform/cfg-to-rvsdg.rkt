@@ -421,23 +421,36 @@
         (define else-blk (cfg-get-block cfg else-bid))
         (define then-term? (terminal-block? then-blk))
         (define else-term? (terminal-block? else-blk))
+        ;; A terminal arm only qualifies as a true "exit" arm when the
+        ;; other arm's forward reach does NOT flow into it.  If it
+        ;; does, the terminal block is the shared convergent join —
+        ;; one arm is an empty-arm diamond whose join happens to end
+        ;; in ret/throw — and must go through translate-gamma proper
+        ;; instead of the asymmetric-exit path.
+        (define then-arm-is-exit?
+          (and then-term?
+               (not (ordered-map-ref (arm-reach-set cfg else-bid) then-bid #f))))
+        (define else-arm-is-exit?
+          (and else-term?
+               (not (ordered-map-ref (arm-reach-set cfg then-bid) else-bid #f))))
         (cond
-          [(and then-term? else-term?)
-           ;; Both arms are single-block exits (Term:ret / Term:throw).
-           (translate-terminal-gamma cfg pred then-bid else-bid
+          [(and then-arm-is-exit? else-arm-is-exit?)
+           ;; Both arms are single-block exits (Term:ret / Term:throw)
+           ;; with disjoint reach-sets.
+           (translate-terminal-gamma cfg start-bid pred then-bid else-bid
                                      region1 var->out1)]
-          [(or then-term? else-term?)
+          [(or then-arm-is-exit? else-arm-is-exit?)
            ;; Asymmetric early-exit: one arm is a single block ending
-           ;; in Term:ret / Term:throw; the other arm is the
-           ;; continuation.  Lower as a Gamma whose exit sub-region
-           ;; runs the early return / throw and whose continue sub-
-           ;; region is a no-op.  After the Gamma falls through,
-           ;; translate-segment resumes from the continuing branch's
-           ;; first block in the outer region.
+           ;; in Term:ret / Term:throw and is not shared with the
+           ;; other arm.  Lower as a Gamma whose exit sub-region runs
+           ;; the early return / throw and whose continue sub-region
+           ;; is a no-op.  After the Gamma falls through, translate-
+           ;; segment resumes from the continuing branch's first block
+           ;; in the outer region.
            (define-values (region2 var->out2 continue-bid)
-             (translate-asymmetric-exit-gamma cfg pred
-                                              then-bid then-term?
-                                              else-bid else-term?
+             (translate-asymmetric-exit-gamma cfg start-bid pred
+                                              then-bid then-arm-is-exit?
+                                              else-bid else-arm-is-exit?
                                               region1 var->out1))
            (translate-segment cfg continue-bid stop-bid region2 var->out2)]
           [else
@@ -468,7 +481,7 @@
               ;; reaches stop-bid (the continue arm); the other arm's
               ;; reach is internal and ret/throw-only.
               (define-values (region2 var->out2 continue-bid)
-                (translate-asymmetric-exit-gamma cfg pred
+                (translate-asymmetric-exit-gamma cfg start-bid pred
                                                  then-bid (not then-reaches-stop?)
                                                  else-bid (not else-reaches-stop?)
                                                  region1 var->out1))
@@ -486,7 +499,7 @@
               ;; "terminal-shaped" even though both arms actually feed
               ;; the outer join — falls through to the standard diamond
               ;; lowering below.
-              (translate-terminal-gamma cfg pred then-bid else-bid
+              (translate-terminal-gamma cfg start-bid pred then-bid else-bid
                                         region1 var->out1)]
              [else
               ;; When both arms reach stop-bid via boundary edges — a
@@ -525,7 +538,7 @@
         (cond
           [(and (andmap (lambda (r) (arm-leaves-all-ret-throw? cfg r)) reaches)
                 (reach-sets-all-pairwise-disjoint? reaches))
-           (translate-terminal-switch cfg value cases default-bid
+           (translate-terminal-switch cfg start-bid value cases default-bid
                                       region1 var->out1)]
           [else
            (define-values (region2 var->out2 join-bid)
@@ -866,24 +879,40 @@
 ;; internal blocks in addition to ret / throw leaves).  Calls
 ;; translate-segment with stop-bid=#f so the arm's entire control
 ;; flow lowers inside the sub-region; the returned payload selects
-;; the sink to install.  No phis are allowed on the arm's entry
-;; block (other arm preds are filtered by the dispatch's disjointness
-;; check).
-(define (build-exit-arm-region cfg branch-bid ctx-vars which)
+;; the sink to install.
+;;
+;; If the entry block carries phis, `pred-bid` names the dispatching
+;; block (the cond-bid / switch-bid the arm branches from).  For each
+;; phi, we look up its source VarId at pred-bid via pick-phi-source and
+;; pre-bind the phi output to the same oid as that source VarId.
+;; Callers must include those source VarIds in ctx-vars so the binding
+;; resolves against the region-arg output map.
+(define (build-exit-arm-region cfg branch-bid pred-bid ctx-vars which)
   (define n-ctx (pvector-length ctx-vars))
   (define entry-blk (cfg-get-block cfg branch-bid))
-  (unless (= 0 (pvector-length (CfgBlock-phis entry-blk)))
+  (define entry-phis (CfgBlock-phis entry-blk))
+  (when (and (> (pvector-length entry-phis) 0) (not pred-bid))
     (error 'build-exit-arm-region
-           "exit arm ~a (~a) entry block has phis, not yet supported"
+           "exit arm ~a (~a) entry block has phis but no pred-bid"
            branch-bid which))
   (define sub0 (region-empty))
   (define-values (sub1 _arg-nid _arg-ins arg-outs)
     (region-add-node sub0 (Simple (list 'region-arg n-ctx)) 0 n-ctx))
-  (define sub-var->out
+  (define sub-var->out-base
     (for/fold ([m (ordered-map-empty var-id-compare)])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector arg-outs)])
       (ordered-map-set m v oid)))
+  (define sub-var->out
+    (for/fold ([m sub-var->out-base])
+              ([phi (in-pvector entry-phis)])
+      (define src-var (pick-phi-source phi pred-bid which))
+      (define src-oid
+        (or (ordered-map-ref sub-var->out-base src-var #f)
+            (error 'build-exit-arm-region
+                   "exit arm ~a (~a) entry phi ~a source ~a missing from ctx"
+                   branch-bid which (PhiInsn-output phi) src-var)))
+      (ordered-map-set m (PhiInsn-output phi) src-oid)))
   (define-values (sub2 sub-var->out2 payload)
     (translate-segment cfg branch-bid #f sub1 sub-var->out))
   (match payload
@@ -894,24 +923,43 @@
                   "exit arm ~a (~a) did not terminate with ret/throw: payload=~s"
                   branch-bid which other)]))
 
+;; Merge the phi sources at `pred-bid` for every phi on the entry
+;; block of `branch-bid` into `ctx-set`.  Only the source VarIds that
+;; exist in `parent-var->out` are added — this mirrors
+;; collect-arm-ctx, which also filters against the parent scope.
+(define (add-entry-phi-srcs-to-ctx cfg ctx-set branch-bid pred-bid
+                                   parent-var->out which)
+  (define phis (CfgBlock-phis (cfg-get-block cfg branch-bid)))
+  (for/fold ([s ctx-set])
+            ([phi (in-pvector phis)])
+    (define src (pick-phi-source phi pred-bid which))
+    (cond
+      [(and (VarId? src) (ordered-map-ref parent-var->out src #f))
+       (ordered-map-set s src #t)]
+      [else s])))
+
 ;; Returns (values region var->out 'already-terminated).  Caller
 ;; treats the terminal-Gamma as the segment's terminator and stops
 ;; translating further blocks.
-(define (translate-terminal-gamma cfg pred then-bid else-bid region var->out)
+(define (translate-terminal-gamma cfg cond-bid pred then-bid else-bid region var->out)
   (define then-reach (arm-reach-set cfg then-bid))
   (define else-reach (arm-reach-set cfg else-bid))
   (define then-ctx (collect-arm-ctx cfg var->out then-reach))
   (define else-ctx (collect-arm-ctx cfg var->out else-reach))
-  (define ctx-set
+  (define ctx-set0
     (for/fold ([acc then-ctx])
               ([kv (in-ordered-map else-ctx)])
       (ordered-map-set acc (car kv) #t)))
+  (define ctx-set1
+    (add-entry-phi-srcs-to-ctx cfg ctx-set0 then-bid cond-bid var->out 'then))
+  (define ctx-set
+    (add-entry-phi-srcs-to-ctx cfg ctx-set1 else-bid cond-bid var->out 'else))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
-  (define then-region (build-exit-arm-region cfg then-bid ctx-vars 'then))
-  (define else-region (build-exit-arm-region cfg else-bid ctx-vars 'else))
+  (define then-region (build-exit-arm-region cfg then-bid cond-bid ctx-vars 'then))
+  (define else-region (build-exit-arm-region cfg else-bid cond-bid ctx-vars 'else))
 
   (define gamma-val (Gamma (list then-region else-region)))
 
@@ -962,7 +1010,7 @@
   (struct-copy Region r
                [info (ordered-map-set (Region-info r) key val)]))
 
-(define (translate-terminal-switch cfg value cases default-bid region var->out)
+(define (translate-terminal-switch cfg switch-bid value cases default-bid region var->out)
   (define case-bids
     (for/list ([kv (in-pvector cases)]) (cdr kv)))
   (define all-bids (cons default-bid case-bids))
@@ -988,20 +1036,27 @@
                "switch arms ~a and ~a share blocks (convergent switch); only terminal disjoint arms supported"
                b1 b2))))
 
-  ;; Union of all arms' ctx-vars.
-  (define ctx-set
+  ;; Union of all arms' ctx-vars, plus each arm's entry-phi source
+  ;; VarIds contributed from switch-bid.
+  (define ctx-set-reads
     (for/fold ([acc (ordered-map-empty var-id-compare)])
               ([reach (in-list reaches)])
       (define arm-ctx (collect-arm-ctx cfg var->out reach))
       (for/fold ([s acc]) ([kv (in-ordered-map arm-ctx)])
         (ordered-map-set s (car kv) #t))))
+  (define ctx-set
+    (for/fold ([s ctx-set-reads])
+              ([b (in-list all-bids)]
+               [i (in-naturals 0)])
+      (add-entry-phi-srcs-to-ctx cfg s b switch-bid var->out
+                                 (list 'switch-arm i))))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   ;; Build each sub-region; tag its info with the switch-case-key.
   (define (build-tagged-arm bid key-tag which)
-    (define sub (build-exit-arm-region cfg bid ctx-vars which))
+    (define sub (build-exit-arm-region cfg bid switch-bid ctx-vars which))
     (region-info-set sub 'java/switch-case-key key-tag))
 
   (define default-region
@@ -1217,7 +1272,7 @@
     (region-add-node sub1 (Simple (list 'region-result 0)) 0 0))
   sub2)
 
-(define (translate-asymmetric-exit-gamma cfg pred
+(define (translate-asymmetric-exit-gamma cfg cond-bid pred
                                          then-bid then-exits?
                                          else-bid else-exits?
                                          region var->out)
@@ -1225,12 +1280,15 @@
   (define continue-bid (if then-exits? else-bid then-bid))
 
   (define exit-reach (arm-reach-set cfg exit-bid))
-  (define ctx-set (collect-arm-ctx cfg var->out exit-reach))
+  (define ctx-set-reads (collect-arm-ctx cfg var->out exit-reach))
+  (define ctx-set
+    (add-entry-phi-srcs-to-ctx cfg ctx-set-reads exit-bid cond-bid
+                               var->out 'exit))
   (define ctx-vars
     (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
-  (define exit-region (build-exit-arm-region cfg exit-bid ctx-vars 'exit))
+  (define exit-region (build-exit-arm-region cfg exit-bid cond-bid ctx-vars 'exit))
   (define noop-region (build-noop-arm-region n-ctx))
 
   ;; Place sub-regions in [then, else] order so the raw predicate

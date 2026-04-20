@@ -1819,6 +1819,64 @@
     (check-equal? (length inner-gammas) 1
                   "try sub-region should host exactly one inner Gamma"))
 
+  ;; ----- Terminal-join diamond: one arm empty, join is terminal -----
+  (test-case "terminal ret/throw that is shared with other arm lowers as empty-arm Gamma"
+    ;; int y = 0;
+    ;; if (x != 0) /* empty */ ;        // ifne falls through OR jumps to L_RET
+    ;; else y = 10;                     // fall-through path assigns y
+    ;; return y;                        // L_RET is the shared join
+    ;;
+    ;; Block shape after CFG build:
+    ;;   L0: y := 0; ifne L_RET   (cond → L_RET | L1)
+    ;;   L1: y := 10; goto L_RET
+    ;;   L_RET: phi(y: L0→0, L1→10) ; return y
+    ;;
+    ;; Previously the Term:cond dispatch treated L_RET as a single-
+    ;; block "exit" arm because its terminator is ireturn and fired
+    ;; translate-asymmetric-exit-gamma, even though L_RET is also
+    ;; reached from the other arm.  That left L_RET's phi unresolved
+    ;; when translate-segment resumed on the continue arm.  Now the
+    ;; dispatch verifies that a terminal arm is not in the other
+    ;; arm's reach-set; if it is, the shape falls through to
+    ;; translate-gamma proper, which lowers it as an empty-arm Gamma
+    ;; whose join (L_RET) is translated in the outer region.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFNE "L_RET")
+                       (mk-insn 'CUTIEDENG-LABEL "L1")
+                       (mk-insn 'BIPUSH 10)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_RET")
+                       (mk-insn 'CUTIEDENG-LABEL "L_RET")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Exactly one Gamma in the parent region (the empty-arm diamond).
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "shared-terminal-join should lower to one Gamma")
+    (define g (car gammas))
+    (check-equal? (length (Gamma-regions g)) 2)
+    ;; Return sink lives in the outer region, not inside a sub-region
+    ;; (the join L_RET is translated in the parent region after the
+    ;; Gamma).
+    (check-not-false (memq 'return (node-ops r))
+                     "outer region must contain the return sink")
+    (for ([sr (in-list (Gamma-regions g))])
+      (for ([kv (in-ordered-map (Region-node->value sr))])
+        (define v (cdr kv))
+        (check-false (and (Simple? v) (equal? (Simple-op v) 'return))
+                     "sub-region must NOT contain a return sink"))))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

@@ -169,5 +169,6 @@
                  kappa-recovery-nested
                  kappa-recovery-method-end
                  kappa-recovery-multi-range
-                 kappa-recovery-multi-source-merge)
+                 kappa-recovery-multi-source-merge
+                 gamma-shared-terminal-join)
     'deferred  '()))
