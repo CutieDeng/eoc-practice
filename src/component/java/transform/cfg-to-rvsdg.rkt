@@ -139,12 +139,22 @@
 ;;
 ;; The kappa-recovery pipeline covers single-range, multi-handler,
 ;; convergent-past-forwarder, method-end (end-bid=#f), nested
-;; try/catch at distinct start-bids, and multi-range (same-start
-;; different-end) layouts.  Multi-range materialises as a stack of
-;; Kappa-Groups under the shared start-bid key (outer first); the
-;; outer Kappa's try-region re-encounters start-bid with the outer
-;; popped and dispatches into the inner Kappa.  Each remaining
-;; unsupported shape raises with a self-identifying error.
+;; try/catch at distinct start-bids, multi-range (same-start
+;; different-end) layouts, and multi-source arm merges (inner
+;; diamond inside the try reunifies at the Kappa's convergent join).
+;; Multi-range materialises as a stack of Kappa-Groups under the
+;; shared start-bid key (outer first); the outer Kappa's try-region
+;; re-encounters start-bid with the outer popped and dispatches into
+;; the inner Kappa.  Multi-source: inside the Kappa try sub-region,
+;; translate-gamma on the inner cond lands its own find-branch-join
+;; on the outer join-bid (with the scope-boundary extension
+;; described at translate-segment's standard-diamond dispatch), and
+;; each join-phi's output VarId is bound to the inner Gamma's output
+;; in sub-var->out.  finish-kappa-sub-region/cfg then detects
+;; multi-source by counting direct Term:jump-to-join preds in the
+;; arm-reach and reads the phi-output oid directly from that map,
+;; rather than picking a single pred's phi-source VarId.  Each
+;; remaining unsupported shape raises with a self-identifying error.
 ;;
 ;; ============================================================
 
@@ -463,18 +473,39 @@
                                                  else-bid (not else-reaches-stop?)
                                                  region1 var->out1))
               (translate-segment cfg continue-bid stop-bid region2 var->out2)]
-             [(and (arm-leaves-all-ret-throw? cfg then-reach)
+             [(and (not then-reaches-stop?)
+                   (not else-reaches-stop?)
+                   (arm-leaves-all-ret-throw? cfg then-reach)
                    (arm-leaves-all-ret-throw? cfg else-reach)
                    (reach-sets-disjoint? then-reach else-reach))
               ;; Multi-block terminal Gamma: build each sub-region by
               ;; recursing into translate-segment until it hits its
-              ;; own ret / throw payload.
+              ;; own ret / throw payload.  Guard on neither-reaches-stop
+              ;; so a merge diamond inside a scope (Kappa try / Theta
+              ;; body) — where arm-reach is scope-clipped and may look
+              ;; "terminal-shaped" even though both arms actually feed
+              ;; the outer join — falls through to the standard diamond
+              ;; lowering below.
               (translate-terminal-gamma cfg pred then-bid else-bid
                                         region1 var->out1)]
              [else
+              ;; When both arms reach stop-bid via boundary edges — a
+              ;; merge diamond whose join lives one step past the
+              ;; scope boundary — extend `current-arm-scope` with
+              ;; stop-bid so find-branch-join / arm-advance recognise
+              ;; stop-bid itself as the convergence point.  Without
+              ;; this, the scope-clipped reach walk dead-ends before
+              ;; reaching the join.
+              (define scope-for-gamma
+                (let ([s (current-arm-scope)])
+                  (cond
+                    [(and s stop-bid then-reaches-stop? else-reaches-stop?)
+                     (ordered-map-set s stop-bid #t)]
+                    [else s])))
               (define-values (region2 var->out2 join-bid)
-                (translate-gamma cfg start-bid pred then-bid else-bid
-                                 region1 var->out1))
+                (parameterize ([current-arm-scope scope-for-gamma])
+                  (translate-gamma cfg start-bid pred then-bid else-bid
+                                   region1 var->out1)))
               (cond
                 [join-bid
                  (translate-segment cfg join-bid stop-bid region2 var->out2)]
@@ -2325,30 +2356,23 @@
               [_ '()]))
           (loop (append succs rest) s*)])])))
 
-;; For a convergent Kappa arm that actually reaches the join via a
-;; direct `Term:jump join-bid`, locate that predecessor block — its
-;; phi-source slot supplies each join-phi's value from this arm.  C3
-;; handles only arms that converge via a single direct jump; complex
-;; arm merges (inner diamonds reunifying at join) are deferred.
-;; Returns #f when no block in the arm jumps to join-bid (that arm is
-;; terminal — the caller installs a ret / throw sink instead).  Errors
-;; when multiple blocks jump to join-bid (ambiguous multi-source).
-(define (find-kappa-arm-pred cfg arm-reach join-bid which)
-  (define candidates
-    (for/fold ([acc '()])
-              ([kv (in-ordered-map arm-reach)])
-      (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
-      (cond
-        [(and (Term:jump? t) (equal? (Term:jump-target t) join-bid))
-         (cons (car kv) acc)]
-        [else acc])))
-  (cond
-    [(= 1 (length candidates)) (car candidates)]
-    [(= 0 (length candidates)) #f]
-    [else
-     (error 'find-kappa-arm-pred
-            "~a arm has multiple direct jumps to join ~a (~s); multi-source arm merges not yet supported"
-            which join-bid candidates)]))
+;; For a convergent Kappa arm, find every block in the arm's reach
+;; that ends in a direct `Term:jump join-bid`.  Each such block is a
+;; phi-source predecessor for this arm.  Returns a list of BlockIds
+;; (possibly empty when the arm terminates via ret / throw rather
+;; than reaching join).  Multi-source: when an inner diamond inside
+;; the arm reunifies at the Kappa's join-bid, both inner-end blocks
+;; appear here — callers consult sub-var->out2 for the phi-output
+;; VarId (already materialised by the inner Gamma) rather than
+;; picking one pred.
+(define (find-kappa-arm-preds cfg arm-reach join-bid)
+  (for/fold ([acc '()])
+            ([kv (in-ordered-map arm-reach)])
+    (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
+    (cond
+      [(and (Term:jump? t) (equal? (Term:jump-target t) join-bid))
+       (cons (car kv) acc)]
+      [else acc])))
 
 ;; Build the try sub-region.  Walks translate-segment scoped to try-
 ;; bids with stop-bid=join-bid (or #f when kind is 'terminal); delegates
@@ -2461,8 +2485,14 @@
        [else
         (ordered-map-set gs start-bid (pvector-drop stack 1))])]))
 
-;; Wrapper that threads `cfg` into the finisher so find-kappa-arm-pred
-;; can locate the Term:jump predecessor when the arm converges.
+;; Wrapper that threads `cfg` into the finisher so find-kappa-arm-preds
+;; can locate the Term:jump predecessor(s) when the arm converges.
+;; Single-source (one direct jump to join) wires each region-result
+;; via pick-phi-source on that pred.  Multi-source (an inner diamond
+;; inside the arm reunifies at join) reads each phi's output VarId
+;; directly from sub-var->out2 — translate-gamma on the inner diamond
+;; has already materialised a Gamma output bound to that VarId when
+;; its find-branch-join landed on the outer join-bid.
 (define (finish-kappa-sub-region/cfg cfg sub2 sub-var->out2 payload
                                      arm-reach join-bid join-phis which)
   (match payload
@@ -2474,23 +2504,30 @@
        (error 'finish-kappa-sub-region
               "~a arm reached a block without a join-bid (terminal-kind walk mis-stopped)"
               which))
-     (define arm-pred
-       (or (find-kappa-arm-pred cfg arm-reach join-bid which)
-           (error 'finish-kappa-sub-region
-                  "~a arm stopped at ~a but no block jumps to it" which join-bid)))
-     (define result-src-vars
-       (for/pvector ([phi (in-pvector join-phis)])
-         (pick-phi-source phi arm-pred which)))
+     (define preds (find-kappa-arm-preds cfg arm-reach join-bid))
+     (define multi? (> (length preds) 1))
+     (when (null? preds)
+       (error 'finish-kappa-sub-region
+              "~a arm stopped at ~a but no block jumps to it" which join-bid))
+     (define (phi-source-oid phi)
+       (cond
+         [multi?
+          (or (ordered-map-ref sub-var->out2 (PhiInsn-output phi) #f)
+              (error 'finish-kappa-sub-region
+                     "~a arm has multi-source merge at ~a but phi-output ~a not resolved (inner merge did not materialise)"
+                     which join-bid (PhiInsn-output phi)))]
+         [else
+          (define arm-pred (car preds))
+          (define src-var (pick-phi-source phi arm-pred which))
+          (or (ordered-map-ref sub-var->out2 src-var #f)
+              (error 'finish-kappa-sub-region
+                     "phi source ~a undefined in ~a sub-region" src-var which))]))
      (define-values (sub3 res-ins)
        (region-add-region-result sub2 (pvector-length join-phis)))
      (for/fold ([r sub3])
-               ([src-var (in-pvector result-src-vars)]
+               ([phi (in-pvector join-phis)]
                 [iid (in-pvector res-ins)])
-       (define src-oid
-         (or (ordered-map-ref sub-var->out2 src-var #f)
-             (error 'finish-kappa-sub-region
-                    "phi source ~a undefined in ~a sub-region" src-var which)))
-       (define-values (r* _w) (region-add-wire r src-oid iid))
+       (define-values (r* _w) (region-add-wire r (phi-source-oid phi) iid))
        r*)]
     [other
      (error 'finish-kappa-sub-region
@@ -2523,20 +2560,18 @@
       [else (pvector-empty)]))
   (define n-phis (pvector-length join-phis))
 
-  ;; Per-arm pred-bids (or #f if the arm does not reach join via a
-  ;; direct Term:jump) — only used to extend ctx with phi-source
-  ;; contributions from arms that actually converge.  The builders
-  ;; re-derive these internally when they finish the sub-region, so
-  ;; we don't thread them through.
-  (define (arm-pred-or-false reach which)
-    (cond [(eq? kind 'convergent)
-           (find-kappa-arm-pred cfg reach join-bid which)]
-          [else #f]))
-  (define try-arm-pred (arm-pred-or-false try-reach 'try))
-  (define handler-arm-preds
-    (for/list ([h (in-pvector handlers)]
-               [reach (in-list handler-reaches)])
-      (arm-pred-or-false reach (list 'handler (cdr h)))))
+  ;; Per-arm pred-bid lists — every block in the arm's reach that
+  ;; directly Term:jumps to join-bid.  Lists (not singletons) so multi
+  ;; -source merges (inner diamond reunifying at the Kappa join) get
+  ;; all contributing preds considered for ctx collection.  Builders
+  ;; re-derive these internally when they finish the sub-region.
+  (define (arm-preds-or-empty reach)
+    (cond [(eq? kind 'convergent) (find-kappa-arm-preds cfg reach join-bid)]
+          [else '()]))
+  (define try-arm-preds (arm-preds-or-empty try-reach))
+  (define handler-arm-preds-list
+    (for/list ([reach (in-list handler-reaches)])
+      (arm-preds-or-empty reach)))
 
   ;; Ctx vars: union of parent-scope reads across every arm, plus
   ;; (for converging arms only) phi-source VarId contributions at
@@ -2550,22 +2585,20 @@
               ([hctx (in-list handler-ctxs)])
       (for/fold ([s s]) ([kv (in-ordered-map hctx)])
         (ordered-map-set s (car kv) #t))))
-  (define (add-phi-srcs arm-pred acc)
-    (cond
-      [arm-pred
-       (for/fold ([a acc]) ([phi (in-pvector join-phis)])
-         (define src (pick-phi-source phi arm-pred 'kappa-ctx))
-         (cond
-           [(and (VarId? src) (ordered-map-ref var->out src #f))
-            (ordered-map-set a src #t)]
-           [else a]))]
-      [else acc]))
+  (define (add-phi-srcs-for-preds arm-preds acc)
+    (for/fold ([a acc]) ([ap (in-list arm-preds)])
+      (for/fold ([a a]) ([phi (in-pvector join-phis)])
+        (define src (pick-phi-source phi ap 'kappa-ctx))
+        (cond
+          [(and (VarId? src) (ordered-map-ref var->out src #f))
+           (ordered-map-set a src #t)]
+          [else a]))))
   (define ctx-set-with-join
     (cond
       [(eq? kind 'convergent)
-       (for/fold ([s (add-phi-srcs try-arm-pred ctx-set-base)])
-                 ([ap (in-list handler-arm-preds)])
-         (add-phi-srcs ap s))]
+       (for/fold ([s (add-phi-srcs-for-preds try-arm-preds ctx-set-base)])
+                 ([preds (in-list handler-arm-preds-list)])
+         (add-phi-srcs-for-preds preds s))]
       [else ctx-set-base]))
   ;; Handler-entry phis (placed by ssa-construct on exception edges)
   ;; need their start-bid-side source value to flow into the handler

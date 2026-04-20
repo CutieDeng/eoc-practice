@@ -168,5 +168,6 @@
                  kappa-recovery-join-chain-refinement
                  kappa-recovery-nested
                  kappa-recovery-method-end
-                 kappa-recovery-multi-range)
+                 kappa-recovery-multi-range
+                 kappa-recovery-multi-source-merge)
     'deferred  '()))

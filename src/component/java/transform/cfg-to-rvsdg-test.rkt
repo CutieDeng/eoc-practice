@@ -1747,6 +1747,78 @@
     (check-equal? (car (pvector-ref (Kappa-handlers (car inner-ks)) 0))
                   "java/lang/NumberFormatException"))
 
+  ;; ----- J. Multi-source arm merge (inner diamond inside try) -----
+  ;;
+  ;; Pseudo-Java:
+  ;;   int y = 0;
+  ;;   try {
+  ;;     if (x > 0) y = 1;
+  ;;     else       y = 2;
+  ;;   } catch (Exception) { y = 3; }
+  ;;   return y;
+  ;;
+  ;; The try-body holds an if-else whose two arms BOTH Term:jump to the
+  ;; same block that the handler also Term:jumps to.  That shared block
+  ;; is the Kappa's convergent join-bid, and its phi receives three
+  ;; sources (L_THEN, L_ELSE, L_HANDLER).  Inside the Kappa try sub-
+  ;; region, translate-segment enters translate-gamma at L_TRY (the
+  ;; inner cond); find-branch-join lands on the outer join-bid, so the
+  ;; inner Gamma materialises an output bound to the join-phi's output
+  ;; VarId.  finish-kappa-sub-region/cfg then detects multi-source
+  ;; (both L_THEN and L_ELSE jump to join) and wires the region-result
+  ;; from the already-materialised phi-output oid, rather than picking
+  ;; a single pred.
+  (test-case "Kappa J: multi-source try arm (inner diamond reunifies at Kappa join)"
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_INIT")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'CUTIEDENG-LABEL "L_TRY")
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IFLE "L_ELSE")
+                       (mk-insn 'CUTIEDENG-LABEL "L_THEN")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_ELSE")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_HANDLER")
+                       (mk-insn 'ASTORE 2)
+                       (mk-insn 'ICONST_3)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_JOIN")
+                       (mk-insn 'CUTIEDENG-LABEL "L_JOIN")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN)
+                       (mk-insn 'TRY-CATCH-BLOCK
+                                "L_TRY" "L_HANDLER" "L_HANDLER"
+                                "java/lang/Exception"))
+                 #:desc "(I)I"))
+    (define lam (compile-method/kappa m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define ks (all-kappa-nodes r))
+    (check-equal? (length ks) 1 "exactly one Kappa installed")
+    (define knid (car (first ks)))
+    (define k (cdr (first ks)))
+    ;; Convergent ⇒ at least one output (the y-phi merge).
+    (check-true (> (node-output-count r knid) 0)
+                "convergent Kappa must carry >=1 output from the join phi")
+    (check-equal? (pvector-length (Kappa-handlers k)) 1)
+    (check-equal? (car (pvector-ref (Kappa-handlers k) 0))
+                  "java/lang/Exception")
+    ;; The try sub-region must contain the inner Gamma that merged
+    ;; the two y assignments.
+    (define try-region (Kappa-try-region k))
+    (define inner-gammas
+      (for/list ([kv (in-ordered-map (Region-node->value try-region))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length inner-gammas) 1
+                  "try sub-region should host exactly one inner Gamma"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))
