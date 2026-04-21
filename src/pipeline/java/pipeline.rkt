@@ -170,5 +170,6 @@
                  kappa-recovery-method-end
                  kappa-recovery-multi-range
                  kappa-recovery-multi-source-merge
-                 gamma-shared-terminal-join)
+                 gamma-shared-terminal-join
+                 switch-recovery-convergent-empty-arm)
     'deferred  '()))

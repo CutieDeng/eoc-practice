@@ -1877,6 +1877,77 @@
         (check-false (and (Simple? v) (equal? (Simple-op v) 'return))
                      "sub-region must NOT contain a return sink"))))
 
+  ;; ----- Convergent switch with empty (default→join) arm -----
+  (test-case "convergent LOOKUPSWITCH with empty default arm lowers to Gamma"
+    ;; int y = 0;
+    ;; switch (x) {
+    ;;   case 10: y = 1; break;
+    ;;   case 20: y = 2; break;
+    ;;   // no default: falls through to L_END
+    ;; }
+    ;; return y;
+    ;;
+    ;; Block shape after CFG build:
+    ;;   L_ENTRY: y := 0; lookupswitch default=L_END [10→L_C10, 20→L_C20]
+    ;;   L_C10:  y := 1; goto L_END
+    ;;   L_C20:  y := 2; goto L_END
+    ;;   L_END:  phi(y: L_ENTRY→0, L_C10→1, L_C20→2) ; return y
+    ;;
+    ;; The default arm's branch-bid (L_END) == join-bid, so it's empty.
+    ;; translate-convergent-switch must treat that arm like translate-
+    ;; gamma's empty-arm case: arm-pred = switch-bid (L_ENTRY), arm-
+    ;; blocks = ∅, phi source picked from switch-bid.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'LOOKUPSWITCH
+                                "L_END"
+                                (list 10 20)
+                                (list "L_C10" "L_C20"))
+                       (mk-insn 'CUTIEDENG-LABEL "L_C10")
+                       (mk-insn 'ICONST_1)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_END")
+                       (mk-insn 'CUTIEDENG-LABEL "L_C20")
+                       (mk-insn 'ICONST_2)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'GOTO "L_END")
+                       (mk-insn 'CUTIEDENG-LABEL "L_END")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    (define gammas
+      (for/list ([kv (in-ordered-map (Region-node->value r))]
+                 #:when (Gamma? (cdr kv)))
+        (cdr kv)))
+    (check-equal? (length gammas) 1
+                  "empty-arm convergent switch should lower to one Gamma")
+    (define g (car gammas))
+    ;; 3 sub-regions: default + 2 cases.
+    (check-equal? (length (Gamma-regions g)) 3)
+    ;; Gamma should carry at least one output (the phi for y).
+    (define gnid
+      (for/or ([kv (in-ordered-map (Region-node->value r))])
+        (and (Gamma? (cdr kv)) (car kv))))
+    (define gout-count
+      (cdr (ordered-map-ref (Region-node->output r) gnid)))
+    (check-true (> gout-count 0)
+                "Gamma must carry >=1 output for the y phi")
+    ;; Return lives in the outer region after the Gamma.
+    (check-not-false (memq 'return (node-ops r))
+                     "outer region must contain the return sink")
+    ;; The default sub-region must report 'default as its switch-case-key.
+    (define keys
+      (for/list ([sr (in-list (Gamma-regions g))])
+        (ordered-map-ref (Region-info sr) 'java/switch-case-key #f)))
+    (check-equal? keys '(default 10 20)
+                  "sub-regions should carry default / case-key info in order"))
+
   ;; ----- fixture init (linear jump chain) -----
   (test-case "fixture: init method translates to RVSDG"
     (define klass (read-jvm-class-file fixture-class-transform))

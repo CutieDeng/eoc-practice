@@ -542,7 +542,7 @@
                                       region1 var->out1)]
           [else
            (define-values (region2 var->out2 join-bid)
-             (translate-convergent-switch cfg value cases default-bid
+             (translate-convergent-switch cfg start-bid value cases default-bid
                                           region1 var->out1))
            (translate-segment cfg join-bid stop-bid region2 var->out2)])]
        [#f
@@ -1109,7 +1109,7 @@
 ;; region's Region.info records 'java/switch-case-key.  Caller
 ;; resumes translate-segment from join-bid in the outer region.
 
-(define (translate-convergent-switch cfg value cases default-bid region var->out)
+(define (translate-convergent-switch cfg switch-bid value cases default-bid region var->out)
   (define case-bids (for/list ([kv (in-pvector cases)]) (cdr kv)))
   (define all-bids (cons default-bid case-bids))
   (unless (>= (length all-bids) 2)
@@ -1124,19 +1124,37 @@
     (for/fold ([s (car reaches)]) ([r (in-list (cdr reaches))])
       (reach-set-intersection s r)))
 
+  ;; Pick a seed pair for find-branch-join that is NOT already the
+  ;; join (otherwise find-branch-join's else-walk starts on the join
+  ;; itself and would spuriously declare start-bid as the join).  If
+  ;; every arm shares the same branch-bid then that bid is the join —
+  ;; all arms empty, which is degenerate.
+  (define (pick-nonempty-pair all-bs)
+    (let loop ([b1 #f] [bs all-bs])
+      (cond
+        [(null? bs) (values b1 #f)]
+        [(not b1) (loop (car bs) (cdr bs))]
+        [(equal? (car bs) b1) (loop b1 (cdr bs))]
+        [else (values b1 (car bs))])))
   (define-values (join-bid arm-preds arm-blocks-list)
     (parameterize ([current-shared-set shared-set])
-      (define jb (find-branch-join cfg (car all-bids) (cadr all-bids)))
-      (when (for/or ([b (in-list all-bids)]) (equal? b jb))
+      (define-values (seed-a seed-b) (pick-nonempty-pair all-bids))
+      (unless (and seed-a seed-b)
         (error 'translate-convergent-switch
-               "empty arm (one of ~s == join ~a) not yet supported"
-               all-bids jb))
-      (define preds
-        (for/list ([b (in-list all-bids)])
-          (arm-last-before-join cfg b jb)))
-      (define blocks-list
-        (for/list ([b (in-list all-bids)])
-          (arm-blocks-set cfg b jb)))
+               "all switch arms equal; degenerate convergent switch"))
+      (define jb (find-branch-join cfg seed-a seed-b))
+      ;; Empty arm: branch-bid == jb.  arm-pred = switch-bid (the
+      ;; single direct predecessor of the join along that arm) and
+      ;; arm-blocks is empty, matching translate-gamma's empty-arm
+      ;; treatment.
+      (define (arm-pred-for b)
+        (if (equal? b jb) switch-bid (arm-last-before-join cfg b jb)))
+      (define (arm-blocks-for b)
+        (if (equal? b jb)
+            (ordered-map-empty block-id-compare)
+            (arm-blocks-set cfg b jb)))
+      (define preds (for/list ([b (in-list all-bids)]) (arm-pred-for b)))
+      (define blocks-list (for/list ([b (in-list all-bids)]) (arm-blocks-for b)))
       (values jb preds blocks-list)))
 
   (define join-blk (cfg-get-block cfg join-bid))
