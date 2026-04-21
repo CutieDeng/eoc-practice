@@ -98,6 +98,27 @@
     (check-equal? (pvector-ref (VfInsn-inputs (pvector-ref insns 2)) 0) iload0-out)
     (check-equal? (pvector-ref (VfInsn-inputs (pvector-ref insns 2)) 1) iload1-out))
 
+  ;; ----- IINC: reads + writes the same local -----
+  (test-case "IINC idx delta lowers to a VfInsn with VarId in+out and const delta"
+    (define m (mk-method
+                (list (mk-insn 'CUTIEDENG-LABEL "L0")
+                      (mk-insn 'IINC 3 5)
+                      (mk-insn 'RETURN))
+                #:desc "()V"))
+    (define cfg (jvm-method->cfg m))
+    (define blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define insns (CfgBlock-insns blk))
+    (check-equal? (pvector-length insns) 1)
+    (define iinc (pvector-ref insns 0))
+    (check-equal? (VfInsn-op iinc) 'IINC)
+    ;; Inputs: [VarId 3, 5 (delta literal)]
+    (check-equal? (pvector-length (VfInsn-inputs iinc)) 2)
+    (check-equal? (pvector-ref (VfInsn-inputs iinc) 0) (VarId 3))
+    (check-equal? (pvector-ref (VfInsn-inputs iinc) 1) 5)
+    ;; Outputs: [VarId 3] (writes back to same local).
+    (check-equal? (pvector-length (VfInsn-outputs iinc)) 1)
+    (check-equal? (pvector-ref (VfInsn-outputs iinc) 0) (VarId 3)))
+
   ;; ----- IFEQ: two successors + pre-terminator VfInsn -----
   (test-case "ILOAD+IFEQ lowered to Term:cond"
     (define m (mk-method

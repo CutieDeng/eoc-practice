@@ -1877,6 +1877,64 @@
         (check-false (and (Simple? v) (equal? (Simple-op v) 'return))
                      "sub-region must NOT contain a return sink"))))
 
+  ;; ----- IINC opcode (for-loop counter increment) -----
+  (test-case "IINC opcode lowers to a Simple node reading+writing the local"
+    ;; int s = 0;
+    ;; for (int i = 0; i < n; i++) s += i;
+    ;; return s;
+    ;;
+    ;; Local layout: arg0 (slot 0) = n; slot 1 = s; slot 2 = i.
+    ;; IINC slot 2 by 1 is the loop's increment.  IINC has one VarId
+    ;; input (current value of the local) and one VarId output (new
+    ;; value); the delta literal is carried as a non-VarId input, so
+    ;; translate-vfinsn/generic materialises it as a const node.
+    (define m
+      (mk-method (list (mk-insn 'CUTIEDENG-LABEL "L_ENTRY")
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'ICONST_0)
+                       (mk-insn 'ISTORE 2)
+                       (mk-insn 'CUTIEDENG-LABEL "L_HEAD")
+                       (mk-insn 'ILOAD 2)
+                       (mk-insn 'ILOAD 0)
+                       (mk-insn 'IF_ICMPGE "L_EXIT")
+                       (mk-insn 'CUTIEDENG-LABEL "L_BODY")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'ILOAD 2)
+                       (mk-insn 'IADD)
+                       (mk-insn 'ISTORE 1)
+                       (mk-insn 'IINC 2 1)
+                       (mk-insn 'GOTO "L_HEAD")
+                       (mk-insn 'CUTIEDENG-LABEL "L_EXIT")
+                       (mk-insn 'ILOAD 1)
+                       (mk-insn 'IRETURN))
+                 #:desc "(I)I"))
+    (define lam (compile-method m))
+    (check-pred Lambda? lam)
+    (define r (region-of lam))
+    ;; Parent region contains a Theta.
+    (check-true (for/or ([kv (in-ordered-map (Region-node->value r))])
+                  (Theta? (cdr kv))))
+    ;; Theta body must contain an IINC Simple node.
+    (define theta
+      (for/or ([kv (in-ordered-map (Region-node->value r))])
+        (and (Theta? (cdr kv)) (cdr kv))))
+    (define theta-sub (Theta-region theta))
+    (define has-iinc?
+      (for/or ([kv (in-ordered-map (Region-node->value theta-sub))])
+        (define v (cdr kv))
+        (and (Simple? v) (equal? (Simple-op v) 'IINC))))
+    (check-true has-iinc? "Theta body must contain the IINC node")
+    ;; And a const feeding IINC (the literal delta).
+    (define has-const?
+      (for/or ([kv (in-ordered-map (Region-node->value theta-sub))])
+        (define v (cdr kv))
+        (and (Simple? v)
+             (let ([op (Simple-op v)])
+               (and (list? op) (equal? (car op) 'const) (equal? (cadr op) 1))))))
+    (check-true has-const?
+                "IINC delta=1 should be materialised as a const node in the Theta body"))
+
   ;; ----- Convergent switch with empty (default→join) arm -----
   (test-case "convergent LOOKUPSWITCH with empty default arm lowers to Gamma"
     ;; int y = 0;

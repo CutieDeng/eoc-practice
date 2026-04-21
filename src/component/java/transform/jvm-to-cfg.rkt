@@ -408,6 +408,26 @@
        stack*
        vc)]
 
+    ;; ---- Local increment (IINC idx delta) ----
+    ;; Reads local idx, writes local idx (value := value + delta).  No
+    ;; stack interaction.  `delta` is encoded as a literal (non-VarId)
+    ;; input so translate-vfinsn/generic materialises it as a const
+    ;; node feeding the IINC op — preserving the increment value as
+    ;; an explicit wire rather than burying it in VfInsn.info.
+    [(IINC)
+     (define idx (car args))
+     (define delta (cadr args))
+     (values
+       (VfInsn op
+               (pvector-cons-right
+                 (pvector-cons-right (pvector-empty) (VarId idx))
+                 delta)
+               (pvector-cons-right (pvector-empty) (VarId idx))
+               #f
+               #f)
+       stack
+       vc)]
+
     ;; ---- Stack manipulation ----
     [(POP)
      (define-values (_ stack*) (stack-pop-n stack 1))

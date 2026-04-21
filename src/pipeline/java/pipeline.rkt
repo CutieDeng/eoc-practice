@@ -171,5 +171,6 @@
                  kappa-recovery-multi-range
                  kappa-recovery-multi-source-merge
                  gamma-shared-terminal-join
-                 switch-recovery-convergent-empty-arm)
+                 switch-recovery-convergent-empty-arm
+                 iinc-opcode)
     'deferred  '()))
