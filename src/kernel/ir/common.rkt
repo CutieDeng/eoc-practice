@@ -52,9 +52,9 @@
 ;; Info Dictionary (metadata container)
 ;; ============================================================
 
-;; Empty info dictionary (using symbol comparison)
-(define empty-info (ordered-map-empty symbol-compare))
+;; Empty info dictionary (immutable hash keyed by symbol)
+(define empty-info (hash))
 
 ;; Check if something is a valid info dictionary
 (define (info? x)
-  (ordered-map? x))
+  (hash? x))

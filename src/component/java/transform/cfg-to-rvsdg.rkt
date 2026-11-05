@@ -165,7 +165,7 @@
          "../../../component/cfg/utils/graph-ops.rkt"
          "../../../component/cfg/analysis/loops.rkt"
          "../../../component/rvsdg/utils/builder.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (provide cfg->rvsdg)
 
@@ -177,7 +177,7 @@
 ;; loop header spawns a Theta.  The body from the header's body-arm
 ;; to any latch may mix Term:jump steps with inner Gamma diamonds
 ;; (each must converge before the latch).  Each latch's back-edge
-;; closes to the header.  `latches` is an ordered-map BlockId -> #t;
+;; closes to the header.  `latches` is an idmap BlockId -> #t;
 ;; a single-entry set covers the common single-latch case, a
 ;; 2-entry set covers the 2-latch diamond pattern (e.g. an inner if
 ;; whose two arms each `continue` via a distinct tail).
@@ -196,7 +196,7 @@
 ;; need, without participating in the current translator.
 ;;
 ;; Fields:
-;;   try-bids     : ordered-map[BlockId -> #t] — blocks inside the
+;;   try-bids     : idmap[BlockId -> #t] — blocks inside the
 ;;                  half-open try window.  Handler blocks are
 ;;                  excluded (they see the exception as a region-arg
 ;;                  rather than a normal predecessor).
@@ -224,7 +224,7 @@
 
 (define (arm-scope-contains? bid)
   (define scope (current-arm-scope))
-  (or (not scope) (ordered-map-ref scope bid #f)))
+  (or (not scope) (idmap-ref scope bid #f)))
 
 ;; During `translate-gamma`'s find-branch-join walk, this parameter
 ;; holds the forward-reach intersection of the two outer arms (i.e.
@@ -288,17 +288,17 @@
   ;; its own ctx entry.
   (define back-edges (cfg-find-back-edges cfg))
   (define theta-ctxs
-    (for/fold ([m (ordered-map-empty block-id-compare)])
+    (for/fold ([m idmap-empty])
               ([be (in-pvector back-edges)])
       (define latch (car be))
       (define header (cdr be))
-      (define existing (ordered-map-ref m header #f))
+      (define existing (idmap-ref m header #f))
       (define latches
         (cond
-          [existing (ordered-map-set (Theta-Ctx-latches existing) latch #t)]
-          [else (ordered-map-set (ordered-map-empty block-id-compare)
+          [existing (idmap-set (Theta-Ctx-latches existing) latch #t)]
+          [else (idmap-set idmap-empty
                                  latch #t)]))
-      (ordered-map-set m header (Theta-Ctx header latches))))
+      (idmap-set m header (Theta-Ctx header latches))))
 
   (define region0 (region-empty))
 
@@ -308,10 +308,10 @@
 
   ;; 2. Seed var → output with each parameter name.
   (define var->out-init
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([name (in-pvector param-names)]
                [oid (in-pvector param-outs)])
-      (ordered-map-set m name oid)))
+      (idmap-set m name oid)))
 
   ;; Compute one Kappa-Group per try window in the exception-table.
   ;; Empty map when the method has no try/catch.  translate-segment
@@ -358,8 +358,8 @@
 (define (translate-segment cfg start-bid stop-bid region var->out)
   (define ctxs (current-theta-ctxs))
   (define kappas (current-kappa-groups))
-  (define ctx-here (and ctxs (ordered-map-ref ctxs start-bid #f)))
-  (define kappa-stack-here (and kappas (ordered-map-ref kappas start-bid #f)))
+  (define ctx-here (and ctxs (idmap-ref ctxs start-bid #f)))
+  (define kappa-stack-here (and kappas (idmap-ref kappas start-bid #f)))
   ;; Outer Kappa first (pvector is sorted descending by end-bid at
   ;; compute-kappa-groups time).  A single Kappa-Group is wrapped in a
   ;; length-1 pvector so this lookup is uniform across the common
@@ -397,7 +397,7 @@
      ;; phi output is resolved -- an unresolved phi means the segment
      ;; was re-entered through a path that skipped its handler.
      (for ([phi (in-pvector (CfgBlock-phis blk))])
-       (unless (ordered-map-ref var->out (PhiInsn-output phi) #f)
+       (unless (idmap-ref var->out (PhiInsn-output phi) #f)
          (error 'translate-segment
                 "unresolved phi ~a at block ~a -- missing Gamma/Theta handler"
                 (PhiInsn-output phi) start-bid)))
@@ -429,10 +429,10 @@
         ;; instead of the asymmetric-exit path.
         (define then-arm-is-exit?
           (and then-term?
-               (not (ordered-map-ref (arm-reach-set cfg else-bid) then-bid #f))))
+               (not (idmap-ref (arm-reach-set cfg else-bid) then-bid #f))))
         (define else-arm-is-exit?
           (and else-term?
-               (not (ordered-map-ref (arm-reach-set cfg then-bid) else-bid #f))))
+               (not (idmap-ref (arm-reach-set cfg then-bid) else-bid #f))))
         (cond
           [(and then-arm-is-exit? else-arm-is-exit?)
            ;; Both arms are single-block exits (Term:ret / Term:throw)
@@ -513,7 +513,7 @@
                 (let ([s (current-arm-scope)])
                   (cond
                     [(and s stop-bid then-reaches-stop? else-reaches-stop?)
-                     (ordered-map-set s stop-bid #t)]
+                     (idmap-set s stop-bid #t)]
                     [else s])))
               (define-values (region2 var->out2 join-bid)
                 (parameterize ([current-arm-scope scope-for-gamma])
@@ -590,7 +590,7 @@
      (unless (VarId? out-var)
        (error 'translate-vfinsn
               "'java/exception-ref output is not a VarId: ~s" out-var))
-     (values region (ordered-map-set var->out out-var exn-oid))]
+     (values region (idmap-set var->out out-var exn-oid))]
     [else
      (translate-vfinsn/generic region var->out op inputs outputs n-in n-out)]))
 
@@ -601,7 +601,7 @@
               ([x (in-pvector inputs)])
       (cond
         [(VarId? x)
-         (define oid (ordered-map-ref var->out x #f))
+         (define oid (idmap-ref var->out x #f))
          (unless oid
            (error 'translate-vfinsn "undefined ~a for op ~a" x op))
          (values r (pvector-cons-right acc oid))]
@@ -628,7 +628,7 @@
               ([vout (in-pvector outputs)]
                [oid (in-pvector out-ids)]
                #:when (VarId? vout))
-      (ordered-map-set m vout oid)))
+      (idmap-set m vout oid)))
 
   (values region3 var->out*))
 
@@ -665,7 +665,7 @@
       (define (arm-pred-for b) (if (equal? b jb) cond-bid
                                    (arm-last-before-join cfg b jb)))
       (define (arm-blocks-for b) (if (equal? b jb)
-                                     (ordered-map-empty block-id-compare)
+                                     idmap-empty
                                      (arm-blocks-set cfg b jb)))
       (values jb
               (arm-pred-for then-bid)
@@ -687,7 +687,7 @@
     (collect-gamma-ctx cfg var->out then-blocks then-pred
                                     else-blocks else-pred phis))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   ;; Build the per-branch sub-region closures.
@@ -705,7 +705,7 @@
 
   ;; Wire predicate.
   (define pred-oid
-    (or (ordered-map-ref var->out pred #f)
+    (or (idmap-ref var->out pred #f)
         (error 'translate-gamma "undefined predicate ~a" pred)))
   (define-values (region2 _pw)
     (region-add-wire region1 pred-oid (pvector-ref g-ins 0)))
@@ -715,7 +715,7 @@
     (for/fold ([r region2])
               ([ctx-var (in-pvector ctx-vars)]
                [i (in-naturals 1)])
-      (define src-oid (ordered-map-ref var->out ctx-var #f))
+      (define src-oid (idmap-ref var->out ctx-var #f))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
       r*))
 
@@ -725,7 +725,7 @@
     (for/fold ([m var->out])
               ([phi (in-pvector phis)]
                [oid (in-pvector g-outs)])
-      (ordered-map-set m (PhiInsn-output phi) oid)))
+      (idmap-set m (PhiInsn-output phi) oid)))
 
   (values region3 var->out* join-bid))
 
@@ -763,20 +763,20 @@
 ;; active scope are treated as boundary edges and not included in
 ;; the walk (typical inside a Theta body, where scope=body-blocks
 ;; and a Term:jump to the loop header crosses the back-edge).
-;; Returns an ordered-map used as a set of BlockId -> #t.
+;; Returns an idmap used as a set of BlockId -> #t.
 (define (arm-reach-set cfg start-bid)
   (let loop ([work (list start-bid)]
-             [seen (ordered-map-empty block-id-compare)])
+             [seen idmap-empty])
     (cond
       [(null? work) seen]
       [else
        (define b (car work))
        (define rest (cdr work))
        (cond
-         [(ordered-map-ref seen b #f) (loop rest seen)]
+         [(idmap-ref seen b #f) (loop rest seen)]
          [(not (arm-scope-contains? b)) (loop rest seen)]
          [else
-          (define seen* (ordered-map-set seen b #t))
+          (define seen* (idmap-set seen b #t))
           (define succs
             (match (CfgBlock-terminator (cfg-get-block cfg b))
               [(Term:jump n) (list n)]
@@ -793,8 +793,8 @@
 ;; to the classic membership check.
 (define (reach-set-reaches-stop? cfg reach-set stop-bid)
   (and stop-bid
-       (or (ordered-map-ref reach-set stop-bid #f)
-           (for/or ([kv (in-ordered-map reach-set)])
+       (or (idmap-ref reach-set stop-bid #f)
+           (for/or ([kv (in-idmap reach-set)])
              (match (CfgBlock-terminator (cfg-get-block cfg (car kv)))
                [(Term:jump n) (equal? n stop-bid)]
                [(Term:cond _ tb eb)
@@ -807,14 +807,14 @@
 ;; leaf.  Rejects switch / unreachable / #f leaves because they
 ;; cannot be materialised as a Gamma-arm sink.
 (define (arm-leaves-all-ret-throw? cfg reach-set)
-  (for/and ([kv (in-ordered-map reach-set)])
+  (for/and ([kv (in-idmap reach-set)])
     (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
     (or (Term:jump? t) (Term:cond? t)
         (Term:ret? t) (Term:throw? t))))
 
 (define (reach-sets-disjoint? s1 s2)
-  (for/and ([kv (in-ordered-map s1)])
-    (not (ordered-map-ref s2 (car kv) #f))))
+  (for/and ([kv (in-idmap s1)])
+    (not (idmap-ref s2 (car kv) #f))))
 
 (define (reach-sets-all-pairwise-disjoint? sets)
   (let loop ([xs sets])
@@ -827,38 +827,38 @@
             (loop (cdr xs)))])))
 
 (define (reach-set-intersection s1 s2)
-  (for/fold ([s (ordered-map-empty block-id-compare)])
-            ([kv (in-ordered-map s1)]
-             #:when (ordered-map-ref s2 (car kv) #f))
-    (ordered-map-set s (car kv) #t)))
+  (for/fold ([s idmap-empty])
+            ([kv (in-idmap s1)]
+             #:when (idmap-ref s2 (car kv) #f))
+    (idmap-set s (car kv) #t)))
 
 ;; Walk every block in the arm's reach-set and collect parent-scope
 ;; VarIds read by any VfInsn input or by the block's terminator
 ;; (Term:ret values, Term:throw exception, Term:cond predicate),
 ;; excluding VarIds locally defined anywhere in the arm (union of phi
 ;; outputs + VfInsn outputs across the reach-set).  Returns an
-;; ordered-map used as a set of VarId -> #t.
+;; idmap used as a set of VarId -> #t.
 (define (collect-arm-ctx cfg parent-var->out reach-set)
   (define locals
-    (for/fold ([s (ordered-map-empty var-id-compare)])
-              ([kv (in-ordered-map reach-set)])
+    (for/fold ([s idmap-empty])
+              ([kv (in-idmap reach-set)])
       (define blk (cfg-get-block cfg (car kv)))
       (define s1
         (for/fold ([s s]) ([phi (in-pvector (CfgBlock-phis blk))])
-          (ordered-map-set s (PhiInsn-output phi) #t)))
+          (idmap-set s (PhiInsn-output phi) #t)))
       (for/fold ([s s1]) ([insn (in-pvector (CfgBlock-insns blk))])
         (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
                            #:when (VarId? o))
-          (ordered-map-set s o #t)))))
+          (idmap-set s o #t)))))
   (define (consider x acc)
     (cond
       [(and (VarId? x)
-            (not (ordered-map-ref locals x #f))
-            (ordered-map-ref parent-var->out x #f))
-       (ordered-map-set acc x #t)]
+            (not (idmap-ref locals x #f))
+            (idmap-ref parent-var->out x #f))
+       (idmap-set acc x #t)]
       [else acc]))
-  (for/fold ([acc (ordered-map-empty var-id-compare)])
-            ([kv (in-ordered-map reach-set)])
+  (for/fold ([acc idmap-empty])
+            ([kv (in-idmap reach-set)])
     (define blk (cfg-get-block cfg (car kv)))
     (define acc1
       (for/fold ([a acc]) ([insn (in-pvector (CfgBlock-insns blk))])
@@ -899,20 +899,20 @@
   (define-values (sub1 _arg-nid _arg-ins arg-outs)
     (region-add-node sub0 (Simple (list 'region-arg n-ctx)) 0 n-ctx))
   (define sub-var->out-base
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector arg-outs)])
-      (ordered-map-set m v oid)))
+      (idmap-set m v oid)))
   (define sub-var->out
     (for/fold ([m sub-var->out-base])
               ([phi (in-pvector entry-phis)])
       (define src-var (pick-phi-source phi pred-bid which))
       (define src-oid
-        (or (ordered-map-ref sub-var->out-base src-var #f)
+        (or (idmap-ref sub-var->out-base src-var #f)
             (error 'build-exit-arm-region
                    "exit arm ~a (~a) entry phi ~a source ~a missing from ctx"
                    branch-bid which (PhiInsn-output phi) src-var)))
-      (ordered-map-set m (PhiInsn-output phi) src-oid)))
+      (idmap-set m (PhiInsn-output phi) src-oid)))
   (define-values (sub2 sub-var->out2 payload)
     (translate-segment cfg branch-bid #f sub1 sub-var->out))
   (match payload
@@ -934,8 +934,8 @@
             ([phi (in-pvector phis)])
     (define src (pick-phi-source phi pred-bid which))
     (cond
-      [(and (VarId? src) (ordered-map-ref parent-var->out src #f))
-       (ordered-map-set s src #t)]
+      [(and (VarId? src) (idmap-ref parent-var->out src #f))
+       (idmap-set s src #t)]
       [else s])))
 
 ;; Returns (values region var->out 'already-terminated).  Caller
@@ -948,14 +948,14 @@
   (define else-ctx (collect-arm-ctx cfg var->out else-reach))
   (define ctx-set0
     (for/fold ([acc then-ctx])
-              ([kv (in-ordered-map else-ctx)])
-      (ordered-map-set acc (car kv) #t)))
+              ([kv (in-idmap else-ctx)])
+      (idmap-set acc (car kv) #t)))
   (define ctx-set1
     (add-entry-phi-srcs-to-ctx cfg ctx-set0 then-bid cond-bid var->out 'then))
   (define ctx-set
     (add-entry-phi-srcs-to-ctx cfg ctx-set1 else-bid cond-bid var->out 'else))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   (define then-region (build-exit-arm-region cfg then-bid cond-bid ctx-vars 'then))
@@ -970,7 +970,7 @@
 
   ;; Wire predicate.
   (define pred-oid
-    (or (ordered-map-ref var->out pred #f)
+    (or (idmap-ref var->out pred #f)
         (error 'translate-terminal-gamma
                "undefined predicate ~a" pred)))
   (define-values (region2 _pw)
@@ -982,7 +982,7 @@
               ([ctx-var (in-pvector ctx-vars)]
                [i (in-naturals 1)])
       (define src-oid
-        (or (ordered-map-ref var->out ctx-var #f)
+        (or (idmap-ref var->out ctx-var #f)
             (error 'translate-terminal-gamma
                    "undefined ctx var ~a" ctx-var)))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
@@ -1008,7 +1008,7 @@
 
 (define (region-info-set r key val)
   (struct-copy Region r
-               [info (ordered-map-set (Region-info r) key val)]))
+               [info (hash-set (Region-info r) key val)]))
 
 (define (translate-terminal-switch cfg switch-bid value cases default-bid region var->out)
   (define case-bids
@@ -1039,11 +1039,11 @@
   ;; Union of all arms' ctx-vars, plus each arm's entry-phi source
   ;; VarIds contributed from switch-bid.
   (define ctx-set-reads
-    (for/fold ([acc (ordered-map-empty var-id-compare)])
+    (for/fold ([acc idmap-empty])
               ([reach (in-list reaches)])
       (define arm-ctx (collect-arm-ctx cfg var->out reach))
-      (for/fold ([s acc]) ([kv (in-ordered-map arm-ctx)])
-        (ordered-map-set s (car kv) #t))))
+      (for/fold ([s acc]) ([kv (in-idmap arm-ctx)])
+        (idmap-set s (car kv) #t))))
   (define ctx-set
     (for/fold ([s ctx-set-reads])
               ([b (in-list all-bids)]
@@ -1051,7 +1051,7 @@
       (add-entry-phi-srcs-to-ctx cfg s b switch-bid var->out
                                  (list 'switch-arm i))))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   ;; Build each sub-region; tag its info with the switch-case-key.
@@ -1075,7 +1075,7 @@
 
   ;; Wire predicate.
   (define pred-oid
-    (or (ordered-map-ref var->out value #f)
+    (or (idmap-ref var->out value #f)
         (error 'translate-terminal-switch
                "undefined switch value ~a" value)))
   (define-values (region2 _pw)
@@ -1087,7 +1087,7 @@
               ([ctx-var (in-pvector ctx-vars)]
                [i (in-naturals 1)])
       (define src-oid
-        (or (ordered-map-ref var->out ctx-var #f)
+        (or (idmap-ref var->out ctx-var #f)
             (error 'translate-terminal-switch
                    "undefined ctx var ~a" ctx-var)))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
@@ -1151,7 +1151,7 @@
         (if (equal? b jb) switch-bid (arm-last-before-join cfg b jb)))
       (define (arm-blocks-for b)
         (if (equal? b jb)
-            (ordered-map-empty block-id-compare)
+            idmap-empty
             (arm-blocks-set cfg b jb)))
       (define preds (for/list ([b (in-list all-bids)]) (arm-pred-for b)))
       (define blocks-list (for/list ([b (in-list all-bids)]) (arm-blocks-for b)))
@@ -1166,7 +1166,7 @@
   (define ctx-set
     (collect-switch-arms-ctx cfg var->out arm-blocks-list arm-preds phis))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   (define (build-tagged-branch-region bid arm-pred key-tag which)
@@ -1192,7 +1192,7 @@
     (region-add-node region gamma-val (add1 n-ctx) n-phis))
 
   (define pred-oid
-    (or (ordered-map-ref var->out value #f)
+    (or (idmap-ref var->out value #f)
         (error 'translate-convergent-switch
                "undefined switch value ~a" value)))
   (define-values (region2 _pw)
@@ -1203,7 +1203,7 @@
               ([ctx-var (in-pvector ctx-vars)]
                [i (in-naturals 1)])
       (define src-oid
-        (or (ordered-map-ref var->out ctx-var #f)
+        (or (idmap-ref var->out ctx-var #f)
             (error 'translate-convergent-switch
                    "undefined ctx var ~a" ctx-var)))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
@@ -1214,7 +1214,7 @@
     (for/fold ([m var->out])
               ([phi (in-pvector phis)]
                [oid (in-pvector g-outs)])
-      (ordered-map-set m (PhiInsn-output phi) oid)))
+      (idmap-set m (PhiInsn-output phi) oid)))
 
   (values region3 var->out* join-bid))
 
@@ -1223,38 +1223,38 @@
 (define (collect-switch-arms-ctx cfg parent-var->out
                                  arm-blocks-list arm-preds phis)
   (define (arm-local-defs blocks)
-    (for/fold ([s (ordered-map-empty var-id-compare)])
-              ([kv (in-ordered-map blocks)])
+    (for/fold ([s idmap-empty])
+              ([kv (in-idmap blocks)])
       (define blk (cfg-get-block cfg (car kv)))
       (define s1
         (for/fold ([s s]) ([phi (in-pvector (CfgBlock-phis blk))])
-          (ordered-map-set s (PhiInsn-output phi) #t)))
+          (idmap-set s (PhiInsn-output phi) #t)))
       (for/fold ([s s1]) ([insn (in-pvector (CfgBlock-insns blk))])
         (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
                            #:when (VarId? o))
-          (ordered-map-set s o #t)))))
+          (idmap-set s o #t)))))
   (define (walk-arm blocks arm-pred acc)
     (define locals (arm-local-defs blocks))
     (define acc*
       (for/fold ([a acc])
-                ([kv (in-ordered-map blocks)])
+                ([kv (in-idmap blocks)])
         (define insns (CfgBlock-insns (cfg-get-block cfg (car kv))))
         (for/fold ([a a]) ([insn (in-pvector insns)])
           (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
             (cond
               [(and (VarId? x)
-                    (not (ordered-map-ref locals x #f))
-                    (ordered-map-ref parent-var->out x #f))
-               (ordered-map-set a x #t)]
+                    (not (idmap-ref locals x #f))
+                    (idmap-ref parent-var->out x #f))
+               (idmap-set a x #t)]
               [else a])))))
     (for/fold ([a acc*]) ([phi (in-pvector phis)])
       (define src (pick-phi-source phi arm-pred 'switch-ctx))
       (cond
         [(and (VarId? src)
-              (ordered-map-ref parent-var->out src #f))
-         (ordered-map-set a src #t)]
+              (idmap-ref parent-var->out src #f))
+         (idmap-set a src #t)]
         [else a])))
-  (for/fold ([acc (ordered-map-empty var-id-compare)])
+  (for/fold ([acc idmap-empty])
             ([blocks (in-list arm-blocks-list)]
              [p (in-list arm-preds)])
     (walk-arm blocks p acc)))
@@ -1303,7 +1303,7 @@
     (add-entry-phi-srcs-to-ctx cfg ctx-set-reads exit-bid cond-bid
                                var->out 'exit))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap ctx-set)]) (car kv)))
   (define n-ctx (pvector-length ctx-vars))
 
   (define exit-region (build-exit-arm-region cfg exit-bid cond-bid ctx-vars 'exit))
@@ -1320,7 +1320,7 @@
     (region-add-node region gamma-val (add1 n-ctx) 0))
 
   (define pred-oid
-    (or (ordered-map-ref var->out pred #f)
+    (or (idmap-ref var->out pred #f)
         (error 'translate-asymmetric-exit-gamma
                "undefined predicate ~a" pred)))
   (define-values (region2 _pw)
@@ -1331,7 +1331,7 @@
               ([ctx-var (in-pvector ctx-vars)]
                [i (in-naturals 1)])
       (define src-oid
-        (or (ordered-map-ref var->out ctx-var #f)
+        (or (idmap-ref var->out ctx-var #f)
             (error 'translate-asymmetric-exit-gamma
                    "undefined ctx var ~a" ctx-var)))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
@@ -1405,17 +1405,17 @@
 ;; advanced (ret/throw/switch) before converging.
 (define (find-branch-join cfg then-bid else-bid)
   (define then-reach
-    (let loop ([b then-bid] [s (ordered-map-empty block-id-compare)])
+    (let loop ([b then-bid] [s idmap-empty])
       (cond
-        [(ordered-map-ref s b #f) s]
+        [(idmap-ref s b #f) s]
         [else
-         (define s2 (ordered-map-set s b #t))
+         (define s2 (idmap-set s b #t))
          (define nxt (arm-advance cfg b))
          (cond [nxt (loop nxt s2)]
                [else s2])])))
   (let loop ([b else-bid])
     (cond
-      [(ordered-map-ref then-reach b #f) b]
+      [(idmap-ref then-reach b #f) b]
       [else
        (define nxt (arm-advance cfg b))
        (unless nxt
@@ -1453,9 +1453,9 @@
     (cond
       [(equal? bid join-bid) visited]
       [(not (arm-scope-contains? bid)) visited]
-      [(ordered-map-ref visited bid #f) visited]
+      [(idmap-ref visited bid #f) visited]
       [else
-       (define v2 (ordered-map-set visited bid #t))
+       (define v2 (idmap-set visited bid #t))
        (define term (CfgBlock-terminator (cfg-get-block cfg bid)))
        (match term
          [(Term:jump n) (walk n v2)]
@@ -1465,7 +1465,7 @@
          [_ (error 'arm-blocks-set
                    "unsupported arm-internal terminator ~s at ~a"
                    term bid)])]))
-  (walk branch-bid (ordered-map-empty block-id-compare)))
+  (walk branch-bid idmap-empty))
 
 ;; Collect every BlockId reachable from `start` without ever
 ;; crossing the loop's back-edge.  Conceptually: run a BFS in the
@@ -1484,7 +1484,7 @@
 ;; "advance past" the latch (whose only successor is the header,
 ;; which in turn has a cond arm that re-enters the body).
 (define (theta-body-blocks cfg start latches header)
-  (let loop ([work (list start)] [s (ordered-map-empty block-id-compare)])
+  (let loop ([work (list start)] [s idmap-empty])
     (cond
       [(null? work) s]
       [else
@@ -1492,11 +1492,11 @@
        (define rest (cdr work))
        (cond
          [(equal? b header) (loop rest s)]
-         [(ordered-map-ref s b #f) (loop rest s)]
+         [(idmap-ref s b #f) (loop rest s)]
          [else
-          (define s* (ordered-map-set s b #t))
+          (define s* (idmap-set s b #t))
           (cond
-            [(ordered-map-ref latches b #f)
+            [(idmap-ref latches b #f)
              ;; Latch included; its only outgoing edge goes to
              ;; header, which is the back-edge we refuse to cross.
              (loop rest s*)]
@@ -1515,8 +1515,8 @@
 ;; inner Gamma diamonds just like the block-set walk.
 (define (body-arm-reaches-any-latch? cfg start latches header)
   (define reach (theta-body-blocks cfg start latches header))
-  (for/or ([kv (in-ordered-map latches)])
-    (and (ordered-map-ref reach (car kv) #f) #t)))
+  (for/or ([kv (in-idmap latches)])
+    (and (idmap-ref reach (car kv) #f) #t)))
 
 ;; ============================================================
 ;; Sub-region builder
@@ -1534,10 +1534,10 @@
 
   ;; Seed sub var→out.
   (define sub-var->out
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector arg-outs)])
-      (ordered-map-set m v oid)))
+      (idmap-set m v oid)))
 
   ;; Translate the arm's chain of blocks.  translate-segment walks
   ;; from branch-bid through Term:jump edges (and inner Gamma /
@@ -1568,7 +1568,7 @@
             ([src-var (in-pvector result-src-vars)]
              [iid (in-pvector res-ins)])
     (define src-oid
-      (or (ordered-map-ref sub-var->out2 src-var #f)
+      (or (idmap-ref sub-var->out2 src-var #f)
           (error 'build-branch-region
                  "phi source ~a undefined in ~a sub-region"
                  src-var which)))
@@ -1583,7 +1583,7 @@
 ;; var is not redefined by any VfInsn output or phi output within the
 ;; arm, and the var is present in parent-var->out.  Also folds in the
 ;; phi source contributed by the arm's predecessor at the outer join.
-;; Returns an ordered-map used as a set of VarId -> #t.
+;; Returns an idmap used as a set of VarId -> #t.
 (define (collect-gamma-ctx cfg parent-var->out
                            then-blocks then-pred
                            else-blocks else-pred phis)
@@ -1592,41 +1592,41 @@
   ;; scoping already ensures outer-parent reads go through phi outputs
   ;; at the outer join, not arm-internal defs.
   (define (arm-local-defs blocks)
-    (for/fold ([s (ordered-map-empty var-id-compare)])
-              ([kv (in-ordered-map blocks)])
+    (for/fold ([s idmap-empty])
+              ([kv (in-idmap blocks)])
       (define blk (cfg-get-block cfg (car kv)))
       (define s*
         (for/fold ([s s]) ([phi (in-pvector (CfgBlock-phis blk))])
-          (ordered-map-set s (PhiInsn-output phi) #t)))
+          (idmap-set s (PhiInsn-output phi) #t)))
       (for/fold ([s s*]) ([insn (in-pvector (CfgBlock-insns blk))])
         (for/fold ([s s]) ([o (in-pvector (VfInsn-outputs insn))]
                            #:when (VarId? o))
-          (ordered-map-set s o #t)))))
+          (idmap-set s o #t)))))
   (define (walk-arm blocks arm-pred acc)
     (define locals (arm-local-defs blocks))
     (define acc*
       (for/fold ([a acc])
-                ([kv (in-ordered-map blocks)])
+                ([kv (in-idmap blocks)])
         (define insns (CfgBlock-insns (cfg-get-block cfg (car kv))))
         (for/fold ([a a]) ([insn (in-pvector insns)])
           (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
             (cond
               [(and (VarId? x)
-                    (not (ordered-map-ref locals x #f))
-                    (ordered-map-ref parent-var->out x #f))
-               (ordered-map-set a x #t)]
+                    (not (idmap-ref locals x #f))
+                    (idmap-ref parent-var->out x #f))
+               (idmap-set a x #t)]
               [else a])))))
     ;; Phi source contributed at the outer join from this arm's pred.
     (for/fold ([a acc*]) ([phi (in-pvector phis)])
       (define src (pick-phi-source phi arm-pred 'gamma-ctx))
       (cond
         [(and (VarId? src)
-              (ordered-map-ref parent-var->out src #f))
-         (ordered-map-set a src #t)]
+              (idmap-ref parent-var->out src #f))
+         (idmap-set a src #t)]
         [else a])))
   (walk-arm else-blocks else-pred
             (walk-arm then-blocks then-pred
-                      (ordered-map-empty var-id-compare))))
+                      idmap-empty)))
 
 ;; Collect parent-scope VarIds actually read inside the loop.  Walks
 ;; the header block and every block on the body chain (body-entry →
@@ -1636,12 +1636,12 @@
 ;; prefix, and present in `parent-var->out` counts as a read.
 ;; `body-blocks` is an ordered-set of BlockIds (as produced by
 ;; `theta-body-blocks`); a single-block body degenerates to just the
-;; latch entry.  Returns an ordered-map used as a set of VarId -> #t.
+;; latch entry.  Returns an idmap used as a set of VarId -> #t.
 (define (collect-theta-ctx cfg parent-var->out header-bid body-blocks phis)
   (define phi-out-set
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([p (in-pvector phis)])
-      (ordered-map-set m (PhiInsn-output p) #t)))
+      (idmap-set m (PhiInsn-output p) #t)))
   (define (walk-block bid acc)
     (define blk (cfg-get-block cfg bid))
     (define insns (CfgBlock-insns blk))
@@ -1653,19 +1653,19 @@
           (for/fold ([a a]) ([x (in-pvector (VfInsn-inputs insn))])
             (cond
               [(and (VarId? x)
-                    (not (ordered-map-ref locals x #f))
-                    (ordered-map-ref parent-var->out x #f))
-               (ordered-map-set a x #t)]
+                    (not (idmap-ref locals x #f))
+                    (idmap-ref parent-var->out x #f))
+               (idmap-set a x #t)]
               [else a])))
         (define locals*
           (for/fold ([s locals]) ([o (in-pvector (VfInsn-outputs insn))]
                                   #:when (VarId? o))
-            (ordered-map-set s o #t)))
+            (idmap-set s o #t)))
         (values locals* a*)))
     acc*)
   (for/fold ([acc (walk-block header-bid
-                              (ordered-map-empty var-id-compare))])
-            ([kv (in-ordered-map body-blocks)])
+                              idmap-empty)])
+            ([kv (in-idmap body-blocks)])
     (walk-block (car kv) acc)))
 
 ;; Find the VarId contributed by `branch-bid` to a phi's sources.
@@ -1731,8 +1731,8 @@
   (define (arm-latch-for arm-bid which)
     (define reach (arm-reach-set cfg arm-bid))
     (define hits
-      (for/list ([kv (in-ordered-map reach)]
-                 #:when (ordered-map-ref latches (car kv) #f))
+      (for/list ([kv (in-idmap reach)]
+                 #:when (idmap-ref latches (car kv) #f))
         (car kv)))
     (unless (= 1 (length hits))
       (error 'translate-theta-two-latch-body
@@ -1750,12 +1750,12 @@
            "arm reach-sets overlap at dispatch ~a; 2-latch diamond requires disjoint arms"
            dispatch-bid))
   (define (arm-closes-to-header? reach)
-    (for/and ([kv (in-ordered-map reach)])
+    (for/and ([kv (in-idmap reach)])
       (match (CfgBlock-terminator (cfg-get-block cfg (car kv)))
-        [(Term:jump n) (or (ordered-map-ref reach n #f)
+        [(Term:jump n) (or (idmap-ref reach n #f)
                            (equal? n header-bid))]
-        [(Term:cond _ tb eb) (and (ordered-map-ref reach tb #f)
-                                  (ordered-map-ref reach eb #f))]
+        [(Term:cond _ tb eb) (and (idmap-ref reach tb #f)
+                                  (idmap-ref reach eb #f))]
         [_ #f])))
   (unless (and (arm-closes-to-header? then-reach)
                (arm-closes-to-header? else-reach))
@@ -1768,10 +1768,10 @@
   (define then-ctx (collect-arm-ctx cfg sub-var->out1 then-reach))
   (define else-ctx (collect-arm-ctx cfg sub-var->out1 else-reach))
   (define combined-ctx-set
-    (for/fold ([s then-ctx]) ([kv (in-ordered-map else-ctx)])
-      (ordered-map-set s (car kv) #t)))
+    (for/fold ([s then-ctx]) ([kv (in-idmap else-ctx)])
+      (idmap-set s (car kv) #t)))
   (define combined-ctx-vars
-    (for/pvector ([kv (in-ordered-map combined-ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap combined-ctx-set)]) (car kv)))
   (define n-ctx (pvector-length combined-ctx-vars))
   (define n-phis (pvector-length phis))
 
@@ -1780,10 +1780,10 @@
     (define-values (arm1 _arg-nid _arg-ins arg-outs)
       (region-add-node arm0 (Simple (list 'region-arg n-ctx)) 0 n-ctx))
     (define arm-var->out
-      (for/fold ([m (ordered-map-empty var-id-compare)])
+      (for/fold ([m idmap-empty])
                 ([v (in-pvector combined-ctx-vars)]
                  [oid (in-pvector arg-outs)])
-        (ordered-map-set m v oid)))
+        (idmap-set m v oid)))
     (define-values (arm2 arm-var->out2 payload)
       (translate-segment cfg arm-bid header-bid arm1 arm-var->out))
     (unless (eq? payload #f)
@@ -1797,7 +1797,7 @@
                [iid (in-pvector res-ins)])
       (define src-var (pick-phi-source phi arm-latch-bid which))
       (define src-oid
-        (or (ordered-map-ref arm-var->out2 src-var #f)
+        (or (idmap-ref arm-var->out2 src-var #f)
             (error 'translate-theta-two-latch-body
                    "~a arm latch source ~a (phi-output ~a) undefined"
                    which src-var (PhiInsn-output phi))))
@@ -1814,7 +1814,7 @@
     (region-add-node sub1 gamma-val (add1 n-ctx) n-phis))
 
   (define pred-oid
-    (or (ordered-map-ref sub-var->out1 pred-var #f)
+    (or (idmap-ref sub-var->out1 pred-var #f)
         (error 'translate-theta-two-latch-body
                "dispatch predicate ~a undefined" pred-var)))
   (define-values (sub-p _pw)
@@ -1824,7 +1824,7 @@
               ([v (in-pvector combined-ctx-vars)]
                [i (in-naturals 1)])
       (define src-oid
-        (or (ordered-map-ref sub-var->out1 v #f)
+        (or (idmap-ref sub-var->out1 v #f)
             (error 'translate-theta-two-latch-body "ctx var ~a undefined" v)))
       (define-values (r* _w) (region-add-wire r src-oid (pvector-ref g-ins i)))
       r*))
@@ -1835,7 +1835,7 @@
     (for/fold ([m sub-var->out1])
               ([phi (in-pvector phis)]
                [oid (in-pvector g-outs)])
-      (ordered-map-set m (PhiInsn-output phi) oid)))
+      (idmap-set m (PhiInsn-output phi) oid)))
 
   (values sub-wired sub-var->out-final))
 
@@ -1871,7 +1871,7 @@
 (define (translate-theta cfg theta-ctx stop-bid region var->out)
   (define header-bid (Theta-Ctx-header theta-ctx))
   (define latches (Theta-Ctx-latches theta-ctx))
-  (define n-latches (ordered-map-count latches))
+  (define n-latches (idmap-count latches))
   (define header-blk (cfg-get-block cfg header-bid))
   (define phis (CfgBlock-phis header-blk))
 
@@ -1879,9 +1879,9 @@
   ;; parent var has an entry here; every other parent var is
   ;; loop-invariant and passes through unchanged.
   (define phi-by-output
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([p (in-pvector phis)])
-      (ordered-map-set m (PhiInsn-output p) p)))
+      (idmap-set m (PhiInsn-output p) p)))
 
   ;; The header must end in Term:cond: one arm jumps (possibly via a
   ;; chain of Term:jump blocks) to some latch and constitutes the loop
@@ -1905,7 +1905,7 @@
        (error 'translate-theta
               "neither cond arm reaches any latch of ~a without crossing back-edge (then=~a else=~a latches=~s)"
               header-bid then-bid else-bid
-              (for/list ([kv (in-ordered-map latches)]) (car kv)))]))
+              (for/list ([kv (in-idmap latches)]) (car kv)))]))
   (define body-blocks
     (theta-body-blocks cfg body-entry-bid latches header-bid))
 
@@ -1923,17 +1923,17 @@
            [reads
             (collect-theta-ctx cfg var->out header-bid body-blocks phis)]
            [seen
-            (for/fold ([s (ordered-map-empty var-id-compare)])
+            (for/fold ([s idmap-empty])
                       ([v (in-pvector phi-outs)])
-              (ordered-map-set s v #t))])
+              (idmap-set s v #t))])
       (for/fold ([out phi-outs] [s seen]
                  #:result out)
-                ([kv (in-ordered-map reads)])
+                ([kv (in-idmap reads)])
         (define v (car kv))
-        (if (ordered-map-ref s v #f)
+        (if (idmap-ref s v #f)
             (values out s)
             (values (pvector-cons-right out v)
-                    (ordered-map-set s v #t))))))
+                    (idmap-set s v #t))))))
   (define n-carried (pvector-length carried-vars))
 
   ;; For each carried var, derive the "entry" source var (value on
@@ -1942,11 +1942,11 @@
   ;; header feed).  Invariant: the var itself.
   (define entry-src-vars
     (for/pvector ([v (in-pvector carried-vars)])
-      (define phi (ordered-map-ref phi-by-output v #f))
+      (define phi (idmap-ref phi-by-output v #f))
       (cond
         [phi
          (or (for/or ([s (in-pvector (PhiInsn-sources phi))])
-               (and (not (ordered-map-ref latches (car s) #f)) (cdr s)))
+               (and (not (idmap-ref latches (car s) #f)) (cdr s)))
              (error 'translate-theta
                     "phi ~a has no non-latch source" v))]
         [else v])))
@@ -1958,10 +1958,10 @@
 
   ;; Sub-var->out maps each carried var to its region-arg output.
   (define sub-var->out-init
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([v (in-pvector carried-vars)]
                [oid (in-pvector arg-outs)])
-      (ordered-map-set m v oid)))
+      (idmap-set m v oid)))
 
   ;; Translate header's non-phi insns (includes the comparison VfInsn
   ;; that produces the Term:cond predicate).
@@ -1984,7 +1984,7 @@
   (define-values (sub3 sub-var->out3)
     (cond
       [(= n-latches 1)
-       (define latch-bid (for/or ([kv (in-ordered-map latches)]) (car kv)))
+       (define latch-bid (for/or ([kv (in-idmap latches)]) (car kv)))
        (define-values (s sv body-payload)
          (parameterize ([current-arm-scope body-blocks])
            (translate-segment cfg body-entry-bid header-bid sub2 sub-var->out2)))
@@ -2004,7 +2004,7 @@
 
   ;; Iteration predicate (see translate-theta docstring).
   (define pred-oid
-    (or (ordered-map-ref sub-var->out3 pred-var #f)
+    (or (idmap-ref sub-var->out3 pred-var #f)
         (error 'translate-theta "predicate ~a undefined in sub-region" pred-var)))
   (define-values (sub4 iter-pred-oid)
     (cond
@@ -2025,15 +2025,15 @@
   ;; output since nothing rebound it).
   (define update-oids
     (for/pvector ([v (in-pvector carried-vars)])
-      (define phi (ordered-map-ref phi-by-output v #f))
+      (define phi (idmap-ref phi-by-output v #f))
       (cond
         [(and phi (= n-latches 1))
-         (define latch-bid (for/or ([kv (in-ordered-map latches)]) (car kv)))
+         (define latch-bid (for/or ([kv (in-idmap latches)]) (car kv)))
          (define latch-var (pick-phi-source phi latch-bid 'latch))
-         (or (ordered-map-ref sub-var->out3 latch-var #f)
+         (or (idmap-ref sub-var->out3 latch-var #f)
              (error 'translate-theta "latch source ~a undefined" latch-var))]
         [else
-         (or (ordered-map-ref sub-var->out3 v #f)
+         (or (idmap-ref sub-var->out3 v #f)
              (error 'translate-theta "carried var ~a lost during body" v))])))
 
   ;; region-result: 1 (predicate) + n-carried updates.
@@ -2061,7 +2061,7 @@
               ([entry-var (in-pvector entry-src-vars)]
                [iid (in-pvector t-ins)])
       (define src-oid
-        (or (ordered-map-ref var->out entry-var #f)
+        (or (idmap-ref var->out entry-var #f)
             (error 'translate-theta "entry source ~a undefined" entry-var)))
       (define-values (r* _w) (region-add-wire r src-oid iid))
       r*))
@@ -2071,7 +2071,7 @@
     (for/fold ([m var->out])
               ([v (in-pvector carried-vars)]
                [oid (in-pvector t-outs)])
-      (ordered-map-set m v oid)))
+      (idmap-set m v oid)))
 
   ;; Continue translating from the exit-arm; the loop map lives in
   ;; the parameter so sibling / outer loops keep dispatching.
@@ -2082,7 +2082,7 @@
 ;; ============================================================
 ;;
 ;; `compute-kappa-groups` runs once at cfg->rvsdg entry, producing an
-;; ordered-map[try-entry-BlockId -> Kappa-Group] keyed on each
+;; idmap[try-entry-BlockId -> Kappa-Group] keyed on each
 ;; exception-table entry's start-bid.  Multiple handlers for the same
 ;; (start-bid, end-bid) window are folded into a single group whose
 ;; `handlers` pvector preserves declaration order (first-wins).  Each
@@ -2105,7 +2105,7 @@
   (define table (cfg-get-info cfg 'java/exception-table #f))
   (cond
     [(or (not table) (= (pvector-length table) 0))
-     (ordered-map-empty block-id-compare)]
+     idmap-empty]
     [else
      ;; Fold entries by (start-bid, end-bid), preserving declaration
      ;; order of handlers within each distinct window.  Entries with
@@ -2117,16 +2117,16 @@
      ;; start-bid, so translate-segment re-dispatches into the inner
      ;; Kappa once the outer pops itself via `kappa-groups-without`.
      (define by-start-end
-       (for/fold ([m (ordered-map-empty block-id-compare)])
+       (for/fold ([m idmap-empty])
                  ([entry (in-pvector table)])
          (match-define (list start-bid end-bid handler-bid catch-type) entry)
-         (define by-end (ordered-map-ref m start-bid #f))
-         (define by-end* (or by-end (ordered-map-empty block-id-or-false-compare)))
-         (define handlers0 (ordered-map-ref by-end* end-bid (pvector-empty)))
+         (define by-end (idmap-ref m start-bid #f))
+         (define by-end* (or by-end idmap-empty))
+         (define handlers0 (idmap-ref by-end* end-bid (pvector-empty)))
          (define handlers1
            (pvector-cons-right handlers0 (cons catch-type handler-bid)))
-         (ordered-map-set m start-bid
-                          (ordered-map-set by-end* end-bid handlers1))))
+         (idmap-set m start-bid
+                          (idmap-set by-end* end-bid handlers1))))
      ;; Build each Kappa-Group.  window-bids is the original ordinal
      ;; window; try-bids is window-bids extended with forwarding
      ;; blocks that sit between the window and the joiner, plus any
@@ -2137,8 +2137,8 @@
      ;; normal post-try continuation may live in blocks that sit
      ;; outside the window but still on the try-success path between
      ;; the window and the real (try/handler) merge.
-     (for/fold ([acc (ordered-map-empty block-id-compare)])
-               ([kv (in-ordered-map by-start-end)])
+     (for/fold ([acc idmap-empty])
+               ([kv (in-idmap by-start-end)])
        (define start-bid (car kv))
        (define by-end (cdr kv))
        ;; Collect (end-bid . handlers) pairs and sort outer-first.
@@ -2146,7 +2146,7 @@
        ;; it sorts as "outermost"; otherwise descending by the end
        ;; block's ordinal.
        (define entries
-         (for/list ([ekv (in-ordered-map by-end)])
+         (for/list ([ekv (in-idmap by-end)])
            (cons (car ekv) (cdr ekv))))
        (define sorted-entries
          (sort entries (kappa-end-outer-first? cfg)))
@@ -2161,21 +2161,15 @@
            (define try-bids0 (extend-with-forwarding-blocks cfg window-bids join-bid))
            (define try-bids
              (for/fold ([s try-bids0]) ([b (in-pvector chain-bids)])
-               (ordered-map-set s b #t)))
+               (idmap-set s b #t)))
            (Kappa-Group try-bids handlers kind join-bid)))
-       (ordered-map-set acc start-bid stack))]))
+       (idmap-set acc start-bid stack))]))
 
-;; Comparator for block-id-or-#f keys used in compute-kappa-groups'
-;; inner by-end map.  Treats #f as LESS than any real bid so that
-;; iteration in ordered-map order yields #f first; the final stack
-;; ordering is produced by kappa-end-outer-first? below (which maps
-;; #f to +inf to put it outermost).
-(define (block-id-or-false-compare a b)
-  (cond
-    [(and (not a) (not b)) 0]
-    [(not a) -1]
-    [(not b)  1]
-    [else (block-id-compare a b)]))
+;; compute-kappa-groups' inner by-end map is keyed by end-bid or #f
+;; (method-end).  idmap sorts #f before every real bid, so iteration
+;; yields #f first; the final stack ordering is produced by
+;; kappa-end-outer-first? below (which maps #f to +inf to put it
+;; outermost).
 
 ;; Returns a comparator on (cons end-bid handlers) pairs that orders
 ;; the OUTER (widest) window first.  end-bid=#f (method-end) maps to
@@ -2187,14 +2181,14 @@
     (or (cfg-get-info cfg 'java/block-order #f)
         (error 'kappa-end-outer-first? "Cfg.info missing 'java/block-order")))
   (define bid->ord
-    (for/fold ([m (ordered-map-empty block-id-compare)])
+    (for/fold ([m idmap-empty])
               ([bid (in-pvector block-order)]
                [i (in-naturals)])
-      (ordered-map-set m bid i)))
+      (idmap-set m bid i)))
   (define (end-rank end-bid)
     (cond
       [(not end-bid) +inf.0]
-      [else (or (ordered-map-ref bid->ord end-bid #f) -inf.0)]))
+      [else (or (idmap-ref bid->ord end-bid #f) -inf.0)]))
   (lambda (a b)
     (> (end-rank (car a)) (end-rank (car b)))))
 
@@ -2223,7 +2217,7 @@
          (kappa-forward-reach cfg (cdr h) #f)))
      (define (in-all-handler-reaches? bid)
        (for/and ([hr (in-list handler-reaches)])
-         (ordered-map-ref hr bid #f)))
+         (idmap-ref hr bid #f)))
      (cond
        [(in-all-handler-reaches? initial-join)
         (values kind initial-join empty-chain)]
@@ -2232,9 +2226,9 @@
         ;; VfInsns) until we hit a common block or a non-trivial one.
         (let loop ([b initial-join]
                    [chain empty-chain]
-                   [visited (ordered-map-empty block-id-compare)])
+                   [visited idmap-empty])
           (cond
-            [(ordered-map-ref visited b #f)
+            [(idmap-ref visited b #f)
              ;; Cycle — give up, keep the original join.
              (values kind initial-join empty-chain)]
             [(in-all-handler-reaches? b)
@@ -2251,7 +2245,7 @@
                   [(Term:jump n)
                    (loop n
                          (pvector-cons-right chain b)
-                         (ordered-map-set visited b #t))]
+                         (idmap-set visited b #t))]
                   [_ (values kind initial-join empty-chain)])])]))])]))
 
 ;; Re-derive the original [start-ord, end-ord) block-ordinal window
@@ -2267,12 +2261,12 @@
         (error 'compute-kappa-window-bids
                "Cfg.info missing 'java/block-order (run jvm-to-cfg first)")))
   (define bid->ord
-    (for/fold ([m (ordered-map-empty block-id-compare)])
+    (for/fold ([m idmap-empty])
               ([bid (in-pvector block-order)]
                [i (in-naturals)])
-      (ordered-map-set m bid i)))
+      (idmap-set m bid i)))
   (define start-ord
-    (or (ordered-map-ref bid->ord start-bid #f)
+    (or (idmap-ref bid->ord start-bid #f)
         (error 'compute-kappa-window-bids
                "unmapped start-bid ~s" start-bid)))
   ;; When end-bid=#f the original JVM range extends to method-end.
@@ -2285,7 +2279,7 @@
   (define end-ord
     (cond
       [end-bid
-       (or (ordered-map-ref bid->ord end-bid #f)
+       (or (idmap-ref bid->ord end-bid #f)
            (error 'compute-kappa-window-bids
                   "unmapped end-bid ~s" end-bid))]
       [else
@@ -2302,27 +2296,27 @@
   (define filter-handlers? (not end-bid))
   (define handler-set (if filter-handlers?
                           (exception-table-handler-set cfg)
-                          (ordered-map-empty block-id-compare)))
-  (for/fold ([s (ordered-map-empty block-id-compare)])
+                          idmap-empty))
+  (for/fold ([s idmap-empty])
             ([bid (in-pvector block-order)]
              [i (in-naturals)]
              #:when (and (<= start-ord i) (< i end-ord)
                          (not (and filter-handlers?
-                                   (ordered-map-ref handler-set bid #f)))))
-    (ordered-map-set s bid #t)))
+                                   (idmap-ref handler-set bid #f)))))
+    (idmap-set s bid #t)))
 
 ;; Collect every handler-bid appearing in the exception table as an
-;; ordered-map (used as a set) for O(log n) membership tests.  Used
+;; idmap (used as a set) for O(log n) membership tests.  Used
 ;; by compute-kappa-window-bids to filter handler blocks out of
 ;; method-end windows.
 (define (exception-table-handler-set cfg)
   (define table (cfg-get-info cfg 'java/exception-table #f))
   (cond
-    [(not table) (ordered-map-empty block-id-compare)]
+    [(not table) idmap-empty]
     [else
-     (for/fold ([s (ordered-map-empty block-id-compare)])
+     (for/fold ([s idmap-empty])
                ([entry (in-pvector table)])
-       (ordered-map-set s (caddr entry) #t))]))
+       (idmap-set s (caddr entry) #t))]))
 
 ;; Collect distinct out-of-window successors from every block in the
 ;; window, canonicalising forwarding-block successors to their joiner.
@@ -2331,8 +2325,8 @@
 ;; exit is an error — normalize-try-exits should have collapsed them.
 (define (classify-kappa-window cfg window-bids)
   (define direct-exits
-    (for/fold ([s (ordered-map-empty block-id-compare)])
-              ([kv (in-ordered-map window-bids)])
+    (for/fold ([s idmap-empty])
+              ([kv (in-idmap window-bids)])
       (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
       (define succs
         (match t
@@ -2343,28 +2337,28 @@
                  (for/list ([kv (in-pvector cases)]) (cdr kv)))]
           [_ '()]))
       (for/fold ([s s]) ([n (in-list succs)]
-                         #:unless (ordered-map-ref window-bids n #f))
-        (ordered-map-set s n #t))))
+                         #:unless (idmap-ref window-bids n #f))
+        (idmap-set s n #t))))
   (define canonical-exits
-    (for/fold ([s (ordered-map-empty block-id-compare)])
-              ([kv (in-ordered-map direct-exits)])
+    (for/fold ([s idmap-empty])
+              ([kv (in-idmap direct-exits)])
       (define bid (car kv))
       (cond
         [(forwarding-block? (cfg-get-block cfg bid))
-         (ordered-map-set s (Term:jump-target
+         (idmap-set s (Term:jump-target
                              (CfgBlock-terminator (cfg-get-block cfg bid)))
                           #t)]
-        [else (ordered-map-set s bid #t)])))
+        [else (idmap-set s bid #t)])))
   (cond
-    [(= 0 (ordered-map-count canonical-exits)) (values 'terminal #f)]
-    [(= 1 (ordered-map-count canonical-exits))
+    [(= 0 (idmap-count canonical-exits)) (values 'terminal #f)]
+    [(= 1 (idmap-count canonical-exits))
      (values 'convergent
-             (for/or ([kv (in-ordered-map canonical-exits)]) (car kv)))]
+             (for/or ([kv (in-idmap canonical-exits)]) (car kv)))]
     [else
      (error 'classify-kappa-window
             "try window has ~a distinct canonical exits (post-normalize ≤ 1 expected): ~s"
-            (ordered-map-count canonical-exits)
-            (for/list ([kv (in-ordered-map canonical-exits)]) (car kv)))]))
+            (idmap-count canonical-exits)
+            (for/list ([kv (in-idmap canonical-exits)]) (car kv)))]))
 
 ;; Structural recogniser for the selector-write forwarding block
 ;; normalize-try-exits synthesises on Term:cond / Term:switch exit
@@ -2384,7 +2378,7 @@
 ;; translation purposes — translate-segment scoped to try-bids needs
 ;; to walk through them to reach the join / joiner.
 (define (extend-with-forwarding-blocks cfg window-bids join-bid)
-  (for/fold ([s window-bids]) ([kv (in-ordered-map window-bids)])
+  (for/fold ([s window-bids]) ([kv (in-idmap window-bids)])
     (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
     (define succs
       (match t
@@ -2396,10 +2390,10 @@
         [_ '()]))
     (for/fold ([s s]) ([n (in-list succs)])
       (cond
-        [(ordered-map-ref s n #f) s]
+        [(idmap-ref s n #f) s]
         [(and join-bid (equal? n join-bid)) s]
         [(forwarding-block? (cfg-get-block cfg n))
-         (ordered-map-set s n #t)]
+         (idmap-set s n #t)]
         [else s]))))
 
 ;; Forward reach-set from start-bid, stopping at stop-bid (if given)
@@ -2411,7 +2405,7 @@
 ;; traverse through stop-bid).
 (define (kappa-forward-reach cfg start-bid stop-bid)
   (let loop ([work (list start-bid)]
-             [s (ordered-map-empty block-id-compare)])
+             [s idmap-empty])
     (cond
       [(null? work) s]
       [else
@@ -2419,9 +2413,9 @@
        (define rest (cdr work))
        (cond
          [(and stop-bid (equal? b stop-bid)) (loop rest s)]
-         [(ordered-map-ref s b #f) (loop rest s)]
+         [(idmap-ref s b #f) (loop rest s)]
          [else
-          (define s* (ordered-map-set s b #t))
+          (define s* (idmap-set s b #t))
           (define succs
             (match (CfgBlock-terminator (cfg-get-block cfg b))
               [(Term:jump n) (list n)]
@@ -2443,7 +2437,7 @@
 ;; picking one pred.
 (define (find-kappa-arm-preds cfg arm-reach join-bid)
   (for/fold ([acc '()])
-            ([kv (in-ordered-map arm-reach)])
+            ([kv (in-idmap arm-reach)])
     (define t (CfgBlock-terminator (cfg-get-block cfg (car kv))))
     (cond
       [(and (Term:jump? t) (equal? (Term:jump-target t) join-bid))
@@ -2459,10 +2453,10 @@
   (define sub0 (region-empty))
   (define-values (sub1 arg-outs) (region-add-region-arg sub0 n-ctx))
   (define sub-var->out
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector arg-outs)])
-      (ordered-map-set m v oid)))
+      (idmap-set m v oid)))
   (define stop (and (eq? kind 'convergent) join-bid))
   (define-values (sub2 sub-var->out2 payload)
     (parameterize ([current-arm-scope try-bids]
@@ -2497,10 +2491,10 @@
   (define n-ctx (pvector-length ctx-vars))
   (define-values (sub1 ctx-outs exn-out) (build-handler-region-entry n-ctx))
   (define sub-var->out-ctx
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([v (in-pvector ctx-vars)]
                [oid (in-pvector ctx-outs)])
-      (ordered-map-set m v oid)))
+      (idmap-set m v oid)))
   ;; Pre-bind handler-entry phi outputs to the ctx oid of their
   ;; start-bid-side phi source.  If the source is not a ctx var
   ;; (shouldn't happen — translate-kappa-group adds those sources to
@@ -2512,8 +2506,8 @@
               ([pair (in-pvector handler-phi-srcs)])
       (define out (car pair))
       (define src (cdr pair))
-      (define src-oid (ordered-map-ref m src #f))
-      (cond [src-oid (ordered-map-set m out src-oid)]
+      (define src-oid (idmap-ref m src #f))
+      (cond [src-oid (idmap-set m out src-oid)]
             [else m])))
   (define stop (and (eq? kind 'convergent) join-bid))
   (define-values (sub2 sub-var->out2 payload)
@@ -2552,14 +2546,13 @@
   (cond
     [(not gs) gs]
     [else
-     (define stack (ordered-map-ref gs start-bid #f))
+     (define stack (idmap-ref gs start-bid #f))
      (cond
        [(not stack) gs]
        [(<= (pvector-length stack) 1)
-        (define-values (gs* _) (ordered-map-delete gs start-bid))
-        gs*]
+        (idmap-remove gs start-bid)]
        [else
-        (ordered-map-set gs start-bid (pvector-drop stack 1))])]))
+        (idmap-set gs start-bid (pvector-drop stack 1))])]))
 
 ;; Wrapper that threads `cfg` into the finisher so find-kappa-arm-preds
 ;; can locate the Term:jump predecessor(s) when the arm converges.
@@ -2588,14 +2581,14 @@
      (define (phi-source-oid phi)
        (cond
          [multi?
-          (or (ordered-map-ref sub-var->out2 (PhiInsn-output phi) #f)
+          (or (idmap-ref sub-var->out2 (PhiInsn-output phi) #f)
               (error 'finish-kappa-sub-region
                      "~a arm has multi-source merge at ~a but phi-output ~a not resolved (inner merge did not materialise)"
                      which join-bid (PhiInsn-output phi)))]
          [else
           (define arm-pred (car preds))
           (define src-var (pick-phi-source phi arm-pred which))
-          (or (ordered-map-ref sub-var->out2 src-var #f)
+          (or (idmap-ref sub-var->out2 src-var #f)
               (error 'finish-kappa-sub-region
                      "phi source ~a undefined in ~a sub-region" src-var which))]))
      (define-values (sub3 res-ins)
@@ -2659,15 +2652,15 @@
   (define ctx-set-base
     (for/fold ([s try-ctx])
               ([hctx (in-list handler-ctxs)])
-      (for/fold ([s s]) ([kv (in-ordered-map hctx)])
-        (ordered-map-set s (car kv) #t))))
+      (for/fold ([s s]) ([kv (in-idmap hctx)])
+        (idmap-set s (car kv) #t))))
   (define (add-phi-srcs-for-preds arm-preds acc)
     (for/fold ([a acc]) ([ap (in-list arm-preds)])
       (for/fold ([a a]) ([phi (in-pvector join-phis)])
         (define src (pick-phi-source phi ap 'kappa-ctx))
         (cond
-          [(and (VarId? src) (ordered-map-ref var->out src #f))
-           (ordered-map-set a src #t)]
+          [(and (VarId? src) (idmap-ref var->out src #f))
+           (idmap-set a src #t)]
           [else a]))))
   (define ctx-set-with-join
     (cond
@@ -2687,11 +2680,11 @@
       (for/fold ([s s]) ([pair (in-pvector pairs)])
         (define src (cdr pair))
         (cond
-          [(and (VarId? src) (ordered-map-ref var->out src #f))
-           (ordered-map-set s src #t)]
+          [(and (VarId? src) (idmap-ref var->out src #f))
+           (idmap-set s src #t)]
           [else s]))))
   (define ctx-vars
-    (for/pvector ([kv (in-ordered-map ctx-set)]) (car kv)))
+    (for/pvector ([kv (in-idmap ctx-set)]) (car kv)))
 
   ;; Build each sub-region.  Arm kind is decided by each builder from
   ;; translate-segment's payload — terminal-kind Kappa sub-regions
@@ -2711,7 +2704,7 @@
   ;; Parent-side ctx producer outputs.
   (define ctx-oids
     (for/pvector ([v (in-pvector ctx-vars)])
-      (or (ordered-map-ref var->out v #f)
+      (or (idmap-ref var->out v #f)
           (error 'translate-kappa-group
                  "ctx var ~a undefined in parent scope" v))))
 
@@ -2729,7 +2722,7 @@
        (for/fold ([m var->out])
                  ([phi (in-pvector join-phis)]
                   [oid (in-pvector out-oids)])
-         (ordered-map-set m (PhiInsn-output phi) oid)))
+         (idmap-set m (PhiInsn-output phi) oid)))
      (values region* var->out* join-bid)]))
 
 ;; ============================================================
@@ -2743,7 +2736,7 @@
   (for/fold ([r region1])
             ([v (in-pvector ret-values)]
              [iid (in-pvector in-ids)])
-    (define oid (or (ordered-map-ref var->out v #f)
+    (define oid (or (idmap-ref var->out v #f)
                     (error 'install-return "undef ~a" v)))
     (define-values (r* _w) (region-add-wire r oid iid))
     r*))
@@ -2751,7 +2744,7 @@
 (define (install-throw region var->out exn)
   (define-values (region1 _nid in-ids _outs)
     (region-add-node region (Throw #f) 1 0))
-  (define oid (or (ordered-map-ref var->out exn #f)
+  (define oid (or (idmap-ref var->out exn #f)
                   (error 'install-throw "undef ~a" exn)))
   (define-values (r* _w) (region-add-wire region1 oid (pvector-ref in-ids 0)))
   r*)

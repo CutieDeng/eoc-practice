@@ -2,9 +2,9 @@
 
 ;; AArch64 Assembly CFG (Control Flow Graph) Representation
 ;;
-;; Uses cutie-ftree/graph for control flow structure:
+;; Uses racket/graph for control flow structure:
 ;; - graph for vertices (blocks) and edges (control flow)
-;; - ordered-map for block data storage
+;; - intmap for block data storage
 ;; - bitset for efficient set operations
 ;;
 ;; This design separates the graph structure from block content,
@@ -12,11 +12,7 @@
 
 (require racket/match
          racket/dict
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
-         cutie-ftree/bitset
-         cutie-ftree/comparator
-         cutie-ftree/graph
+         "../../../kernel/data/data.rkt"
          "types.rkt")
 
 (provide
@@ -79,11 +75,11 @@
  graph-vertices-set)
 
 ;; ============================================================================
-;; Block ID (using vertex-id from cutie-ftree/graph)
+;; Block ID (using vertex-id from racket/graph)
 ;; ============================================================================
 
 ;; Re-use vertex-id as block ID
-;; vertex-id is already exported from cutie-ftree/graph
+;; vertex-id is already exported from racket/graph
 
 (define (block-id-compare a b)
   (vertex-id-compare a b))
@@ -130,15 +126,15 @@
 ;; ============================================================================
 
 ;; AsmBlock:
-;; - id: vertex-id (from cutie-ftree/graph)
+;; - id: vertex-id (from racket/graph)
 ;; - label: Label:id or Label:named (for emission)
 ;; - insns: pvector of instructions
 ;; - terminator: terminator instruction
-;; - info: ordered-map of metadata (liveness, etc.)
+;; - info: hash of metadata (liveness, etc.)
 (struct AsmBlock (id label insns terminator info) #:prefab)
 
 (define (make-empty-block id label)
-  (AsmBlock id label (pvector-empty) #f (ordered-map-empty symbol-compare)))
+  (AsmBlock id label (pvector-empty) #f (hash)))
 
 ;; Append a single instruction to the block
 (define (block-append-insn block insn)
@@ -162,12 +158,12 @@
   (pvector-length (AsmBlock-insns block)))
 
 ;; ============================================================================
-;; CFG Structure using cutie-ftree/graph
+;; CFG Structure using racket/graph
 ;; ============================================================================
 
 ;; AsmCfg:
-;; - graph: cutie-ftree/graph - vertices are blocks, edges are control flow
-;; - block-data: ordered-map[vertex-id-val -> AsmBlock]
+;; - graph: racket/graph - vertices are blocks, edges are control flow
+;; - block-data: intmap[vertex-id-val -> AsmBlock]
 ;; - entry: vertex-id of entry block (or #f)
 ;; - next-label-id: counter for fresh label IDs
 ;; - config: AsmConfig (or #f)
@@ -175,7 +171,7 @@
 
 (define (make-empty-cfg #:config [config #f])
   (AsmCfg graph-empty
-          (ordered-map-empty integer-compare)
+          intmap-empty
           #f
           0
           config))
@@ -204,7 +200,7 @@
 
   ;; Store block data
   (define new-block-data
-    (ordered-map-set (AsmCfg-block-data cfg) vid-val block))
+    (intmap-set (AsmCfg-block-data cfg) vid-val block))
 
   ;; Add edges based on terminator
   (define term (AsmBlock-terminator block))
@@ -227,7 +223,7 @@
 (define (cfg-get-block cfg block-id)
   (unless (vertex-id? block-id)
     (raise-argument-error 'cfg-get-block "vertex-id?" 1 cfg block-id))
-  (ordered-map-ref (AsmCfg-block-data cfg) (vertex-id-val block-id) #f))
+  (intmap-ref (AsmCfg-block-data cfg) (vertex-id-val block-id) #f))
 
 ;; Update a block in the CFG
 (define (cfg-update-block cfg block-id updater)
@@ -240,7 +236,7 @@
 
   ;; Update block data
   (define new-block-data
-    (ordered-map-set (AsmCfg-block-data cfg) vid-val new-block))
+    (intmap-set (AsmCfg-block-data cfg) vid-val new-block))
 
   ;; TODO: Update edges if terminator changed
   ;; For now, edges must be managed manually via cfg-add-edge/cfg-remove-edge
@@ -252,8 +248,8 @@
   (define vid-val (vertex-id-val block-id))
 
   ;; Remove block data
-  (define-values (new-block-data _)
-    (ordered-map-delete (AsmCfg-block-data cfg) vid-val))
+  (define new-block-data
+    (intmap-remove (AsmCfg-block-data cfg) vid-val))
 
   ;; Remove vertex from graph (this also removes edges)
   (define new-graph
@@ -267,7 +263,7 @@
 
 ;; Get block count
 (define (cfg-block-count cfg)
-  (ordered-map-count (AsmCfg-block-data cfg)))
+  (intmap-count (AsmCfg-block-data cfg)))
 
 ;; Get entry block
 (define (cfg-entry-block cfg)
@@ -278,7 +274,7 @@
 
 ;; Iterate over blocks
 (define (in-cfg-blocks cfg)
-  (in-ordered-map-values (AsmCfg-block-data cfg)))
+  (in-intmap-values (AsmCfg-block-data cfg)))
 
 ;; Iterate over block IDs - extract from block structs (safe API, no vertex-id constructor)
 (define (in-cfg-block-ids cfg)
@@ -328,10 +324,10 @@
 (define (cfg-reachable-blocks cfg)
   (define entry (AsmCfg-entry cfg))
   (if (not entry)
-      (bitset)
+      intbits-empty
       ;; worklist is a pvector; we pop from the right (stack discipline)
       (let loop ([worklist (pvector-cons-right (pvector-empty) entry)]
-                 [visited (bitset)])
+                 [visited intbits-empty])
         (cond
           [(= (pvector-length worklist) 0) visited]
           [else
@@ -340,10 +336,10 @@
            (define rest (pvector-drop-right worklist 1))
            (define vid-val (vertex-id-val current))
            (cond
-             [(bitset-member? visited vid-val)
+             [(intbits-ref visited vid-val)
               (loop rest visited)]
              [else
-              (define new-visited (bitset-add visited vid-val))
+              (define new-visited (intbits-set visited vid-val))
               (define succs (cfg-successors cfg current))
               (loop (pvector-append rest succs) new-visited)])]))))
 

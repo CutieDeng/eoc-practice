@@ -11,14 +11,14 @@
 ;; Design principles:
 ;; 1. Region is the core container with extensible info field
 ;; 2. Node types are pure data structures
-;; 3. info field uses ordered-map for extensibility
+;; 3. info field uses idmap for extensibility
 ;;
 ;; Recommended info keys:
-;;   'types        -> ordered-map: NodeId/WireId -> Type
-;;   'effects      -> ordered-map: NodeId -> EffectRow
-;;   'source-map   -> ordered-map: NodeId -> SrcLoc
-;;   'names        -> ordered-map: NodeId/WireId -> Symbol
-;;   'tensor-shapes -> ordered-map: WireId -> Shape (for ML compilers)
+;;   'types        -> idmap: NodeId/WireId -> Type
+;;   'effects      -> idmap: NodeId -> EffectRow
+;;   'source-map   -> idmap: NodeId -> SrcLoc
+;;   'names        -> idmap: NodeId/WireId -> Symbol
+;;   'tensor-shapes -> idmap: WireId -> Shape (for ML compilers)
 ;;
 ;; ============================================================
 
@@ -85,19 +85,19 @@
 ;; a lexical scope containing nodes, wires, and ports.
 ;;
 ;; Fields:
-;;   info         : ordered-map - extensible metadata
+;;   info         : idmap - extensible metadata
 ;;
-;;   wire->input  : ordered-map: WireId -> InputId - wire targets
-;;   wire->output : ordered-map: WireId -> OutputId - wire sources
+;;   wire->input  : idmap: WireId -> InputId - wire targets
+;;   wire->output : idmap: WireId -> OutputId - wire sources
 ;;
-;;   input->wire  : ordered-map: InputId -> WireId - reverse mapping
-;;   input->node  : ordered-map: InputId -> NodeId - port ownership
-;;   output->wire : ordered-map: OutputId -> WireId - reverse mapping
-;;   output->node : ordered-map: OutputId -> NodeId - port ownership
+;;   input->wire  : idmap: InputId -> WireId - reverse mapping
+;;   input->node  : idmap: InputId -> NodeId - port ownership
+;;   output->wire : idmap: OutputId -> WireId - reverse mapping
+;;   output->node : idmap: OutputId -> NodeId - port ownership
 ;;
-;;   node->input  : ordered-map: NodeId -> (cons InputId count) - node inputs
-;;   node->output : ordered-map: NodeId -> (cons OutputId count) - node outputs
-;;   node->value  : ordered-map: NodeId -> NodeValue - node content
+;;   node->input  : idmap: NodeId -> (cons InputId count) - node inputs
+;;   node->output : idmap: NodeId -> (cons OutputId count) - node outputs
+;;   node->value  : idmap: NodeId -> NodeValue - node content
 ;;
 ;;   wire-cnt     : Natural - ID allocator
 ;;   input-cnt    : Natural - ID allocator

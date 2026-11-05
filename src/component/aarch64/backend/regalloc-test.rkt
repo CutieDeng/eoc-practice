@@ -12,10 +12,7 @@
          "../frontend/parser.rkt"
          "../analysis/liveness.rkt"
          "../backend/regalloc.rkt"
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
-         cutie-ftree/bitset
-         cutie-ftree/comparator)
+         "../../../kernel/data/data.rkt")
 
 ;; ============================================================================
 ;; Virtual Register Parsing Tests
@@ -150,7 +147,7 @@
 
      (check-true (AllocationResult? result))
      (check-true (AllocationResult-success? result))
-     (check-true (ordered-map-has-key? (AllocationResult-assignment result) 'a)))
+     (check-true (hash-has-key? (AllocationResult-assignment result) 'a)))
 
    (test-case "allocation with SVE virtual registers"
      (define vz (VReg:sve 'vec0))
@@ -174,11 +171,11 @@
 
      (check-true (AllocationResult-success? result))
      ;; Check that vz gets a z register
-     (define z-query (ordered-map-query (AllocationResult-assignment result) 'vec0))
-     (check-true (and z-query (Reg:z? (cdr z-query))))
+     (define z-query (hash-ref (AllocationResult-assignment result) 'vec0 #f))
+     (check-true (and z-query (Reg:z? z-query)))
      ;; Check that vp gets a p register
-     (define p-query (ordered-map-query (AllocationResult-assignment result) 'mask))
-     (check-true (and p-query (Reg:p? (cdr p-query)))))))
+     (define p-query (hash-ref (AllocationResult-assignment result) 'mask #f))
+     (check-true (and p-query (Reg:p? p-query))))))
 
 ;; ============================================================================
 ;; Run All Tests

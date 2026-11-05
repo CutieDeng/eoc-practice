@@ -27,3 +27,6 @@ out/
 *.md
 !doc/
 !doc/*.md
+
+# gccast plugin build products (per-GCC-version)
+gccast-plugin/build/

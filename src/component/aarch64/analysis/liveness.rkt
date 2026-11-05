@@ -12,7 +12,7 @@
 (require racket/match
          racket/list
          racket/class
-         racket/dict
+         racket/intmap
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          (only-in "../../../driver/dataflow/liveness.rkt"
@@ -24,11 +24,8 @@
                   BlockLiveness-insn-liveness BlockLiveness-gen BlockLiveness-kill
                   InsnLiveness InsnLiveness?
                   InsnLiveness-live-before InsnLiveness-live-after)
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
-         cutie-ftree/bitset
-         cutie-ftree/comparator
-         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
+         "../../../kernel/data/data.rkt"
+         (only-in racket/graph vertex-id? vertex-id-val))
 
 (provide
  ;; Main analysis (uses driver framework)
@@ -155,12 +152,12 @@
 
 ;; Convert list of registers to bitset indices
 (define (regs->bitset regs id->idx-map)
-  (for/fold ([bs bitset-empty])
+  (for/fold ([bs intbits-empty])
             ([r regs]
              #:when (vreg? r))
-    (define idx (dict-ref id->idx-map (vreg-id r) #f))
+    (define idx (hash-ref id->idx-map (vreg-id r) #f))
     (if idx
-        (bitset-add bs idx)
+        (intbits-set bs idx)
         bs)))
 
 ;; Helper to get block ID value (supports both vertex-id and legacy BlockId)
@@ -180,10 +177,10 @@
   ;; Precompute predecessors map for entire CFG
   ;; cfg-predecessors returns a pvector of vertex-ids per block
   (define pred-map
-    (for/fold ([m (ordered-map-empty integer-compare)])
+    (for/fold ([m intmap-empty])
               ([bid (in-cfg-block-ids cfg)])
       (define preds (cfg-predecessors cfg bid))
-      (ordered-map-set m (get-block-id-val bid) preds)))
+      (intmap-set m (get-block-id-val bid) preds)))
 
   (new aarch64-liveness-interface%
        [id->idx-map id->idx]
@@ -194,10 +191,10 @@
 ;; AArch64-specific implementation of liveness-interface<%>
 (define aarch64-liveness-interface%
   (class* object% (liveness-interface<%>)
-    (init-field id->idx-map     ; ordered-map[symbol -> int]
+    (init-field id->idx-map     ; hash[symbol -> int]
                 idx->id-vec     ; pvector[int -> symbol]
                 var-count-val   ; int
-                predecessors-map) ; ordered-map[int -> (listof vertex-id)]
+                predecessors-map) ; intmap[int -> pvector of vertex-id]
 
     (super-new)
 
@@ -207,7 +204,7 @@
 
     (define/public (var->id var)
       (if (vreg? var)
-          (dict-ref id->idx-map (vreg-id var) 0)
+          (hash-ref id->idx-map (vreg-id var) 0)
           0))
 
     (define/public (id->var id)
@@ -231,29 +228,14 @@
 
     (define/public (block-predecessors cfg bid)
       (define vid-val (get-block-id-val bid))
-      (or (ordered-map-query predecessors-map vid-val)
-          (pvector-empty)))
+      (intmap-ref predecessors-map vid-val (pvector-empty)))
 
     ;; === Instruction def/use (returns bitset) ===
     (define/public (insn-defs-bitset insn)
       (regs->bitset (insn-defs insn) id->idx-map))
 
     (define/public (insn-uses-bitset insn)
-      (regs->bitset (insn-uses insn) id->idx-map))
-
-    ;; === Block ID comparison ===
-    ;; Returns a comparator function that returns '< '= '>
-    (define/public (block-id-compare)
-      block-id-compare*)))
-
-;; Block ID comparator using vertex-id-val
-(define (block-id-compare* a b)
-  (define a-val (get-block-id-val a))
-  (define b-val (get-block-id-val b))
-  (cond
-    [(< a-val b-val) '<]
-    [(> a-val b-val) '>]
-    [else '=]))
+      (regs->bitset (insn-uses insn) id->idx-map))))
 
 ;; ============================================================================
 ;; Main Entry Point
@@ -272,10 +254,9 @@
 
 ;; Get live bitset after a specific instruction
 (define (get-live-after liveness-result block-id insn-index)
-  (define block-query (ordered-map-query (LivenessResult-block-info liveness-result) block-id))
-  (define block-liveness (and block-query (cdr block-query)))
+  (define block-liveness (hash-ref (LivenessResult-block-info liveness-result) block-id #f))
   (if (and block-liveness
            (< insn-index (pvector-length (BlockLiveness-insn-liveness block-liveness))))
       (InsnLiveness-live-after
        (pvector-ref (BlockLiveness-insn-liveness block-liveness) insn-index))
-      bitset-empty))
+      intbits-empty))

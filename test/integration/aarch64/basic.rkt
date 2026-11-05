@@ -5,10 +5,10 @@
 (require rackunit
          racket/string
          "../../../src/pipeline/aarch64-asm/aarch64-asm.rkt"
-         cutie-ftree/pvector
-         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
+         "../../../src/kernel/data/data.rkt"
+         (only-in racket/graph vertex-id? vertex-id-val))
 
-;; Test 1: CFG construction with cutie-ftree/graph
+;; Test 1: CFG construction with racket/graph
 (define (test-cfg-construction)
   (printf "Test 1: CFG construction with graph-based blocks...\n")
 

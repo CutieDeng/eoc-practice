@@ -12,7 +12,7 @@
          "../../../kernel/ir/jvm/types.rkt"
          "../../../kernel/ir/cfg/types.rkt"
          "../../../component/cfg/utils/graph-ops.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (define-runtime-path fixture-class-transform
   "../../../../test/integration/ClassTransform.dat")
@@ -37,13 +37,13 @@
 
   (define (no-duplicate-defs? cfg)
     (define outs (all-outputs cfg))
-    (define seen (ordered-map-empty var-id-compare))
+    (define seen idmap-empty)
     (define-values (_seen ok?)
       (for/fold ([s seen] [ok? #t]) ([v (in-pvector outs)])
         (cond
           [(not ok?) (values s #f)]
-          [(ordered-map-ref s v #f) (values s #f)]
-          [else (values (ordered-map-set s v #t) #t)])))
+          [(idmap-ref s v #f) (values s #f)]
+          [else (values (idmap-set s v #t) #t)])))
     ok?)
 
   ;; ----- trivial method: nothing to rename -----

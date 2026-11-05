@@ -46,7 +46,7 @@
 
 ;; BB-partition result for a single method.
 ;;   entry      : String                              - entry label
-;;   blocks     : ordered-map[String -> JvmBB]
+;;   blocks     : hash[String -> JvmBB]
 ;;   order      : pvector[String]                     - source order
 ;;   exceptions : pvector[JvmExceptionEntry]
 (struct JvmMethodBBs (entry blocks order exceptions) #:prefab)
@@ -68,14 +68,14 @@
       (car seg)))
   (define n (pvector-length order))
   (define blocks
-    (for/fold ([m (ordered-map-empty string-compare)])
+    (for/fold ([m (hash)])
               ([seg (in-pvector segments)] [i (in-naturals)])
       (define label (car seg))
       (define insns (cdr seg))
       (define next-label
         (and (< (add1 i) n) (pvector-ref order (add1 i))))
       (define succs (compute-successors insns next-label))
-      (ordered-map-set m label (JvmBB label insns succs))))
+      (hash-set m label (JvmBB label insns succs))))
   (define entry (if (= n 0) SYNTHETIC-ENTRY (pvector-ref order 0)))
   (JvmMethodBBs entry blocks order exceptions))
 

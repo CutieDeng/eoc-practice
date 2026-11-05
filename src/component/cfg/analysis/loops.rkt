@@ -11,7 +11,7 @@
 
 (require racket/set)
 (require "../../../kernel/ir/cfg/cfg.rkt")
-(require (except-in "../../../kernel/data/data.rkt" integer-compare))
+(require "../../../kernel/data/data.rkt")
 (require "../../../driver/loop/loop.rkt")
 (require "../../../driver/dominance/dominance.rkt")
 (require "../utils/graph-ops.rkt")
@@ -59,19 +59,19 @@
 
   ;; Use driver algorithms
   (define back-edges
-    (find-back-edges block-id-compare block-ids entry get-succs get-preds))
+    (find-back-edges block-ids entry get-succs get-preds))
 
   (define loops
-    (find-natural-loops block-id-compare block-ids entry get-succs get-preds))
+    (find-natural-loops block-ids entry get-succs get-preds))
 
   (define headers
-    (find-loop-headers block-id-compare block-ids entry get-succs get-preds))
+    (find-loop-headers block-ids entry get-succs get-preds))
 
   ;; Build loop forest with proper depths
   (define-values (updated-loops parent-map children-map)
     (if (null? loops)
         (values '() (hash) (hash))
-        (build-loop-forest block-id-compare loops)))
+        (build-loop-forest loops)))
 
   (AnalysisResult
     (CfgLoopInfo updated-loops back-edges headers parent-map children-map)
@@ -104,7 +104,7 @@
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (find-natural-loops block-id-compare block-ids entry get-succs get-preds))
+  (find-natural-loops block-ids entry get-succs get-preds))
 
 ;; Find all back edges in a CFG
 (define (cfg-find-back-edges cfg)
@@ -112,7 +112,7 @@
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (find-back-edges block-id-compare block-ids entry get-succs get-preds))
+  (find-back-edges block-ids entry get-succs get-preds))
 
 ;; Find all loop headers in a CFG
 (define (cfg-find-loop-headers cfg)
@@ -120,7 +120,7 @@
   (define entry (cfg-get-entry cfg))
   (define get-succs (cfg-make-successors cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (find-loop-headers block-id-compare block-ids entry get-succs get-preds))
+  (find-loop-headers block-ids entry get-succs get-preds))
 
 ;; Get the nesting depth of a block (0 = not in loop)
 ;;

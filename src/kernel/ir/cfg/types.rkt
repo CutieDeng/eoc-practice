@@ -7,33 +7,29 @@
 ;; The canonical Control Flow Graph representation used across all
 ;; IRs in this compiler. Shape:
 ;;
-;;   - Block identity is `vertex-id` from cutie-ftree/graph. No
-;;     per-Cfg BlockId constructor -- a block is born by allocating
-;;     a vertex in the Cfg's graph.
+;;   - Block identity is the prefab `BlockId`, a wrapper over a
+;;     natural allocated from `Cfg-block-cnt`.
 ;;
-;;   - Control-flow structure is a cutie-ftree/graph: vertices are
-;;     blocks, edges follow terminator successors.
+;;   - Control-flow structure is implicit: the successors of a block
+;;     are exactly its terminator's targets (see
+;;     component/cfg/utils/graph-ops.rkt).  No separate edge store.
 ;;
 ;;   - Block content (`CfgBlock`) carries phis + instructions +
 ;;     terminator + info. Phi and VfInsn are SSA-oriented but are
 ;;     the default content type; other IRs (e.g. aarch64 AsmBlock)
 ;;     define their own block struct while keeping the same
-;;     vertex-id / graph / Term:* conventions.
+;;     BlockId / Term:* conventions.
 ;;
 ;;   - Terminators use the `Term:*` prefix style consistently.
 ;;
 ;; This module contains data definitions only -- no algorithms.
 ;; ============================================================
 
-(require (only-in cutie-ftree/graph
-                  vertex-id?
-                  vertex-id-val
-                  vertex-id-compare))
+(require (only-in racket/compare integer-compare))
 
 (provide
-  ;; Block identity (alias over vertex-id)
-  BlockId?
-  BlockId-id
+  ;; Block identity
+  (struct-out BlockId)
   block-id-compare
 
   ;; Other ID types
@@ -71,12 +67,12 @@
 ;; Block identity
 ;; ============================================================
 
-;; A block id is a `vertex-id` from cutie-ftree/graph.  We expose
-;; a pair of aliases so the rest of the codebase can spell the
-;; concept as "BlockId" without importing the graph library.
-(define BlockId? vertex-id?)
-(define BlockId-id vertex-id-val)
-(define block-id-compare vertex-id-compare)
+;; A block id is a prefab wrapper over a natural number allocated
+;; per Cfg (see Cfg-block-cnt).  Prefab so a Cfg can be written and
+;; read back verbatim.
+(struct BlockId (id) #:prefab)
+(define (block-id-compare a b)
+  (integer-compare (BlockId-id a) (BlockId-id b)))
 
 ;; ============================================================
 ;; Other ID types
@@ -96,25 +92,28 @@
 ;; ============================================================
 
 ;; Fields:
-;;   graph    : cutie-ftree/graph - vertices are blocks
-;;   blocks   : ordered-map[BlockId -> CfgBlock] (keyed by vertex-id via block-id-compare)
-;;   entry    : BlockId  (or #f before set)
-;;   exit     : BlockId or #f (optional unified exit)
-;;   var-cnt  : Integer - next VarId id to allocate
-;;   insn-cnt : Integer - next InsnId id to allocate
-;;   info     : ordered-map[Symbol -> Any] - metadata
+;;   blocks    : idmap[BlockId -> CfgBlock]
+;;   entry     : BlockId  (or #f before set)
+;;   exit      : BlockId or #f (optional unified exit)
+;;   block-cnt : Integer - next BlockId id to allocate
+;;   var-cnt   : Integer - next VarId id to allocate
+;;   insn-cnt  : Integer - next InsnId id to allocate
+;;   info      : hash[Symbol -> Any] - metadata
 ;;
-(struct Cfg (graph blocks entry exit var-cnt insn-cnt info) #:prefab)
+;; Control-flow edges are not stored: successors are derived from
+;; each block's terminator (component/cfg/utils/graph-ops.rkt).
+;;
+(struct Cfg (blocks entry exit block-cnt var-cnt insn-cnt info) #:prefab)
 
 ;; Fields:
-;;   id         : BlockId (vertex-id)
+;;   id         : BlockId
 ;;   phis       : pvector[PhiInsn]
 ;;   insns      : pvector[VfInsn]   (other IRs that reuse CfgBlock may
 ;;                                   carry their own instruction type
 ;;                                   here; the pvector requirement is
 ;;                                   uniform)
 ;;   terminator : Terminator or #f
-;;   info       : ordered-map[Symbol -> Any]
+;;   info       : hash[Symbol -> Any]
 ;;
 (struct CfgBlock (id phis insns terminator info) #:prefab)
 
@@ -188,12 +187,6 @@
 ;; ============================================================
 ;; Comparison helpers
 ;; ============================================================
-
-(define (integer-compare a b)
-  (cond
-    [(< a b) '<]
-    [(> a b) '>]
-    [else '=]))
 
 (define (var-id-compare a b)
   (integer-compare (VarId-id a) (VarId-id b)))

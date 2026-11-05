@@ -49,11 +49,9 @@
 ;; ============================================================
 
 (require racket/match
-         (only-in cutie-ftree/graph graph-add-vertex graph-add-edge
-                  graph-remove-edges-between)
          "../../../kernel/ir/cfg/types.rkt"
          "../../../component/cfg/utils/graph-ops.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (provide normalize-try-exits)
 
@@ -82,40 +80,40 @@
 ;; ============================================================
 
 (define (compute-bid->ord block-order)
-  (for/fold ([m (ordered-map-empty block-id-compare)])
+  (for/fold ([m idmap-empty])
             ([bid (in-pvector block-order)]
              [i (in-naturals)])
-    (ordered-map-set m bid i)))
+    (idmap-set m bid i)))
 
 ;; `'java/exception-table` record is (list start-bid end-bid handler-bid catch-type).
 ;; `end-bid` may be #f when the JVM range ends at method-end.
 (define (resolve-window entry bid->ord block-order)
   (match entry
     [(list start-bid end-bid _handler-bid _catch-type)
-     (define start-ord (ordered-map-ref bid->ord start-bid #f))
+     (define start-ord (idmap-ref bid->ord start-bid #f))
      (unless start-ord
        (error 'normalize-try-exits "unmapped start-bid: ~s" start-bid))
      (define end-ord
        (cond
-         [end-bid (ordered-map-ref bid->ord end-bid #f)]
+         [end-bid (idmap-ref bid->ord end-bid #f)]
          [else (pvector-length block-order)]))
      (unless end-ord
        (error 'normalize-try-exits "unmapped end-bid: ~s" end-bid))
-     (for/fold ([s (ordered-map-empty block-id-compare)])
+     (for/fold ([s idmap-empty])
                ([bid (in-pvector block-order)]
                 [i (in-naturals)]
                 #:when (and (<= start-ord i) (< i end-ord)))
-       (ordered-map-set s bid #t))]))
+       (idmap-set s bid #t))]))
 
 (define (collect-handler-bids table)
-  (for/fold ([s (ordered-map-empty block-id-compare)])
+  (for/fold ([s idmap-empty])
             ([entry (in-pvector table)])
     (match entry
       [(list _start _end handler-bid _ct)
-       (ordered-map-set s handler-bid #t)])))
+       (idmap-set s handler-bid #t)])))
 
 (define (in-window? window bid)
-  (and (ordered-map-ref window bid #f) #t))
+  (and (idmap-ref window bid #f) #t))
 
 ;; ============================================================
 ;; Exit-edge collection
@@ -133,7 +131,7 @@
 
 (define (collect-exit-edges cfg window handler-set)
   (for/fold ([acc (pvector-empty)])
-            ([bid (in-ordered-map-keys window)])
+            ([bid (in-idmap-keys window)])
     (define blk (cfg-get-block cfg bid))
     (cond
       [(not blk) acc]
@@ -142,17 +140,17 @@
        (match t
          [(Term:jump target)
           (if (and (not (in-window? window target))
-                   (not (ordered-map-ref handler-set target #f)))
+                   (not (idmap-ref handler-set target #f)))
               (pvector-cons-right acc (list bid 'jump target))
               acc)]
          [(Term:cond _cv then-t else-t)
           (define a1
             (if (and (not (in-window? window then-t))
-                     (not (ordered-map-ref handler-set then-t #f)))
+                     (not (idmap-ref handler-set then-t #f)))
                 (pvector-cons-right acc (list bid 'cond-then then-t))
                 acc))
           (if (and (not (in-window? window else-t))
-                   (not (ordered-map-ref handler-set else-t #f)))
+                   (not (idmap-ref handler-set else-t #f)))
               (pvector-cons-right a1 (list bid 'cond-else else-t))
               a1)]
          [(Term:switch _v cases default)
@@ -162,11 +160,11 @@
                        [i (in-naturals)])
               (define tgt (cdr kv))
               (if (and (not (in-window? window tgt))
-                       (not (ordered-map-ref handler-set tgt #f)))
+                       (not (idmap-ref handler-set tgt #f)))
                   (pvector-cons-right a (list bid (cons 'case i) tgt))
                   a)))
           (if (and (not (in-window? window default))
-                   (not (ordered-map-ref handler-set default #f)))
+                   (not (idmap-ref handler-set default #f)))
               (pvector-cons-right a1 (list bid 'switch-default default))
               a1)]
          [_ acc])])))
@@ -175,13 +173,13 @@
 (define (distinct-targets edges)
   (define-values (pv _seen)
     (for/fold ([pv (pvector-empty)]
-               [seen (ordered-map-empty block-id-compare)])
+               [seen idmap-empty])
               ([e (in-pvector edges)])
       (define tgt (caddr e))
       (cond
-        [(ordered-map-ref seen tgt #f) (values pv seen)]
+        [(idmap-ref seen tgt #f) (values pv seen)]
         [else (values (pvector-cons-right pv tgt)
-                      (ordered-map-set seen tgt #t))])))
+                      (idmap-set seen tgt #t))])))
   pv)
 
 ;; ============================================================
@@ -200,9 +198,8 @@
     (and (equal? t tgt) i)))
 
 (define (insert-joiner cfg edges targets)
-  ;; Phase A: allocate joiner block-id in the graph.
-  (define-values (g1 joiner-bid) (graph-add-vertex (Cfg-graph cfg)))
-  (define cfg1 (struct-copy Cfg cfg [graph g1]))
+  ;; Phase A: allocate the joiner block-id.
+  (define-values (cfg1 joiner-bid) (cfg-fresh-block-id cfg))
 
   ;; Phase B: for each edge, decide inline-vs-forwarding and do the
   ;; per-source rewrite.  Produces:
@@ -271,38 +268,31 @@
     (struct-copy CfgBlock blk
       [insns insns*]
       [terminator (Term:jump joiner-bid)]))
-  (define g1 (graph-remove-edges-between (Cfg-graph cfg) src-bid old-tgt))
-  (define-values (g2 _eid) (graph-add-edge g1 src-bid joiner-bid))
-  (cfg-set-block (struct-copy Cfg cfg [graph g2]) blk*))
+  (cfg-set-block cfg blk*))
 
 ;; Install a forwarding block F that writes the selector and jumps
 ;; to joiner-bid; retarget src's terminator arm (role) from tgt-bid
 ;; to F.  Returns (values cfg fwd-bid).
 (define (install-forwarding-block cfg src-bid role tgt-bid
                                   sel-var sel-idx joiner-bid)
-  (define-values (g1 fwd-bid) (graph-add-vertex (Cfg-graph cfg)))
+  (define-values (cfg0 fwd-bid) (cfg-fresh-block-id cfg))
   (define fwd-block
     (CfgBlock fwd-bid
               (pvector-empty)
               (pvector-cons-right (pvector-empty)
                                   (make-selector-insn sel-var sel-idx))
               (Term:jump joiner-bid)
-              (ordered-map-empty symbol-compare)))
-  (define cfg1 (cfg-set-block (struct-copy Cfg cfg [graph g1]) fwd-block))
+              (hash)))
+  (define cfg1 (cfg-set-block cfg0 fwd-block))
   ;; Retarget src arm.
   (define src-blk (cfg-get-block cfg1 src-bid))
   (define old-t (CfgBlock-terminator src-blk))
   (define new-t (retarget-term old-t role tgt-bid fwd-bid))
   (define src-blk* (struct-copy CfgBlock src-blk [terminator new-t]))
   (define cfg2 (cfg-set-block cfg1 src-blk*))
-  ;; Adjust graph edges: src --removed--> tgt-bid; add src->fwd, fwd->joiner.
-  (define g2 (graph-remove-edges-between (Cfg-graph cfg2) src-bid tgt-bid))
-  (define-values (g3 _e1) (graph-add-edge g2 src-bid fwd-bid))
-  (define-values (g4 _e2) (graph-add-edge g3 fwd-bid joiner-bid))
-  (define cfg3 (struct-copy Cfg cfg2 [graph g4]))
   ;; Append fwd-bid to block-order immediately so downstream passes
   ;; observe a consistent linearisation.
-  (values (append-to-block-order cfg3 fwd-bid) fwd-bid))
+  (values (append-to-block-order cfg2 fwd-bid) fwd-bid))
 
 (define (retarget-term term role old-tgt new-tgt)
   (match term
@@ -360,21 +350,15 @@
     (Term:switch sel-phi-output joiner-cases joiner-default))
   (define joiner-block
     (CfgBlock joiner-bid joiner-phis (pvector-empty) joiner-term
-              (let* ([m (ordered-map-empty symbol-compare)]
-                     [m (ordered-map-set m 'java/kappa-joiner #t)]
-                     [m (ordered-map-set m 'java/kappa-joiner-target-merges
+              (let* ([m (hash)]
+                     [m (hash-set m 'java/kappa-joiner #t)]
+                     [m (hash-set m 'java/kappa-joiner-target-merges
                                          merge-bindings)])
                 m)))
 
   (define cfg1 (cfg-set-block cfg joiner-block))
 
-  ;; 4. Graph edges from joiner to each target.
-  (define cfg2
-    (for/fold ([c cfg1]) ([t (in-pvector targets)])
-      (define-values (g _e) (graph-add-edge (Cfg-graph c) joiner-bid t))
-      (struct-copy Cfg c [graph g])))
-
-  (struct-copy Cfg cfg2 [var-cnt vc2]))
+  (struct-copy Cfg cfg1 [var-cnt vc2]))
 
 ;; For each target T_j, for each phi at T_j whose sources include at
 ;; least one (src-bid . v) with src-bid ∈ joiner's predecessors,
@@ -414,7 +398,7 @@
                    ([orig-phi (in-pvector (CfgBlock-phis t-blk))])
            (define w-src-map (collect-w-source-map orig-phi edge-plans t))
            (cond
-             [(= 0 (ordered-map-count w-src-map))
+             [(= 0 (idmap-count w-src-map))
               (values phis-acc binds-acc vc)]
              [else
               (define placeholder
@@ -425,7 +409,7 @@
                               [pt (in-pvector plan-target-of)])
                   (cond
                     [(equal? pt t)
-                     (cons pb (ordered-map-ref w-src-map pb placeholder))]
+                     (cons pb (idmap-ref w-src-map pb placeholder))]
                     [else (cons pb placeholder)])))
               (values
                 (pvector-cons-right phis-acc
@@ -436,13 +420,13 @@
                 (add1 vc))]))])))
   (values phis bindings vc*))
 
-;; For a phi in target T, return ordered-map[W-source-bid → value]
+;; For a phi in target T, return idmap[W-source-bid → value]
 ;; (renaming src-bids to their joiner-predecessor bid if they went
 ;; through a forwarding block).  The W-source bid in the ORIGINAL
 ;; phi is the CFG-side predecessor before rewriting; we look up its
 ;; matching edge-plan to find the new pred-bid.
 (define (collect-w-source-map orig-phi edge-plans target)
-  (for/fold ([m (ordered-map-empty block-id-compare)])
+  (for/fold ([m idmap-empty])
             ([src (in-pvector (PhiInsn-sources orig-phi))])
     (define orig-pred-bid (car src))
     (define v (cdr src))
@@ -459,11 +443,11 @@
              (equal? etgt target)
              pred-bid)))
     (cond
-      [maybe-plan (ordered-map-set m maybe-plan v)]
+      [maybe-plan (idmap-set m maybe-plan v)]
       [else m])))
 
 (define (first-value-of m)
-  (for/or ([kv (in-ordered-map m)]) (cdr kv)))
+  (for/or ([kv (in-idmap m)]) (cdr kv)))
 
 ;; ============================================================
 ;; Phase D: patch each exit target's phis to source from joiner
@@ -473,37 +457,37 @@
   ;; merge-bindings lives on the joiner block's info.
   (define joiner-blk (cfg-get-block cfg joiner-bid))
   (define bindings
-    (ordered-map-ref (CfgBlock-info joiner-blk)
+    (hash-ref (CfgBlock-info joiner-blk)
                      'java/kappa-joiner-target-merges (pvector-empty)))
   ;; Group bindings by target.
   (define binding-map
-    (for/fold ([m (ordered-map-empty block-id-compare)])
+    (for/fold ([m idmap-empty])
               ([b (in-pvector bindings)])
       (match-define (list t old-out new-out) b)
-      (define cur (ordered-map-ref m t (ordered-map-empty var-id-compare)))
-      (ordered-map-set m t (ordered-map-set cur old-out new-out))))
+      (define cur (idmap-ref m t idmap-empty))
+      (idmap-set m t (idmap-set cur old-out new-out))))
   ;; Set of pred-bids we're consolidating into joiner, so we can
   ;; recognise which existing phi sources to strip.
   (define w-pred-set
-    (for/fold ([s (ordered-map-empty block-id-compare)])
+    (for/fold ([s idmap-empty])
               ([p (in-pvector edge-plans)])
-      (ordered-map-set s (cadr p) #t)))
+      (idmap-set s (cadr p) #t)))
   ;; Also mark the ORIGINAL src-bids as "to be stripped" — for the
   ;; Term:jump case the pred-bid IS the src, but for forwarding the
   ;; original phi still references src directly (never saw the
   ;; forwarding block).  Build a map orig-src → joiner-pred-bid.
   (define src->joiner-pred
-    (for/fold ([m (ordered-map-empty block-id-compare)])
+    (for/fold ([m idmap-empty])
               ([p (in-pvector edge-plans)])
       (match-define (list edge pred-bid _sel) p)
-      (ordered-map-set m (car edge) pred-bid)))
+      (idmap-set m (car edge) pred-bid)))
   (for/fold ([c cfg]) ([t (in-pvector targets)])
     (define t-blk (cfg-get-block c t))
     (cond
       [(not t-blk) c]
       [else
        (define t-merges
-         (ordered-map-ref binding-map t (ordered-map-empty var-id-compare)))
+         (idmap-ref binding-map t idmap-empty))
        (define new-phis
          (for/pvector ([phi (in-pvector (CfgBlock-phis t-blk))])
            (rewrite-target-phi phi src->joiner-pred joiner-bid t-merges)))
@@ -517,14 +501,14 @@
               ([src (in-pvector old-sources)])
       (define orig-pred (car src))
       (cond
-        [(ordered-map-ref src->joiner-pred orig-pred #f)
+        [(idmap-ref src->joiner-pred orig-pred #f)
          ;; Strip this W-source; consolidate later.
          (values kept added?)]
         [else
          (values (pvector-cons-right kept src) added?)])))
   ;; If this phi had a W-source, add one (joiner . merge-out) entry.
   (define merge-out
-    (ordered-map-ref t-merges (PhiInsn-output phi) #f))
+    (idmap-ref t-merges (PhiInsn-output phi) #f))
   (define final-sources
     (cond
       [merge-out

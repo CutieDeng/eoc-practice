@@ -1,8 +1,8 @@
 # Architecture
 
-Last Updated: 2026-04-19
+Last Updated: 2026-11-05
 
-适用范围: 新架构（`src/`）。
+适用范围: `src/`。
 
 ## 1. 设计目标
 
@@ -33,7 +33,7 @@ frontend -> pipeline -> component -> driver
 
 典型内容：
 - `ir/ast/*`, `ir/cfg/*`, `ir/rvsdg/*`, `ir/jvm/*`, `ir/x86/*`
-- `data/*`（依赖 `cutie-ftree` 的持久结构封装）
+- `data/*`：标准库持久结构的统一入口（`racket/pvector`、`racket/intmap`、`racket/intbits`、`racket/graph`、`racket/compare`）与 `idmap`（typed-id 键表，intmap 存储）
 
 ### `src/driver/`
 
@@ -131,10 +131,11 @@ Lvar AST
 5. 若是外部格式读取：
 - 放 `frontend/`
 
-## 7. 当前已知边界
+## 7. 数据结构约定
 
-- 根目录旧流水线（`compiler.rkt`, `run-tests.rkt`）与 `src/` 新架构并存。
-- 新开发建议优先进入 `src/`，避免在旧链路扩大技术债。
+- IR struct 一律 `#:prefab`，跨引用存 typed id（`BlockId`、`VarId`、`NodeId`…），整个 IR 可 `write`/`read`。
+- typed-id 键表用 `idmap-*`；driver 层泛型节点用 `equal?` hash；symbol/string 键用 `hash`；裸整数用 `intmap`，位集合用 `intbits`。
+- kernel `Cfg` 不存边：后继由 terminator 推导（`component/cfg/utils/graph-ops.rkt`）。
 
 ## 8. 变更检查清单
 
@@ -147,5 +148,6 @@ Lvar AST
 
 ## 9. 相关阅读
 
-- [quickstart.md](/Users/cutiedeng/Y2026/M03/D28/compiler.rkt/doc/quickstart.md)
-- [README.md](/Users/cutiedeng/Y2026/M03/D28/compiler.rkt/doc/README.md)
+- [quickstart.md](quickstart.md)
+- [README.md](README.md)
+- [roadmap.md](roadmap.md)

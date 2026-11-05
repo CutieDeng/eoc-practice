@@ -148,7 +148,7 @@
 ;; ============================================================
 
 ;; Top-level program
-;; info: ordered-map of metadata
+;; info: idmap of metadata
 (struct Program (info body) #:prefab)
 
 ;; Function definition

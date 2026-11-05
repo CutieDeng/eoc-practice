@@ -1,3 +1,0 @@
-[submodule "vendor/cutie-ftree.rkt"]
-	path = vendor/cutie-ftree.rkt
-	url = ssh://git@gitcode.com/pro-gcc/cutie-ftree

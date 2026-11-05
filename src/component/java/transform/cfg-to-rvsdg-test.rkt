@@ -14,7 +14,7 @@
          "../../../frontend/java/reader.rkt"
          "../../../kernel/ir/jvm/types.rkt"
          "../../../kernel/ir/rvsdg/rvsdg.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (define-runtime-path fixture-class-transform
   "../../../../test/integration/ClassTransform.dat")
@@ -30,10 +30,10 @@
   (define (region-of lam) (Lambda-region lam))
 
   (define (region-node-count r)
-    (ordered-map-count (Region-node->value r)))
+    (idmap-count (Region-node->value r)))
 
   (define (node-ops r)
-    (for/list ([kv (in-ordered-map (Region-node->value r))])
+    (for/list ([kv (in-idmap (Region-node->value r))])
       (define v (cdr kv))
       (cond
         [(Simple? v) (Simple-op v)]
@@ -75,7 +75,7 @@
     (define r (region-of lam))
     (check-equal? (node-ops r) '(param ILOAD return))
     ;; Exactly two wires: param→ILOAD, ILOAD→return.
-    (check-equal? (ordered-map-count (Region-wire->input r)) 2))
+    (check-equal? (idmap-count (Region-wire->input r)) 2))
 
   ;; ----- Literal inputs become const nodes -----
   (test-case "BIPUSH integer literal spawns const node"
@@ -130,12 +130,12 @@
     (define r (region-of lam))
     ;; The parent region must contain a Gamma node.
     (define gamma-nid
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (and (Gamma? (cdr kv)) (car kv))))
     (check-not-false gamma-nid)
     ;; Context pruning: both branches only write locally-defined vars,
     ;; so the Gamma should have just the predicate input (no context).
-    (define gamma-in-info (ordered-map-ref (Region-node->input r) gamma-nid))
+    (define gamma-in-info (idmap-ref (Region-node->input r) gamma-nid))
     (check-equal? (cdr gamma-in-info) 1
                   "Gamma input count should be 1 (predicate only) after escape pruning")
     ;; And must finish with a return.
@@ -174,7 +174,7 @@
     (define r (region-of lam))
     ;; Exactly one Gamma in the parent region.
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -211,7 +211,7 @@
     (define r (region-of lam))
     ;; Parent region still has exactly one Gamma node.
     (define gamma
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (and (Gamma? (cdr kv)) (cdr kv))))
     (check-pred Gamma? gamma)
     ;; The multi-block arm lives in Gamma-regions index 1: IFEQ's
@@ -220,7 +220,7 @@
     ;; BOTH ICONST_1 and ICONST_2 (one per source block).
     (define fallthrough-region (cadr (Gamma-regions gamma)))
     (define fallthrough-ops
-      (for/list ([kv (in-ordered-map (Region-node->value fallthrough-region))])
+      (for/list ([kv (in-idmap (Region-node->value fallthrough-region))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'ICONST_1 fallthrough-ops))
@@ -265,7 +265,7 @@
     (define r (region-of lam))
     ;; Parent region has exactly one outer Gamma.
     (define outer-gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length outer-gammas) 1
@@ -277,7 +277,7 @@
     ;; Gamma node inside.
     (define nested-gamma-count
       (for/sum ([sub (in-list (Gamma-regions outer-gamma))])
-        (for/sum ([kv (in-ordered-map (Region-node->value sub))])
+        (for/sum ([kv (in-idmap (Region-node->value sub))])
           (if (Gamma? (cdr kv)) 1 0))))
     (check-equal? nested-gamma-count 1
                   "exactly one of the outer Gamma's sub-regions should contain an inner Gamma")
@@ -309,17 +309,17 @@
     (define r (region-of lam))
     ;; Parent region contains a Theta node.
     (define has-theta?
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (Theta? (cdr kv))))
     (check-true has-theta?)
     ;; IFEQ body is on the else arm, so Theta polarity-flip inserts
     ;; a `Simple 'not` inside the theta's region.
     (define theta
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (and (Theta? (cdr kv)) (cdr kv))))
     (define theta-sub (Theta-region theta))
     (define has-not?
-      (for/or ([kv (in-ordered-map (Region-node->value theta-sub))])
+      (for/or ([kv (in-idmap (Region-node->value theta-sub))])
         (define v (cdr kv))
         (and (Simple? v) (equal? (Simple-op v) 'not))))
     (check-true has-not?)
@@ -366,7 +366,7 @@
     (define r (region-of lam))
     ;; Parent region contains exactly one Theta node.
     (define thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length thetas) 1
@@ -375,7 +375,7 @@
     ;; Both body blocks' arithmetic ops must appear inside the
     ;; Theta's sub-region: IADD from body_a and ISUB from body_b.
     (define sub-ops
-      (for/list ([kv (in-ordered-map (Region-node->value theta-sub))])
+      (for/list ([kv (in-idmap (Region-node->value theta-sub))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'IADD sub-ops)
@@ -429,7 +429,7 @@
     (define r (region-of lam))
     ;; Parent region contains exactly one Theta node.
     (define thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length thetas) 1
@@ -440,13 +440,13 @@
     ;; from each arm; ISUB from the latch block lives in the Theta
     ;; sub-region directly.
     (define inner-gammas
-      (for/list ([kv (in-ordered-map (Region-node->value theta-sub))]
+      (for/list ([kv (in-idmap (Region-node->value theta-sub))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length inner-gammas) 1
                   "Theta body should contain exactly one inner Gamma")
     (define sub-ops
-      (for/list ([kv (in-ordered-map (Region-node->value theta-sub))])
+      (for/list ([kv (in-idmap (Region-node->value theta-sub))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'ISUB sub-ops)
@@ -504,7 +504,7 @@
     (define r (region-of lam))
     ;; Parent region contains exactly one (outer) Theta node.
     (define outer-thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length outer-thetas) 1
@@ -513,13 +513,13 @@
     ;; Outer Theta's sub-region hosts exactly one inner Theta plus
     ;; the outer-latch ISUB.
     (define inner-thetas
-      (for/list ([kv (in-ordered-map (Region-node->value outer-sub))]
+      (for/list ([kv (in-idmap (Region-node->value outer-sub))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length inner-thetas) 1
                   "outer Theta body should contain exactly one inner Theta")
     (define outer-sub-ops
-      (for/list ([kv (in-ordered-map (Region-node->value outer-sub))])
+      (for/list ([kv (in-idmap (Region-node->value outer-sub))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'ISUB outer-sub-ops)
@@ -528,7 +528,7 @@
     ;; inner-latch ISUB (slot2 -= 1).
     (define inner-sub (Theta-region (car inner-thetas)))
     (define inner-sub-ops
-      (for/list ([kv (in-ordered-map (Region-node->value inner-sub))])
+      (for/list ([kv (in-idmap (Region-node->value inner-sub))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'IADD inner-sub-ops)
@@ -562,7 +562,7 @@
     (define r (region-of lam))
     ;; Parent region contains exactly one Gamma node.
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -578,7 +578,7 @@
     (for ([sub (in-list sub-regions)]
           [which (in-list '(then else))])
       (define ops
-        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+        (for/list ([kv (in-idmap (Region-node->value sub))])
           (define v (cdr kv))
           (cond [(Simple? v) (Simple-op v)] [else 'other])))
       (check-not-false (memq 'return ops)
@@ -624,7 +624,7 @@
     ;;   - the outer asymmetric early-exit Gamma (0 outputs)
     ;;   - the inner if/else diamond for y*2 vs y*3
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 2
@@ -632,7 +632,7 @@
     ;; Exactly one of the two Gammas has an exit-arm sub-region
     ;; hosting a 'return (the asymmetric early-exit Gamma).
     (define (sub-has-return? sub)
-      (for/or ([kv (in-ordered-map (Region-node->value sub))])
+      (for/or ([kv (in-idmap (Region-node->value sub))])
         (define v (cdr kv))
         (and (Simple? v) (eq? (Simple-op v) 'return))))
     (define (gamma-has-any-exit-arm? g)
@@ -697,7 +697,7 @@
     (define r (region-of lam))
     ;; Parent region holds exactly one outer Gamma.
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -714,7 +714,7 @@
     (for ([sub (in-list sub-regions)]
           [which (in-list '(then else))])
       (define inner-gammas
-        (for/list ([kv (in-ordered-map (Region-node->value sub))]
+        (for/list ([kv (in-idmap (Region-node->value sub))]
                    #:when (Gamma? (cdr kv)))
           (cdr kv)))
       (check-equal? (length inner-gammas) 1
@@ -722,7 +722,7 @@
       (define inner-sub-regions (Gamma-regions (car inner-gammas)))
       (define inner-return-count
         (for/sum ([ir (in-list inner-sub-regions)])
-          (for/sum ([kv (in-ordered-map (Region-node->value ir))])
+          (for/sum ([kv (in-idmap (Region-node->value ir))])
             (define v (cdr kv))
             (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
       (check-equal? inner-return-count 2
@@ -781,7 +781,7 @@
     ;; L_END.  The inner Gamma lives inside the outer-then sub-region,
     ;; not at the parent.
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -795,7 +795,7 @@
     (define sub-regions (Gamma-regions outer))
     (check-equal? (length sub-regions) 2)
     (define (region-inner-gammas sub)
-      (for/list ([kv (in-ordered-map (Region-node->value sub))]
+      (for/list ([kv (in-idmap (Region-node->value sub))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (define inner-counts (map (lambda (s) (length (region-inner-gammas s))) sub-regions))
@@ -810,7 +810,7 @@
     (check-equal? (length inner-subs) 2)
     (define inner-return-count
       (for/sum ([isub (in-list inner-subs)])
-        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+        (for/sum ([kv (in-idmap (Region-node->value isub))])
           (define v (cdr kv))
           (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
     (check-equal? inner-return-count 1
@@ -873,7 +873,7 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -884,7 +884,7 @@
     (define sub-regions (Gamma-regions outer))
     (check-equal? (length sub-regions) 2)
     (define (region-inner-gammas sub)
-      (for/list ([kv (in-ordered-map (Region-node->value sub))]
+      (for/list ([kv (in-idmap (Region-node->value sub))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (define inner-counts (map (lambda (s) (length (region-inner-gammas s))) sub-regions))
@@ -899,7 +899,7 @@
     (check-equal? (length inner-subs) 2)
     (define inner-return-count
       (for/sum ([isub (in-list inner-subs)])
-        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+        (for/sum ([kv (in-idmap (Region-node->value isub))])
           (define v (cdr kv))
           (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
     (check-equal? inner-return-count 1
@@ -910,13 +910,13 @@
     (define exit-sub
       (for/or ([isub (in-list inner-subs)])
         (define ops
-          (for/list ([kv (in-ordered-map (Region-node->value isub))])
+          (for/list ([kv (in-idmap (Region-node->value isub))])
             (define v (cdr kv))
             (cond [(Simple? v) (Simple-op v)] [else 'other])))
         (and (memq 'return ops) isub)))
     (check-not-false exit-sub)
     (define exit-ops
-      (for/list ([kv (in-ordered-map (Region-node->value exit-sub))])
+      (for/list ([kv (in-idmap (Region-node->value exit-sub))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'ISTORE exit-ops)
@@ -961,7 +961,7 @@
     (define r (region-of lam))
     ;; Parent region has exactly one Theta and a final return.
     (define thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length thetas) 1
@@ -973,7 +973,7 @@
     ;; sink in total.
     (define body (Theta-region (car thetas)))
     (define inner-gammas
-      (for/list ([kv (in-ordered-map (Region-node->value body))]
+      (for/list ([kv (in-idmap (Region-node->value body))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length inner-gammas) 1
@@ -981,7 +981,7 @@
     (define inner-subs (Gamma-regions (car inner-gammas)))
     (define inner-return-count
       (for/sum ([isub (in-list inner-subs)])
-        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+        (for/sum ([kv (in-idmap (Region-node->value isub))])
           (define v (cdr kv))
           (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
     (check-equal? inner-return-count 1
@@ -1031,14 +1031,14 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length thetas) 1
                   "parent region should contain exactly one Theta")
     (define body (Theta-region (car thetas)))
     (define inner-gammas
-      (for/list ([kv (in-ordered-map (Region-node->value body))]
+      (for/list ([kv (in-idmap (Region-node->value body))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length inner-gammas) 1
@@ -1046,7 +1046,7 @@
     (define inner-subs (Gamma-regions (car inner-gammas)))
     (define inner-return-count
       (for/sum ([isub (in-list inner-subs)])
-        (for/sum ([kv (in-ordered-map (Region-node->value isub))])
+        (for/sum ([kv (in-idmap (Region-node->value isub))])
           (define v (cdr kv))
           (if (and (Simple? v) (eq? (Simple-op v) 'return)) 1 0))))
     (check-equal? inner-return-count 1
@@ -1056,13 +1056,13 @@
     (define exit-sub
       (for/or ([isub (in-list inner-subs)])
         (define ops
-          (for/list ([kv (in-ordered-map (Region-node->value isub))])
+          (for/list ([kv (in-idmap (Region-node->value isub))])
             (define v (cdr kv))
             (cond [(Simple? v) (Simple-op v)] [else 'other])))
         (and (memq 'return ops) isub)))
     (check-not-false exit-sub)
     (define exit-ops
-      (for/list ([kv (in-ordered-map (Region-node->value exit-sub))])
+      (for/list ([kv (in-idmap (Region-node->value exit-sub))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     (check-not-false (memq 'ISTORE exit-ops)
@@ -1110,7 +1110,7 @@
     (define r (region-of lam))
     ;; Parent region: exactly one Theta + final return.
     (define thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length thetas) 1
@@ -1119,7 +1119,7 @@
     ;; Theta body: exactly one inner Gamma (the latch merge).
     (define body (Theta-region (car thetas)))
     (define merges
-      (for/list ([kv (in-ordered-map (Region-node->value body))]
+      (for/list ([kv (in-idmap (Region-node->value body))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length merges) 1
@@ -1132,7 +1132,7 @@
     ;; region-result (but no 'return sink).
     (for ([sub (in-list merge-subs)] [i (in-naturals)])
       (define ops
-        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+        (for/list ([kv (in-idmap (Region-node->value sub))])
           (define v (cdr kv))
           (cond [(Simple? v) (Simple-op v)] [else 'other])))
       (check-not-false (memq 'ISUB ops)
@@ -1179,13 +1179,13 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define thetas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Theta? (cdr kv)))
         (cdr kv)))
     (check-equal? (length thetas) 1)
     (define body (Theta-region (car thetas)))
     (define merges
-      (for/list ([kv (in-ordered-map (Region-node->value body))]
+      (for/list ([kv (in-idmap (Region-node->value body))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length merges) 1)
@@ -1195,7 +1195,7 @@
     ;; latch); the other is the pure-continue arm.
     (define istores-per-sub
       (for/list ([sub (in-list merge-subs)])
-        (for/sum ([kv (in-ordered-map (Region-node->value sub))])
+        (for/sum ([kv (in-idmap (Region-node->value sub))])
           (define v (cdr kv))
           (if (and (Simple? v) (eq? (Simple-op v) 'ISTORE)) 1 0))))
     (check-equal? (sort istores-per-sub <) '(0 1)
@@ -1232,7 +1232,7 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -1243,7 +1243,7 @@
     ;; Every sub-region must install a 'return sink.
     (for ([sub (in-list subs)] [i (in-naturals)])
       (define ops
-        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+        (for/list ([kv (in-idmap (Region-node->value sub))])
           (define v (cdr kv))
           (cond [(Simple? v) (Simple-op v)] [else 'other])))
       (check-not-false (memq 'return ops)
@@ -1252,7 +1252,7 @@
     ;; 1, 2.
     (define keys
       (for/list ([sub (in-list subs)])
-        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+        (hash-ref (Region-info sub) 'java/switch-case-key #f)))
     (check-equal? keys '(default 0 1 2)
                   "sub-regions should carry default / case-key info in order"))
 
@@ -1284,7 +1284,7 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1)
@@ -1292,7 +1292,7 @@
     (check-equal? (length subs) 3)
     (define keys
       (for/list ([sub (in-list subs)])
-        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+        (hash-ref (Region-info sub) 'java/switch-case-key #f)))
     (check-equal? keys '(default 10 20)))
 
   ;; ----- convergent TABLESWITCH -----
@@ -1334,7 +1334,7 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -1347,7 +1347,7 @@
     ;; Gamma.
     (for ([sub (in-list subs)] [i (in-naturals)])
       (define ops
-        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+        (for/list ([kv (in-idmap (Region-node->value sub))])
           (define v (cdr kv))
           (cond [(Simple? v) (Simple-op v)] [else 'other])))
       (check-false (memq 'return ops)
@@ -1357,7 +1357,7 @@
     ;; Keys in expected order (default, 0, 1, 2).
     (define keys
       (for/list ([sub (in-list subs)])
-        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+        (hash-ref (Region-info sub) 'java/switch-case-key #f)))
     (check-equal? keys '(default 0 1 2)))
 
   ;; ----- convergent LOOKUPSWITCH -----
@@ -1394,7 +1394,7 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1)
@@ -1404,14 +1404,14 @@
     (check-not-false (memq 'return (node-ops r)))
     (for ([sub (in-list subs)] [i (in-naturals)])
       (define ops
-        (for/list ([kv (in-ordered-map (Region-node->value sub))])
+        (for/list ([kv (in-idmap (Region-node->value sub))])
           (define v (cdr kv))
           (cond [(Simple? v) (Simple-op v)] [else 'other])))
       (check-false (memq 'return ops)
                    (format "convergent arm ~a should not host 'return" i)))
     (define keys
       (for/list ([sub (in-list subs)])
-        (ordered-map-ref (Region-info sub) 'java/switch-case-key #f)))
+        (hash-ref (Region-info sub) 'java/switch-case-key #f)))
     (check-equal? keys '(default 10 20)))
 
   ;; ============================================================
@@ -1427,19 +1427,19 @@
     (cfg->rvsdg (normalize-try-exits (jvm-cfg->ssa (jvm-method->cfg m)))))
 
   (define (all-kappas r)
-    (for/list ([kv (in-ordered-map (Region-node->value r))]
+    (for/list ([kv (in-idmap (Region-node->value r))]
                #:when (Kappa? (cdr kv)))
       (cdr kv)))
 
   ;; Find (node-id . Kappa) pairs — needed when output count is
   ;; required, since output counts live in Region-node->output.
   (define (all-kappa-nodes r)
-    (for/list ([kv (in-ordered-map (Region-node->value r))]
+    (for/list ([kv (in-idmap (Region-node->value r))]
                #:when (Kappa? (cdr kv)))
       kv))
 
   (define (node-output-count r nid)
-    (define entry (ordered-map-ref (Region-node->output r) nid #f))
+    (define entry (idmap-ref (Region-node->output r) nid #f))
     (if entry (cdr entry) 0))
 
   ;; ----- A. Terminal single-handler Kappa -----
@@ -1556,7 +1556,7 @@
     (define k (first (all-kappas r)))
     (define handler-region (cdr (pvector-ref (Kappa-handlers k) 0)))
     (define handler-ops
-      (for/list ([kv (in-ordered-map (Region-node->value handler-region))])
+      (for/list ([kv (in-idmap (Region-node->value handler-region))])
         (define v (cdr kv))
         (cond [(Simple? v) (Simple-op v)] [else 'other])))
     ;; Handler must not carry a fossil 'java/exception-ref Simple node.
@@ -1813,7 +1813,7 @@
     ;; the two y assignments.
     (define try-region (Kappa-try-region k))
     (define inner-gammas
-      (for/list ([kv (in-ordered-map (Region-node->value try-region))]
+      (for/list ([kv (in-idmap (Region-node->value try-region))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length inner-gammas) 1
@@ -1859,7 +1859,7 @@
     (define r (region-of lam))
     ;; Exactly one Gamma in the parent region (the empty-arm diamond).
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -1872,7 +1872,7 @@
     (check-not-false (memq 'return (node-ops r))
                      "outer region must contain the return sink")
     (for ([sr (in-list (Gamma-regions g))])
-      (for ([kv (in-ordered-map (Region-node->value sr))])
+      (for ([kv (in-idmap (Region-node->value sr))])
         (define v (cdr kv))
         (check-false (and (Simple? v) (equal? (Simple-op v) 'return))
                      "sub-region must NOT contain a return sink"))))
@@ -1913,21 +1913,21 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     ;; Parent region contains a Theta.
-    (check-true (for/or ([kv (in-ordered-map (Region-node->value r))])
+    (check-true (for/or ([kv (in-idmap (Region-node->value r))])
                   (Theta? (cdr kv))))
     ;; Theta body must contain an IINC Simple node.
     (define theta
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (and (Theta? (cdr kv)) (cdr kv))))
     (define theta-sub (Theta-region theta))
     (define has-iinc?
-      (for/or ([kv (in-ordered-map (Region-node->value theta-sub))])
+      (for/or ([kv (in-idmap (Region-node->value theta-sub))])
         (define v (cdr kv))
         (and (Simple? v) (equal? (Simple-op v) 'IINC))))
     (check-true has-iinc? "Theta body must contain the IINC node")
     ;; And a const feeding IINC (the literal delta).
     (define has-const?
-      (for/or ([kv (in-ordered-map (Region-node->value theta-sub))])
+      (for/or ([kv (in-idmap (Region-node->value theta-sub))])
         (define v (cdr kv))
         (and (Simple? v)
              (let ([op (Simple-op v)])
@@ -1980,7 +1980,7 @@
     (check-pred Lambda? lam)
     (define r (region-of lam))
     (define gammas
-      (for/list ([kv (in-ordered-map (Region-node->value r))]
+      (for/list ([kv (in-idmap (Region-node->value r))]
                  #:when (Gamma? (cdr kv)))
         (cdr kv)))
     (check-equal? (length gammas) 1
@@ -1990,10 +1990,10 @@
     (check-equal? (length (Gamma-regions g)) 3)
     ;; Gamma should carry at least one output (the phi for y).
     (define gnid
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (and (Gamma? (cdr kv)) (car kv))))
     (define gout-count
-      (cdr (ordered-map-ref (Region-node->output r) gnid)))
+      (cdr (idmap-ref (Region-node->output r) gnid)))
     (check-true (> gout-count 0)
                 "Gamma must carry >=1 output for the y phi")
     ;; Return lives in the outer region after the Gamma.
@@ -2002,7 +2002,7 @@
     ;; The default sub-region must report 'default as its switch-case-key.
     (define keys
       (for/list ([sr (in-list (Gamma-regions g))])
-        (ordered-map-ref (Region-info sr) 'java/switch-case-key #f)))
+        (hash-ref (Region-info sr) 'java/switch-case-key #f)))
     (check-equal? keys '(default 10 20)
                   "sub-regions should carry default / case-key info in order"))
 

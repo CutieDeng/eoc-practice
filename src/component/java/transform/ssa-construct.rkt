@@ -47,7 +47,7 @@
          "../../../component/cfg/utils/graph-ops.rkt"
          "../../../component/cfg/analysis/dominance.rkt"
          "../../../driver/dominance/dominance.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (provide jvm-cfg->ssa)
 
@@ -96,11 +96,11 @@
   (values
     (lambda (bid)
       (define base (base-preds bid))
-      (define extra (ordered-map-ref exn-preds bid (pvector-empty)))
+      (define extra (idmap-ref exn-preds bid (pvector-empty)))
       (pvector-extend-unique base extra))
     (lambda (bid)
       (define base (base-succs bid))
-      (define extra (ordered-map-ref exn-succs bid (pvector-empty)))
+      (define extra (idmap-ref exn-succs bid (pvector-empty)))
       (pvector-extend-unique base extra))))
 
 ;; Build (values exn-preds exn-succs) maps from the exception table.
@@ -111,23 +111,23 @@
   (define table (cfg-get-info cfg 'java/exception-table #f))
   (define block-order (cfg-get-info cfg 'java/block-order #f))
   (cond
-    [(or (not table) (not block-order)) (values (ordered-map-empty block-id-compare)
-                                                (ordered-map-empty block-id-compare))]
+    [(or (not table) (not block-order)) (values idmap-empty
+                                                idmap-empty)]
     [else
      (define n (pvector-length block-order))
      ;; ordinal lookup: BlockId -> int
      (define ord-of
-       (for/fold ([m (ordered-map-empty block-id-compare)])
+       (for/fold ([m idmap-empty])
                  ([i (in-range n)])
-         (ordered-map-set m (pvector-ref block-order i) i)))
-     (for/fold ([preds (ordered-map-empty block-id-compare)]
-                [succs (ordered-map-empty block-id-compare)])
+         (idmap-set m (pvector-ref block-order i) i)))
+     (for/fold ([preds idmap-empty]
+                [succs idmap-empty])
                ([entry (in-pvector table)])
        (define start-bid (car entry))
        (define end-bid (cadr entry))
        (define handler-bid (caddr entry))
-       (define start-ord (ordered-map-ref ord-of start-bid #f))
-       (define end-ord (if end-bid (ordered-map-ref ord-of end-bid #f) n))
+       (define start-ord (idmap-ref ord-of start-bid #f))
+       (define end-ord (if end-bid (idmap-ref ord-of end-bid #f) n))
        (cond
          [(or (not start-ord) (not end-ord)) (values preds succs)]
          [else
@@ -135,18 +135,18 @@
                     ([i (in-range start-ord end-ord)])
             (define b (pvector-ref block-order i))
             ;; handler gets b as extra predecessor
-            (define cur-p (ordered-map-ref pm handler-bid (pvector-empty)))
+            (define cur-p (idmap-ref pm handler-bid (pvector-empty)))
             (define pm*
               (if (pvector-member? cur-p b)
                   pm
-                  (ordered-map-set pm handler-bid
+                  (idmap-set pm handler-bid
                                    (pvector-cons-right cur-p b))))
             ;; b gets handler as extra successor
-            (define cur-s (ordered-map-ref sm b (pvector-empty)))
+            (define cur-s (idmap-ref sm b (pvector-empty)))
             (define sm*
               (if (pvector-member? cur-s handler-bid)
                   sm
-                  (ordered-map-set sm b
+                  (idmap-set sm b
                                    (pvector-cons-right cur-s handler-bid))))
             (values pm* sm*))]))]))
 
@@ -158,28 +158,28 @@
 ;; Driver-level dominance invoked with augmented predecessors.
 (define (augmented-idom cfg entry-bid aug-preds)
   (define block-ids (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
-  (compute-idom block-id-compare block-ids entry-bid aug-preds))
+  (compute-idom block-ids entry-bid aug-preds))
 
 (define (augmented-dom-tree cfg idom)
   (define block-ids (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
-  (compute-dominator-tree block-id-compare block-ids idom))
+  (compute-dominator-tree block-ids idom))
 
 (define (augmented-dominance-frontier cfg entry-bid aug-preds)
   (define block-ids (for/pvector ([bid (in-cfg-block-ids cfg)]) bid))
-  (compute-dominance-frontier block-id-compare block-ids entry-bid aug-preds))
+  (compute-dominance-frontier block-ids entry-bid aug-preds))
 
 ;; ============================================================
 ;; Phase 1: Phi placement
 ;; ============================================================
 
-;; Returns ordered-map VarId -> pvector[BlockId] of def-sites
+;; Returns idmap VarId -> pvector[BlockId] of def-sites
 ;; (one entry per slot 0..local-count-1).
 (define (collect-def-sites cfg local-count entry-bid)
   ;; Start with entry-bid as a phantom def for every local slot.
   (define init
-    (for/fold ([m (ordered-map-empty var-id-compare)])
+    (for/fold ([m idmap-empty])
               ([i (in-range local-count)])
-      (ordered-map-set m (VarId i) (pvector entry-bid))))
+      (idmap-set m (VarId i) (pvector entry-bid))))
 
   ;; Add real defs from every VfInsn output whose VarId is in 0..local-count-1.
   (for/fold ([m init])
@@ -194,11 +194,11 @@
                    ([out (in-pvector (VfInsn-outputs insn))]
                     #:when (and (VarId? out)
                                 (< (VarId-id out) local-count)))
-           (define cur (ordered-map-ref m out (pvector-empty)))
+           (define cur (idmap-ref m out (pvector-empty)))
            ;; Avoid duplicate bids (two stores in same block).
            (if (pvector-member? cur bid)
                m
-               (ordered-map-set m out (pvector-cons-right cur bid)))))])))
+               (idmap-set m out (pvector-cons-right cur bid)))))])))
 
 (define (pvector-member? pv x)
   (for/or ([v (in-pvector pv)]) (equal? v x)))
@@ -211,16 +211,16 @@
   (define dom-frontier (augmented-dominance-frontier cfg entry-bid aug-preds))
 
   ;; For each variable v, compute phi-placement blocks (IDF of defs).
-  ;; Returns ordered-map BlockId -> pvector[VarId] of phis to insert.
-  (define phi-plan (ordered-map-empty block-id-compare))
+  ;; Returns idmap BlockId -> pvector[VarId] of phis to insert.
+  (define phi-plan idmap-empty)
 
   (define phi-plan*
     (for/fold ([plan phi-plan])
-              ([kv (in-ordered-map def-sites)])
+              ([kv (in-idmap def-sites)])
       (define v (car kv))
       (define bids (cdr kv))
-      (define has-phi (ordered-map-empty block-id-compare))
-      (define in-work (ordered-map-empty block-id-compare))
+      (define has-phi idmap-empty)
+      (define in-work idmap-empty)
 
       ;; Worklist seeded with def-sites.
       (define-values (_hp _iw plan*)
@@ -235,7 +235,7 @@
   ;; block in addition to any ordinary in-edge predecessors.
   (define preds-of aug-preds)
   (for/fold ([c cfg])
-            ([kv (in-ordered-map phi-plan*)])
+            ([kv (in-idmap phi-plan*)])
     (define bid (car kv))
     (define vars (cdr kv))
     (define blk (cfg-get-block c bid))
@@ -253,13 +253,13 @@
          (pvector-append (CfgBlock-phis blk) new-phis))
        (cfg-set-block c (struct-copy CfgBlock blk [phis merged-phis]))])))
 
-;; Worklist iteration: classical Cytron IDF using an ordered-map
+;; Worklist iteration: classical Cytron IDF using an idmap
 ;; as a set-for-seen-blocks, and a pvector worklist.
 (define (iterate-phi-placement v def-bids dom-frontier has-phi in-work plan)
   ;; Mark all def-bids as "has been in worklist".
   (define in-work*
     (for/fold ([m in-work]) ([b (in-pvector def-bids)])
-      (ordered-map-set m b #t)))
+      (idmap-set m b #t)))
 
   (let loop ([work def-bids] [has-phi has-phi] [in-work in-work*] [plan plan])
     (cond
@@ -269,19 +269,19 @@
        (define n (pvector-length work))
        (define b (pvector-ref work (- n 1)))
        (define work* (pvector-take-left work (- n 1)))
-       (define df (ordered-map-ref dom-frontier b (ordered-map-empty block-id-compare)))
+       (define df (hash-ref dom-frontier b (pvector-empty)))
        (define-values (work** has-phi* plan*)
          (for/fold ([w work*] [hp has-phi] [pl plan])
-                   ([d (in-ordered-map-keys df)])
+                   ([d (in-pvector df)])
            (cond
-             [(ordered-map-ref hp d #f) (values w hp pl)]
+             [(idmap-ref hp d #f) (values w hp pl)]
              [else
-              (define hp* (ordered-map-set hp d #t))
-              (define cur-vars (ordered-map-ref pl d (pvector-empty)))
-              (define pl* (ordered-map-set pl d (pvector-cons-right cur-vars v)))
+              (define hp* (idmap-set hp d #t))
+              (define cur-vars (idmap-ref pl d (pvector-empty)))
+              (define pl* (idmap-set pl d (pvector-cons-right cur-vars v)))
               (define w*
                 (cond
-                  [(ordered-map-ref in-work d #f) w]
+                  [(idmap-ref in-work d #f) w]
                   [else (pvector-cons-right w d)]))
               (values w* hp* pl*)])))
        (loop work** has-phi* in-work plan*)])))
@@ -304,29 +304,29 @@
 ;;   - pop everything pushed in this block
 ;; ============================================================
 
-;; Per-var rename state: ordered-map VarId -> pvector[VarId]
+;; Per-var rename state: idmap VarId -> pvector[VarId]
 ;; (stack; top is last element)
 (define (stk-peek stacks v)
-  (define s (ordered-map-ref stacks v (pvector-empty)))
+  (define s (idmap-ref stacks v (pvector-empty)))
   (cond
     [(= (pvector-length s) 0) #f]
     [else (pvector-ref s (sub1 (pvector-length s)))]))
 
 (define (stk-push stacks v name)
-  (define s (ordered-map-ref stacks v (pvector-empty)))
-  (ordered-map-set stacks v (pvector-cons-right s name)))
+  (define s (idmap-ref stacks v (pvector-empty)))
+  (idmap-set stacks v (pvector-cons-right s name)))
 
 (define (stk-pop stacks v)
-  (define s (ordered-map-ref stacks v (pvector-empty)))
+  (define s (idmap-ref stacks v (pvector-empty)))
   (cond
     [(= (pvector-length s) 0) stacks]
-    [else (ordered-map-set stacks v (pvector-take-left s (sub1 (pvector-length s))))]))
+    [else (idmap-set stacks v (pvector-take-left s (sub1 (pvector-length s))))]))
 
 (define (rename-vars cfg local-count entry-bid idom dom-tree aug-succs)
   ;; Seed stacks with fresh names for each local slot at entry.
   (define vc0 (Cfg-var-cnt cfg))
   (define-values (init-stacks param-names vc1)
-    (for/fold ([stk (ordered-map-empty var-id-compare)]
+    (for/fold ([stk idmap-empty]
                [names (pvector-empty)]
                [vc vc0])
               ([i (in-range local-count)])
@@ -422,7 +422,7 @@
       (fill-phi-sources c succ bid stk2 local-count)))
 
   ;; --- Step 5: recurse into dominator-tree children. ---
-  (define children (ordered-map-ref dom-tree bid (pvector-empty)))
+  (define children (hash-ref dom-tree bid (pvector-empty)))
   (define-values (cfg3 _stk-child vc3)
     (for/fold ([c cfg2] [s stk2] [v vc2]) ([ch (in-pvector children)])
       (rename-block c ch s v preds-of dom-tree local-count aug-succs)))

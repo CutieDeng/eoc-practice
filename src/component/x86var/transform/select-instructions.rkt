@@ -26,27 +26,27 @@
 ;; State Management
 ;; ============================================================
 
-;; Ensure info is an ordered-map
-(define (ensure-ordered-map-info info)
+;; Ensure info is an immutable hash
+(define (ensure-info-hash info)
   (cond
-    [(ordered-map? info) info]
-    [(null? info) (ordered-map-empty symbol-compare)]
+    [(hash? info) info]
+    [(null? info) (hash)]
     [(list? info)
-     (for/fold ([m (ordered-map-empty symbol-compare)])
+     (for/fold ([m (hash)])
                ([pair info])
-       (ordered-map-set m (car pair) (cdr pair)))]
-    [else (error 'ensure-ordered-map-info "invalid info: ~a" info)]))
+       (hash-set m (car pair) (cdr pair)))]
+    [else (error 'ensure-info-hash "invalid info: ~a" info)]))
 
 ;; Get counter from info (default 0)
 (define (info-counter info)
-  (if (ordered-map? info)
-      (ordered-map-ref info 'counter 0)
+  (if (hash? info)
+      (hash-ref info 'counter 0)
       0))
 
 ;; Set counter in info
 (define (info-set-counter info counter)
-  (define om (ensure-ordered-map-info info))
-  (ordered-map-set om 'counter counter))
+  (define om (ensure-info-hash info))
+  (hash-set om 'counter counter))
 
 ;; Generate fresh variable ID
 (define (fresh-var-id counter)

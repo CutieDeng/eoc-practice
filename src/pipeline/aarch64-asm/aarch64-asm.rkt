@@ -5,11 +5,11 @@
 ;; ============================================================================
 ;;
 ;; This module provides the complete API for the AArch64 SVE assembly pipeline.
-;; The pipeline is self-contained and based on cutie-ftree persistent data
+;; The pipeline is self-contained and based on standard-library persistent data
 ;; structures for all internal representations.
 ;;
 ;; Architecture:
-;; - IR layer: types, cfg, sve-insns (based on cutie-ftree/graph)
+;; - IR layer: types, cfg, sve-insns (based on racket/graph)
 ;; - Frontend: parser, type-check
 ;; - Analysis: liveness (via driver framework)
 ;; - Backend: regalloc, emit
@@ -19,7 +19,7 @@
 
 (require
  ;; Utilities
- cutie-ftree/bitset
+ "../../kernel/data/data.rkt"
 
  ;; IR - Core types and structures
  "../../component/aarch64/ir/types.rkt"
@@ -285,7 +285,7 @@
       ;; Allocation failed - spills needed
       (error 'compile-function
              "register allocation failed: ~a spills needed"
-             (bitset-count (AllocationResult-spilled allocation)))))
+             (intbits-count (AllocationResult-spilled allocation)))))
 
 (provide compile-function)
 

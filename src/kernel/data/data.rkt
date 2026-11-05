@@ -4,108 +4,124 @@
 ;; Kernel Data Structures
 ;; ============================================================
 ;;
-;; Re-exports immutable data structures from cutie-ftree:
-;;   - pvector: persistent vector (finger tree based)
-;;   - ordered-map: ordered dictionary
-;;   - bitset: bit set operations
-;;   - graph: immutable graph
-;;   - comparator: comparison functions
+;; Single entry point for the persistent data structures used by
+;; every IR.  All of them come from the Racket standard library:
 ;;
-;; These are the foundational data structures for all IRs.
-;; Plus a small set of pvector utilities built on the primitives.
-;; ============================================================
-
-(require cutie-ftree/cutie-ftree)
-
-;; Re-export everything from cutie-ftree.
-(provide (all-from-out cutie-ftree/cutie-ftree))
-
-;; ============================================================
-;; pvector utilities
-;; ============================================================
+;;   - racket/pvector : persistent vector (pvector, in-pvector,
+;;                      for/pvector, pvector-map, pvector-filter, ...)
+;;   - racket/graph   : persistent multigraph with opaque vertex-id /
+;;                      edge-id (only the Graph-type API is re-exported;
+;;                      the generic traversal algorithms are NOT, to
+;;                      avoid name clashes with driver/graph/*)
+;;   - racket/intmap  : persistent integer-keyed map (typed-id keyed
+;;                      IR tables store the id value as key)
+;;   - racket/intbits : integer bit sets (replaces the former bitset:
+;;                      intbits-empty / intbits-set / intbits-ref / ...)
+;;   - racket/compare : three-way comparators integer-compare,
+;;                      symbol-compare, string-compare ('< '= '>)
 ;;
-;; These wrappers compose cutie-ftree primitives so the rest of
-;; the compiler can stay pvector-native without re-deriving
-;; list-style helpers at each callsite.
+;; Convention: every pvector operation takes the pvector FIRST
+;; (standard-library order), e.g. (pvector-map pv f), (pvector-filter
+;; pv pred), (pvector-fold-left pv init (lambda (acc x) ...)).
+;; The helpers defined below follow the same order.
 ;;
-;; Names follow racket/list conventions where they match, so
-;; semantics are predictable:
-;;   - filter/filter-not: predicate, keep-if/keep-unless
-;;   - findf:             predicate, first match or #f
-;;   - index-of:          value,     first index or #f
-;;   - index-where:       predicate, first index or #f
-;;   - remove-all:        value,     drops EVERY occurrence
-;;                        (distinct from racket's `remove`, which
-;;                         drops only the first — "all" is the
-;;                         common case in compiler passes)
-;;   - andmap/ormap:      short-circuiting predicate folds
+;; idmap.rkt adds idmap-*: tables keyed by typed ids (BlockId, VarId,
+;; NodeId, ...) stored as an intmap of the id payload.
 ;; ============================================================
 
-;; Reverse a pvector.
-;; Uses in-pvector-reverse for efficient iteration.
-(define (pvector-reverse pv)
-  (for/pvector ([x (in-pvector-reverse pv)])
-    x))
+(require racket/pvector
+         racket/intbits
+         racket/intmap
+         (only-in racket/compare
+                  integer-compare
+                  symbol-compare
+                  string-compare)
+         (only-in racket/graph
+                  graph
+                  graph?
+                  graph-empty
+                  graph-add-vertex
+                  graph-add-edge
+                  graph-add-edge-pair
+                  graph-remove-vertex
+                  graph-remove-vertex*
+                  graph-remove-edge
+                  graph-remove-edge*
+                  graph-remove-edge-between
+                  graph-remove-edges-between
+                  graph-vertex?
+                  graph-edge?
+                  graph-vertex-count
+                  graph-edge-count
+                  graph-vertices-set
+                  graph-edges-set
+                  graph-edges-between
+                  graph-has-edge-to?
+                  graph-edge-src
+                  graph-edge-dst
+                  graph-edge-endpoints
+                  graph-edge-pair
+                  graph-in-edges
+                  graph-out-edges
+                  graph-in-degree
+                  graph-out-degree
+                  graph-successors
+                  graph-predecessors
+                  in-graph-vertices
+                  in-graph-edges
+                  in-graph-out-edges
+                  in-graph-successors
+                  in-graph-predecessors
+                  vertex-id?
+                  vertex-id-val
+                  vertex-id-compare
+                  edge-id?
+                  edge-id-val
+                  edge-id-compare)
+         "idmap.rkt")
 
-(define (pvector-map f pv)
-  (for/pvector ([x (in-pvector pv)])
-    (f x)))
+(provide (all-from-out racket/pvector)
+         (all-from-out racket/intbits)
+         (all-from-out racket/intmap)
+         (all-from-out racket/compare)
+         (all-from-out racket/graph)
+         (all-from-out "idmap.rkt"))
 
-(define (pvector-filter pred pv)
-  (for/pvector ([x (in-pvector pv)] #:when (pred x))
-    x))
+;; ============================================================
+;; pvector helpers with no standard-library equivalent
+;; ============================================================
 
-(define (pvector-filter-not pred pv)
-  (for/pvector ([x (in-pvector pv)] #:unless (pred x))
-    x))
+;; Keep elements for which pred is false.
+(define (pvector-filter-not pv pred)
+  (pvector-filter pv (lambda (x) (not (pred x)))))
 
-(define (pvector-foldl f init pv)
-  (for/fold ([acc init]) ([x (in-pvector pv)])
-    (f acc x)))
-
-(define (pvector-foldr f init pv)
-  (for/fold ([acc init]) ([x (in-pvector-reverse pv)])
-    (f acc x)))
-
-(define (pvector-findf pred pv)
+;; First element satisfying pred, or #f.
+(define (pvector-findf pv pred)
   (for/first ([x (in-pvector pv)] #:when (pred x))
     x))
 
-(define (pvector-index-where pred pv)
+;; Index of the first element satisfying pred, or #f.
+(define (pvector-index-where pv pred)
   (for/first ([x (in-pvector pv)] [i (in-naturals)] #:when (pred x))
     i))
 
+;; Index of the first element equal to v, or #f.
 (define (pvector-index-of pv v [is-equal? equal?])
   (for/first ([x (in-pvector pv)] [i (in-naturals)] #:when (is-equal? x v))
     i))
 
-;; Drop every element equal to v.
+;; Drop EVERY element equal to v (unlike racket's `remove`).
 (define (pvector-remove-all pv v [is-equal? equal?])
-  (for/pvector ([x (in-pvector pv)] #:unless (is-equal? x v))
-    x))
+  (pvector-filter pv (lambda (x) (not (is-equal? x v)))))
 
-(define (pvector-andmap pred pv)
-  (for/and ([x (in-pvector pv)])
-    (pred x)))
-
-(define (pvector-ormap pred pv)
-  (for/or ([x (in-pvector pv)])
-    (pred x)))
-
+;; Concatenate any number of pvectors (pvector-append is binary).
 (define (pvector-concat* . pvs)
   (for/fold ([acc (pvector-empty)]) ([pv (in-list pvs)])
     (pvector-append acc pv)))
 
-(provide pvector-reverse
-         pvector-map
-         pvector-filter
-         pvector-filter-not
-         pvector-foldl
-         pvector-foldr
+(provide pvector-filter-not
          pvector-findf
-         pvector-index-of
          pvector-index-where
+         pvector-index-of
          pvector-remove-all
-         pvector-andmap
-         pvector-ormap
          pvector-concat*)

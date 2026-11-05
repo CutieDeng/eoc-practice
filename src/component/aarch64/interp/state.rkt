@@ -2,16 +2,13 @@
 
 ;; AArch64 Interpreter Machine State
 ;;
-;; Uses persistent data structures from cutie-ftree:
+;; Uses persistent data structures from the Racket standard library:
 ;; - pvector for register files
-;; - ordered-map for memory
+;; - intmap for memory
 ;; - bitset for flags
 
 (require racket/match
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
-         cutie-ftree/bitset
-         cutie-ftree/comparator
+         "../../../kernel/data/data.rkt"
          "../ir/types.rkt"
          "../ir/config.rkt")
 
@@ -95,8 +92,8 @@
 ;; - p-regs: pvector of 16 predicates (p0-p15, each is an integer bitset)
 ;; - sp: stack pointer (64-bit)
 ;; - pc: program counter
-;; - flags: NZCV flags (bitset)
-;; - memory: ordered-map of address -> byte
+;; - flags: NZCV flags intbits-empty
+;; - memory: intmap of address -> byte
 ;; - vl: vector length in bytes for SVE
 ;; - config: AsmConfig
 (struct MachineState (x-regs v-regs z-regs p-regs sp pc flags memory vl config)
@@ -123,8 +120,8 @@
    (make-pvector-n 16 0)           ; p0-p15 = 0
    #xFFFF0000                      ; Initial SP
    0                               ; PC = 0
-   (bitset)                        ; Flags clear
-   (ordered-map-empty integer-compare) ; Empty memory
+   intbits-empty                        ; Flags clear
+   intmap-empty ; Empty memory
    16                              ; Default VL = 128 bits = 16 bytes
    #f))                            ; No config
 
@@ -137,8 +134,8 @@
    (make-pvector-n 16 0)
    #xFFFF0000
    0
-   (bitset)
-   (ordered-map-empty integer-compare)
+   intbits-empty
+   intmap-empty
    vl-bytes
    config))
 
@@ -275,25 +272,25 @@
 
 (define (state-set-flag state flag)
   (struct-copy MachineState state
-               [flags (bitset-add (MachineState-flags state) flag)]))
+               [flags (intbits-set (MachineState-flags state) flag)]))
 
 (define (state-clear-flag state flag)
   (struct-copy MachineState state
-               [flags (bitset-remove (MachineState-flags state) flag)]))
+               [flags (intbits-clear (MachineState-flags state) flag)]))
 
 (define (state-test-flag state flag)
-  (bitset-member? (MachineState-flags state) flag))
+  (intbits-ref (MachineState-flags state) flag))
 
 ;; ============================================================================
 ;; Memory Access
 ;; ============================================================================
 
 (define (state-read-byte state addr)
-  (ordered-map-ref (MachineState-memory state) addr 0))
+  (intmap-ref (MachineState-memory state) addr 0))
 
 (define (state-write-byte state addr val)
   (struct-copy MachineState state
-               [memory (ordered-map-set (MachineState-memory state)
+               [memory (intmap-set (MachineState-memory state)
                                         addr
                                         (bitwise-and val #xFF))]))
 

@@ -8,6 +8,11 @@
 ;; These do NOT depend on any specific graph representation.
 ;; All graph operations are passed as parameters.
 ;;
+;; Nodes are compared with equal?; visited sets are immutable
+;; hashes.  Every result that is a sequence is a pvector whose
+;; order is determined solely by the traversal and the order in
+;; which get-successors returns successors.
+;;
 ;; ============================================================
 
 (require "../../kernel/data/data.rkt")
@@ -36,19 +41,18 @@
 
 ;; DFS preorder traversal
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node - starting node
 ;; Returns: pvector of nodes in preorder
 ;;
-(define (dfs-preorder node-compare get-successors start)
-  (define visited (ordered-map-empty node-compare))
+(define (dfs-preorder get-successors start)
+  (define visited (hash))
 
   (define (visit node result)
     (cond
-      [(ordered-map-has-key? visited node) result]
+      [(hash-has-key? visited node) result]
       [else
-       (set! visited (ordered-map-set visited node #t))
+       (set! visited (hash-set visited node #t))
        (define result* (pvector-cons-right result node))
        (for/fold ([r result*])
                  ([succ (in-pvector (get-successors node))])
@@ -58,19 +62,18 @@
 
 ;; DFS postorder traversal
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node - starting node
 ;; Returns: pvector of nodes in postorder
 ;;
-(define (dfs-postorder node-compare get-successors start)
-  (define visited (ordered-map-empty node-compare))
+(define (dfs-postorder get-successors start)
+  (define visited (hash))
 
   (define (visit node result)
     (cond
-      [(ordered-map-has-key? visited node) result]
+      [(hash-has-key? visited node) result]
       [else
-       (set! visited (ordered-map-set visited node #t))
+       (set! visited (hash-set visited node #t))
        (define result*
          (for/fold ([r result])
                    ([succ (in-pvector (get-successors node))])
@@ -81,13 +84,12 @@
 
 ;; DFS reverse postorder (topological order for DAGs)
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node - starting node
 ;; Returns: pvector of nodes in reverse postorder
 ;;
-(define (dfs-reverse-postorder node-compare get-successors start)
-  (pvector-reverse (dfs-postorder node-compare get-successors start)))
+(define (dfs-reverse-postorder get-successors start)
+  (pvector-reverse (dfs-postorder get-successors start)))
 
 ;; ============================================================
 ;; BFS Traversal
@@ -95,16 +97,13 @@
 
 ;; Breadth-first search
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node - starting node
 ;; Returns: pvector of nodes in BFS order
 ;;
-(define (bfs node-compare get-successors start)
-  (define visited (ordered-map-empty node-compare))
-  (set! visited (ordered-map-set visited start #t))
-
+(define (bfs get-successors start)
   (let loop ([queue (pvector-cons-right (pvector-empty) start)]
+             [visited (hash start #t)]
              [result (pvector-empty)])
     (cond
       [(pvector-empty? queue) result]
@@ -116,13 +115,12 @@
          (for/fold ([q queue*] [v visited])
                    ([succ (in-pvector (get-successors node))])
            (cond
-             [(ordered-map-has-key? v succ) (values q v)]
+             [(hash-has-key? v succ) (values q v)]
              [else
               (values (pvector-cons-right q succ)
-                      (ordered-map-set v succ #t))])))
+                      (hash-set v succ #t))])))
 
-       (set! visited new-visited)
-       (loop new-queue result*)])))
+       (loop new-queue new-visited result*)])))
 
 ;; ============================================================
 ;; Topology Sort
@@ -130,26 +128,23 @@
 
 ;; Topological sort using Kahn's algorithm
 ;; Parameters:
-;;   node-compare     : comparator for nodes
 ;;   nodes            : pvector of nodes - all nodes
 ;;   get-successors   : node -> pvector of nodes
 ;;   get-predecessors : node -> pvector of nodes
 ;; Returns: pvector of nodes in topological order, or #f if cycle exists
 ;;
-(define (topology-sort node-compare nodes get-successors get-predecessors)
-  (define in-degree (ordered-map-empty node-compare))
-
+(define (topology-sort nodes get-successors get-predecessors)
   ;; Calculate in-degrees
-  (for ([node (in-pvector nodes)])
-    (set! in-degree
-          (ordered-map-set in-degree node
-                           (pvector-length (get-predecessors node)))))
+  (define in-degree
+    (for/fold ([m (hash)])
+              ([node (in-pvector nodes)])
+      (hash-set m node (pvector-length (get-predecessors node)))))
 
   ;; Find nodes with zero in-degree
   (define initial-queue
     (for/fold ([q (pvector-empty)])
               ([node (in-pvector nodes)])
-      (if (= (ordered-map-ref in-degree node 0) 0)
+      (if (= (hash-ref in-degree node 0) 0)
           (pvector-cons-right q node)
           q)))
 
@@ -169,8 +164,8 @@
        (define-values (new-queue new-degrees)
          (for/fold ([q queue*] [d degrees])
                    ([succ (in-pvector (get-successors node))])
-           (define new-deg (- (ordered-map-ref d succ 0) 1))
-           (define d* (ordered-map-set d succ new-deg))
+           (define new-deg (- (hash-ref d succ 0) 1))
+           (define d* (hash-set d succ new-deg))
            (if (= new-deg 0)
                (values (pvector-cons-right q succ) d*)
                (values q d*))))
@@ -183,27 +178,25 @@
 
 ;; Find all nodes reachable from start
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node - starting node
-;; Returns: pvector of nodes reachable from start
+;; Returns: pvector of nodes reachable from start (preorder)
 ;;
-(define (reachable-from node-compare get-successors start)
-  (dfs-preorder node-compare get-successors start))
+(define (reachable-from get-successors start)
+  (dfs-preorder get-successors start))
 
 ;; Find all nodes reachable from any node in starts
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   starts         : pvector of nodes - starting nodes
-;; Returns: ordered-map (as set) of reachable nodes
+;; Returns: immutable hash (as set, node -> #t) of reachable nodes
 ;;
-(define (reachable-from-set node-compare get-successors starts)
-  (define visited (ordered-map-empty node-compare))
+(define (reachable-from-set get-successors starts)
+  (define visited (hash))
 
   (define (visit node)
-    (unless (ordered-map-has-key? visited node)
-      (set! visited (ordered-map-set visited node #t))
+    (unless (hash-has-key? visited node)
+      (set! visited (hash-set visited node #t))
       (for ([succ (in-pvector (get-successors node))])
         (visit succ))))
 
@@ -218,22 +211,21 @@
 
 ;; Find a path from start to end (if exists)
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node
 ;;   end            : node
 ;; Returns: pvector of nodes (path), or #f if no path
 ;;
-(define (find-path node-compare get-successors start end)
-  (define visited (ordered-map-empty node-compare))
+(define (find-path get-successors start end)
+  (define visited (hash))
 
   (define (search node path)
     (cond
       [(equal? node end)
        (pvector-cons-right path node)]
-      [(ordered-map-has-key? visited node) #f]
+      [(hash-has-key? visited node) #f]
       [else
-       (set! visited (ordered-map-set visited node #t))
+       (set! visited (hash-set visited node #t))
        (define path* (pvector-cons-right path node))
        (for/or ([succ (in-pvector (get-successors node))])
          (search succ path*))]))
@@ -242,23 +234,22 @@
 
 ;; Find all paths from start to end
 ;; Parameters:
-;;   node-compare   : comparator for nodes
 ;;   get-successors : node -> pvector of nodes
 ;;   start          : node
 ;;   end            : node
 ;; Returns: pvector of pvector (all paths)
 ;;
-(define (all-paths node-compare get-successors start end)
+(define (all-paths get-successors start end)
   (define (search node path visited)
     (cond
       [(equal? node end)
        (pvector-cons-right (pvector-empty) (pvector-cons-right path node))]
-      [(ordered-map-has-key? visited node) (pvector-empty)]
+      [(hash-has-key? visited node) (pvector-empty)]
       [else
-       (define new-visited (ordered-map-set visited node #t))
+       (define new-visited (hash-set visited node #t))
        (define path* (pvector-cons-right path node))
        (for/fold ([paths (pvector-empty)])
                  ([succ (in-pvector (get-successors node))])
          (pvector-append paths (search succ path* new-visited)))]))
 
-  (search start (pvector-empty) (ordered-map-empty node-compare)))
+  (search start (pvector-empty) (hash)))

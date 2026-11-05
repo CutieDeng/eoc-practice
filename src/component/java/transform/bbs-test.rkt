@@ -27,13 +27,13 @@
   (define (succs-of mbb lbl)
     (for/list ([s (in-pvector
                     (JvmBB-successors
-                      (ordered-map-ref (JvmMethodBBs-blocks mbb) lbl #f)))])
+                      (hash-ref (JvmMethodBBs-blocks mbb) lbl #f)))])
       s))
 
   (define (insn-ops mbb lbl)
     (for/list ([i (in-pvector
                     (JvmBB-insns
-                      (ordered-map-ref (JvmMethodBBs-blocks mbb) lbl #f)))])
+                      (hash-ref (JvmMethodBBs-blocks mbb) lbl #f)))])
       (JvmInsn-opcode i)))
 
   ;; --------------------------------------------------------

@@ -1,12 +1,6 @@
 #lang racket/base
 
-;; ============================================================
-;; Component: RVSDG Utilities Module
-;; ============================================================
-;;
-;; Re-exports all RVSDG utility functions.
-;; ============================================================
+;; Component: RVSDG utilities (region builder).
 
-(require "graph-ops.rkt")
-
-(provide (all-from-out "graph-ops.rkt"))
+(require "builder.rkt")
+(provide (all-from-out "builder.rkt"))

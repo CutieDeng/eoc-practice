@@ -6,8 +6,7 @@
 ;; and SVE2, organized by category.
 
 (require racket/match
-         cutie-ftree/ordered-map
-         cutie-ftree/comparator)
+         "../../../kernel/data/data.rkt")
 
 (provide
  ;; Instruction categories (lists of symbols)
@@ -346,7 +345,7 @@
 ;; - sve2-only?: #t if this is SVE2 only
 (struct InsnFormat (mnemonic format operands sve2-only?) #:prefab)
 
-;; Instruction formats table (using ordered-map for efficient lookup)
+;; Instruction formats table (hasheq keyed by mnemonic symbol)
 (define sve-insn-formats
   (make-hasheq
    ;; Arithmetic

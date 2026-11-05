@@ -1,27 +1,18 @@
 # Troubleshooting
 
-Last Updated: 2026-04-19
+Last Updated: 2026-11-05
 
-适用范围: 新架构（`src/`）与根目录旧流水线。
+适用范围: `src/` 与 `test/`。
 
-## 1. `make test` / `racket run-tests.rkt` 失败
-
-### 现象
-
-```text
-cannot open module file
-module path: cutie-ftree
-path: .../vendor/cutie-ftree.rkt/main.rkt
-```
+## 1. `collection not found` / `cannot open module file racket/pvector`
 
 ### 原因
 
-根目录旧链路包含 `(require cutie-ftree)`，但当前 vendor 结构下没有 `main.rkt` collection 入口文件。
+Racket 版本过旧。项目依赖标准库里的 `racket/pvector`、`racket/intmap`、`racket/intbits`、`racket/graph`、`racket/compare`，没有第三方包。
 
 ### 处理
 
-1. 新开发优先使用 `src/` 下 `raco test` 流程。
-2. 若必须跑旧链路：统一 `cutie-ftree` require 方式，或补齐 collection 入口。
+升级到 Racket 9.3.13+。
 
 ## 2. Java 管线测试找不到 `ClassTransform.dat`
 
@@ -43,19 +34,15 @@ racket src/frontend/java/java-tools/build.rkt --compile
 racket src/frontend/java/java-tools/build.rkt --analyze com/cutiedeng/ClassTransform --output test/integration/ClassTransform.dat
 ```
 
-## 3. `raco test` 命令通过但 `make test` 失败
+## 3. `raco test src test` 报 scribble 缺失
 
 ### 原因
 
-两套链路并存：
-- `src/` 新架构测试使用模块级 `rackunit`。
-- 根目录 `make test` 走旧课程链路，依赖条件不同。
+`raco test` 扫描目录时会把 `src/component/aarch64/doc/aarch64-sve-asm.scrbl` 当作测试模块，而本机可能没装 `scribble-lib`。
 
 ### 处理
 
-以你改动所在链路为准：
-- 改 `src/*` -> 以 `raco test src/...` 为主验证。
-- 改根目录旧链路 -> 必须修通 `make test`。
+用 `make test`（显式文件列表），不要对目录整体 `raco test`。
 
 ## 4. Java 工具执行失败（`javac` / `java` / `curl`）
 
@@ -121,5 +108,5 @@ raco test src/pipeline/java/pipeline-test.rkt
 
 ## 8. 相关阅读
 
-- [quickstart.md](/Users/cutiedeng/Y2026/M03/D28/compiler.rkt/doc/quickstart.md)
-- [testing.md](/Users/cutiedeng/Y2026/M03/D28/compiler.rkt/doc/testing.md)
+- [quickstart.md](quickstart.md)
+- [testing.md](testing.md)

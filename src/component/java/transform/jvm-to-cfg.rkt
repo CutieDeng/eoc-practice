@@ -35,11 +35,10 @@
 
 (require (only-in racket/set set set-member? set-add)
          (only-in racket/match match-define)
-         (only-in cutie-ftree/graph graph-empty graph-add-vertex graph-add-edge)
          "bbs.rkt"
          "../../../kernel/ir/jvm/types.rkt"
          "../../../kernel/ir/cfg/types.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (provide jvm-method->cfg
          parse-method-descriptor)
@@ -93,13 +92,12 @@
     (for/fold ([s (set)]) ([e (in-pvector exceptions)])
       (set-add s (JvmExceptionEntry-handler e))))
 
-  ;; Step 1: allocate a vertex-id per BB
-  (define-values (graph0 label->bid)
-    (for/fold ([g graph-empty]
-               [m (ordered-map-empty string-compare)])
-              ([lbl (in-pvector (JvmMethodBBs-order mbb))])
-      (define-values (g* vid) (graph-add-vertex g))
-      (values g* (ordered-map-set m lbl vid))))
+  ;; Step 1: allocate a BlockId per BB (ids follow BB order)
+  (define label->bid
+    (for/fold ([m (hash)])
+              ([lbl (in-pvector (JvmMethodBBs-order mbb))]
+               [i (in-naturals)])
+      (hash-set m lbl (BlockId i))))
 
   ;; Label -> order-index map, so covering-ranges can be expressed in
   ;; block ordinals rather than label strings.  End-of-method is
@@ -107,10 +105,10 @@
   (define block-order (JvmMethodBBs-order mbb))
   (define n-blocks (pvector-length block-order))
   (define label->order
-    (for/fold ([m (ordered-map-empty string-compare)])
+    (for/fold ([m (hash)])
               ([lbl (in-pvector block-order)]
                [i (in-naturals)])
-      (ordered-map-set m lbl i)))
+      (hash-set m lbl i)))
 
   ;; Resolve each JvmExceptionEntry to BlockId-based ranges.  Entries
   ;; whose start or handler label cannot be mapped to a BB are
@@ -123,17 +121,17 @@
       (define handler-lbl (JvmExceptionEntry-handler e))
       (define catch-type (JvmExceptionEntry-catch-type e))
       (define start-bid
-        (or (ordered-map-ref label->bid start-lbl #f)
+        (or (hash-ref label->bid start-lbl #f)
             (error 'jvm-method->cfg
                    "exception table start-label ~s has no BB" start-lbl)))
       (define handler-bid
-        (or (ordered-map-ref label->bid handler-lbl #f)
+        (or (hash-ref label->bid handler-lbl #f)
             (error 'jvm-method->cfg
                    "exception table handler-label ~s has no BB" handler-lbl)))
       ;; end-label is exclusive; it may or may not correspond to a BB.
       ;; When it does, store that BlockId; when it doesn't (e.g. range
       ;; ends at method-end), store #f.
-      (define end-bid (ordered-map-ref label->bid end-lbl #f))
+      (define end-bid (hash-ref label->bid end-lbl #f))
       (list start-bid end-bid handler-bid catch-type)))
 
   ;; For each entry, derive a half-open [start-order, end-order)
@@ -141,10 +139,10 @@
   (define entry-windows
     (for/pvector ([rec (in-pvector exception-table-bids)]
                   [e (in-pvector exceptions)])
-      (define start-ord (ordered-map-ref label->order
+      (define start-ord (hash-ref label->order
                                          (JvmExceptionEntry-start e) #f))
       (define end-ord
-        (or (ordered-map-ref label->order (JvmExceptionEntry-end e) #f)
+        (or (hash-ref label->order (JvmExceptionEntry-end e) #f)
             n-blocks))
       (list start-ord end-ord (caddr rec) (cadddr rec))))
 
@@ -156,11 +154,11 @@
   ;; Step 3: translate each BB, annotating its info with the list of
   ;; covering handlers in declaration order.
   (define-values (blocks-map vc-final)
-    (for/fold ([bm (ordered-map-empty block-id-compare)] [vc vc0])
+    (for/fold ([bm idmap-empty] [vc vc0])
               ([lbl (in-pvector block-order)]
                [i (in-naturals)])
-      (define jvmbb (ordered-map-ref (JvmMethodBBs-blocks mbb) lbl #f))
-      (define bid (ordered-map-ref label->bid lbl #f))
+      (define jvmbb (hash-ref (JvmMethodBBs-blocks mbb) lbl #f))
+      (define bid (hash-ref label->bid lbl #f))
       (define entry-h (if (set-member? handler-labels lbl) 1 0))
       (define covering
         (for/pvector ([w (in-pvector entry-windows)]
@@ -173,25 +171,12 @@
           [(= 0 (pvector-length covering)) cfg-block]
           [else
            (struct-copy CfgBlock cfg-block
-             [info (ordered-map-set (CfgBlock-info cfg-block)
+             [info (hash-set (CfgBlock-info cfg-block)
                                     'java/covering-handlers covering)])]))
-      (values (ordered-map-set bm bid cfg-block*) vc*)))
-
-  ;; Step 4: wire edges
-  (define graph-final
-    (for/fold ([g graph0]) ([lbl (in-pvector block-order)])
-      (define jvmbb (ordered-map-ref (JvmMethodBBs-blocks mbb) lbl #f))
-      (define src (ordered-map-ref label->bid lbl #f))
-      (for/fold ([g g]) ([s (in-pvector (JvmBB-successors jvmbb))])
-        (define dst (ordered-map-ref label->bid s #f))
-        (cond
-          [dst
-           (define-values (g* _) (graph-add-edge g src dst))
-           g*]
-          [else g]))))
+      (values (idmap-set bm bid cfg-block*) vc*)))
 
   (define entry-bid
-    (ordered-map-ref label->bid (JvmMethodBBs-entry mbb) #f))
+    (hash-ref label->bid (JvmMethodBBs-entry mbb) #f))
 
   (define-values (param-n _has-ret?)
     (parse-method-descriptor (JvmMethod-descriptor method)))
@@ -204,26 +189,26 @@
   ;; the mapping once here rather than re-walking labels.
   (define block-order-bids
     (for/pvector ([lbl (in-pvector block-order)])
-      (ordered-map-ref label->bid lbl #f)))
+      (hash-ref label->bid lbl #f)))
   (define info0
-    (let* ([m (ordered-map-empty symbol-compare)]
-           [m (ordered-map-set m 'java/param-count param-n)]
-           [m (ordered-map-set m 'java/max-local local-count)]
-           [m (ordered-map-set m 'java/block-order block-order-bids)]
+    (let* ([m (hash)]
+           [m (hash-set m 'java/param-count param-n)]
+           [m (hash-set m 'java/max-local local-count)]
+           [m (hash-set m 'java/block-order block-order-bids)]
            ;; Record the original block count so later passes
            ;; (normalize-try-exits, compute-kappa-window-bids) can
            ;; resolve end-bid=#f (method-end) try windows.
-           [m (ordered-map-set m 'java/original-block-count
+           [m (hash-set m 'java/original-block-count
                                (pvector-length block-order-bids))])
       (cond
         [(> (pvector-length exception-table-bids) 0)
-         (ordered-map-set m 'java/exception-table exception-table-bids)]
+         (hash-set m 'java/exception-table exception-table-bids)]
         [else m])))
 
-  (Cfg graph-final
-       blocks-map
+  (Cfg blocks-map
        entry-bid
        #f
+       n-blocks
        vc-final
        0
        info0))
@@ -309,7 +294,7 @@
 
   (define all-insns (pvector-append vf-pv vf-extra-pv))
 
-  (values (CfgBlock bid (pvector-empty) all-insns term (ordered-map-empty symbol-compare))
+  (values (CfgBlock bid (pvector-empty) all-insns term (hash))
           vc3))
 
 (define (alloc-stack h vc)
@@ -358,7 +343,7 @@
     [(= (pvector-length succs) 0) (Term:unreachable)]
     [else
      (define lbl (pvector-ref succs 0))
-     (Term:jump (ordered-map-ref label->bid lbl #f))]))
+     (Term:jump (hash-ref label->bid lbl #f))]))
 
 ;; ============================================================
 ;; Instruction translation
@@ -630,7 +615,7 @@
   (define args (JvmInsn-operands insn))
   (define succs (JvmBB-successors jvmbb))
 
-  (define (bid-of lbl) (ordered-map-ref label->bid lbl #f))
+  (define (bid-of lbl) (hash-ref label->bid lbl #f))
 
   (case op
     ;; Unconditional jump: pvector[0] is the only successor.

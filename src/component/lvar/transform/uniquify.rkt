@@ -25,42 +25,42 @@
 ;; State Management
 ;; ============================================================
 
-;; Ensure info is an ordered-map
-(define (ensure-ordered-map-info info)
+;; Ensure info is an immutable hash
+(define (ensure-info-hash info)
   (cond
-    [(ordered-map? info) info]
-    [(null? info) (ordered-map-empty symbol-compare)]
+    [(hash? info) info]
+    [(null? info) (hash)]
     [(list? info)
-     ;; Convert association list to ordered-map
-     (for/fold ([m (ordered-map-empty symbol-compare)])
+     ;; Convert association list to hash
+     (for/fold ([m (hash)])
                ([pair info])
-       (ordered-map-set m (car pair) (cdr pair)))]
-    [else (error 'ensure-ordered-map-info "invalid info: ~a" info)]))
+       (hash-set m (car pair) (cdr pair)))]
+    [else (error 'ensure-info-hash "invalid info: ~a" info)]))
 
 ;; Get counter from info (default 0)
 (define (info-counter info)
-  (if (ordered-map? info)
-      (ordered-map-ref info 'counter 0)
+  (if (hash? info)
+      (hash-ref info 'counter 0)
       0))
 
 ;; Set counter in info
 (define (info-set-counter info counter)
-  (define om (ensure-ordered-map-info info))
-  (ordered-map-set om 'counter counter))
+  (define om (ensure-info-hash info))
+  (hash-set om 'counter counter))
 
 ;; Generate fresh variable ID, returns (values new-var new-counter)
 (define (fresh-var counter)
   (values (Var counter) (add1 counter)))
 
-;; Environment: ordered-map from original name to Var
+;; Environment: hash from original name to Var
 (define (empty-env)
-  (ordered-map-empty symbol-compare))
+  (hash))
 
 (define (extend-env env name var)
-  (ordered-map-set env name var))
+  (hash-set env name var))
 
 (define (lookup-env env name)
-  (define result (ordered-map-ref env name #f))
+  (define result (hash-ref env name #f))
   (unless result
     (error 'uniquify "unbound variable: ~a" name))
   result)

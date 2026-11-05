@@ -1,8 +1,8 @@
 # Testing Guide
 
-Last Updated: 2026-04-19
+Last Updated: 2026-11-05
 
-适用范围: 新架构（`src/`）为主，附带旧流水线测试说明。
+适用范围: `src/` 与 `test/`。
 
 ## 1. 测试目标
 
@@ -23,9 +23,8 @@ Last Updated: 2026-04-19
 3. 管线级测试
 - 目标: 验证端到端入口（如 `pipeline/java/pipeline-test.rkt`）。
 
-4. 旧流水线测试（历史链路）
-- 目标: 验证根目录课程模板链路。
-- 入口: `make test` 或 `racket run-tests.rkt`。
+4. 全量
+- 入口: `make test`（= `scripts/run-tests.sh`：全部 `*-test.rkt` + `src/kernel/data/idmap.rkt` + `test/integration/aarch64/basic.rkt`）。
 
 ## 3. 常用命令
 
@@ -111,18 +110,13 @@ Validation:
 
 ## 6. 失败排查
 
-### 场景 1: 旧流水线 `make test` 失败
+### 场景 1: 标准库模块缺失
 
 典型报错：
-- `cannot open module file ... cutie-ftree ... main.rkt`
-
-说明：
-- 这是根目录旧链路依赖与 vendor collection 入口不一致问题。
-- 不影响 `src/` 下多数 `raco test`。
+- `collection not found` 或 `cannot open module file racket/pvector`
 
 处理：
-- 优先跑 `src/` 测试作为主验证。
-- 如需修复旧链路，统一 `cutie-ftree` require 方式或补入口文件。
+- 升级 Racket 到 9.3.13+。项目没有第三方包依赖。
 
 ### 场景 2: Java 测试缺少夹具 `.dat`
 
@@ -157,5 +151,5 @@ racket src/frontend/java/java-tools/build.rkt --analyze com/cutiedeng/ClassTrans
 
 ## 8. 相关阅读
 
-- [quickstart.md](/Users/cutiedeng/Y2026/M03/D28/compiler.rkt/doc/quickstart.md)
-- [architecture.md](/Users/cutiedeng/Y2026/M03/D28/compiler.rkt/doc/architecture.md)
+- [quickstart.md](quickstart.md)
+- [architecture.md](architecture.md)

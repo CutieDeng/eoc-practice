@@ -7,8 +7,7 @@
 
 (require racket/class
          racket/match
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
+         "../../../kernel/data/data.rkt"
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../ir/config.rkt"

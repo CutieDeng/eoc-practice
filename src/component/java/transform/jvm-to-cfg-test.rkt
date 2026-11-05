@@ -6,12 +6,12 @@
 
 (require rackunit
          racket/runtime-path
-         (only-in cutie-ftree/graph graph-vertex-count graph-edge-count)
          "jvm-to-cfg.rkt"
+         "../../cfg/utils/graph-ops.rkt"
          "../../../frontend/java/reader.rkt"
          "../../../kernel/ir/jvm/types.rkt"
          "../../../kernel/ir/cfg/types.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (define-runtime-path fixture-class-transform
   "../../../../test/integration/ClassTransform.dat")
@@ -45,7 +45,7 @@
                                (mk-insn 'RETURN))))
     (define cfg (jvm-method->cfg m))
     (define entry (Cfg-entry cfg))
-    (define blk (ordered-map-ref (Cfg-blocks cfg) entry #f))
+    (define blk (idmap-ref (Cfg-blocks cfg) entry #f))
     (check-not-false blk)
     (check-equal? (pvector-length (CfgBlock-insns blk)) 0)
     (check-pred Term:ret? (CfgBlock-terminator blk))
@@ -58,7 +58,7 @@
                                (mk-insn 'IRETURN))
                          #:desc "()I"))
     (define cfg (jvm-method->cfg m))
-    (define blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define insns (CfgBlock-insns blk))
     ;; One VfInsn (ICONST_1) and a Term:ret
     (check-equal? (pvector-length insns) 1)
@@ -80,7 +80,7 @@
                       (mk-insn 'IRETURN))
                 #:desc "(II)I"))
     (define cfg (jvm-method->cfg m))
-    (define blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define insns (CfgBlock-insns blk))
     (check-equal? (pvector-length insns) 3)
     (check-equal? (VfInsn-op (pvector-ref insns 0)) 'ILOAD)
@@ -106,7 +106,7 @@
                       (mk-insn 'RETURN))
                 #:desc "()V"))
     (define cfg (jvm-method->cfg m))
-    (define blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define insns (CfgBlock-insns blk))
     (check-equal? (pvector-length insns) 1)
     (define iinc (pvector-ref insns 0))
@@ -131,9 +131,9 @@
                       (mk-insn 'RETURN))
                 #:desc "(I)V"))
     (define cfg (jvm-method->cfg m))
-    (check-equal? (graph-vertex-count (Cfg-graph cfg)) 3)
-    (check-equal? (graph-edge-count  (Cfg-graph cfg)) 2)
-    (define entry-blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (check-equal? (cfg-block-count cfg) 3)
+    (check-equal? (cfg-edge-count cfg) 2)
+    (define entry-blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define t (CfgBlock-terminator entry-blk))
     (check-pred Term:cond? t)
     ;; Entry block instructions: ILOAD + IFEQ (pre-lowered)
@@ -149,7 +149,7 @@
                       (mk-insn 'INVOKESTATIC "Owner" "f" "(I)V")
                       (mk-insn 'RETURN))))
     (define cfg (jvm-method->cfg m))
-    (define blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define call-i (pvector-ref (CfgBlock-insns blk) 1))
     (check-equal? (VfInsn-op call-i) 'INVOKESTATIC)
     (check-equal? (pvector-length (VfInsn-inputs call-i)) 1)
@@ -165,7 +165,7 @@
                       (mk-insn 'POP)
                       (mk-insn 'RETURN))))
     (define cfg (jvm-method->cfg m))
-    (define blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define call-i (pvector-ref (CfgBlock-insns blk) 2))
     (check-equal? (VfInsn-op call-i) 'INVOKEVIRTUAL)
     (check-equal? (pvector-length (VfInsn-inputs call-i)) 2)
@@ -180,11 +180,11 @@
     (check-not-false init-m)
     (define cfg (jvm-method->cfg init-m))
     ;; 2 blocks (L1023892928, L558638686)
-    (check-equal? (graph-vertex-count (Cfg-graph cfg)) 2)
+    (check-equal? (cfg-block-count cfg) 2)
     ;; one fallthrough edge between them
-    (check-equal? (graph-edge-count (Cfg-graph cfg)) 1)
+    (check-equal? (cfg-edge-count cfg) 1)
     ;; entry block: GETSTATIC + INVOKESTATIC
-    (define entry-blk (ordered-map-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
+    (define entry-blk (idmap-ref (Cfg-blocks cfg) (Cfg-entry cfg) #f))
     (define insns (CfgBlock-insns entry-blk))
     (check-equal? (pvector-length insns) 2)
     (check-equal? (VfInsn-op (pvector-ref insns 0)) 'GETSTATIC)
@@ -199,11 +199,11 @@
     (check-not-false test-m)
     (define cfg (jvm-method->cfg test-m))
     ;; 5 blocks
-    (check-equal? (graph-vertex-count (Cfg-graph cfg)) 5)
+    (check-equal? (cfg-block-count cfg) 5)
     ;; edges: L1452126962→L931919113, L931919113→L764977973 (GOTO),
     ;;        L1607521710→L381259350 (fall), L381259350→L764977973 (fall)
     ;; L764977973 is terminal.  Total 4 edges.
-    (check-equal? (graph-edge-count (Cfg-graph cfg)) 4))
+    (check-equal? (cfg-edge-count cfg) 4))
 
   ;; ----- synthetic try/catch: exception table preserved on Cfg.info -----
   (test-case "try/catch preserves exception-table in Cfg.info"
@@ -222,7 +222,7 @@
                  #:desc "(I)I"))
     (define cfg (jvm-method->cfg m))
     (define info (Cfg-info cfg))
-    (define table (ordered-map-ref info 'java/exception-table #f))
+    (define table (hash-ref info 'java/exception-table #f))
     (check-pred (lambda (x) (and x (> (pvector-length x) 0)))
                 table
                 "Cfg.info should carry 'java/exception-table")
@@ -249,9 +249,9 @@
                  #:desc "(I)I"))
     (define cfg (jvm-method->cfg m))
     (define entry (Cfg-entry cfg))
-    (define entry-blk (ordered-map-ref (Cfg-blocks cfg) entry #f))
+    (define entry-blk (idmap-ref (Cfg-blocks cfg) entry #f))
     (define covering
-      (ordered-map-ref (CfgBlock-info entry-blk) 'java/covering-handlers #f))
+      (hash-ref (CfgBlock-info entry-blk) 'java/covering-handlers #f))
     (check-pred (lambda (x) (and x (= 1 (pvector-length x))))
                 covering
                 "try block should carry one covering handler")
@@ -261,8 +261,8 @@
     (check-pred BlockId? (cdr pair) "covering pair's handler-bid")
     ;; Handler block itself is excluded from its own try range.
     (define handler-bid (cdr pair))
-    (define handler-blk (ordered-map-ref (Cfg-blocks cfg) handler-bid #f))
-    (check-equal? (ordered-map-ref (CfgBlock-info handler-blk)
+    (define handler-blk (idmap-ref (Cfg-blocks cfg) handler-bid #f))
+    (check-equal? (hash-ref (CfgBlock-info handler-blk)
                                    'java/covering-handlers #f)
                   #f
                   "handler block is not covered by its own try range"))
@@ -282,9 +282,9 @@
                  #:desc "(I)I"))
     (define cfg (jvm-method->cfg m))
     ;; Locate the handler block via the exception-table entry.
-    (define table (ordered-map-ref (Cfg-info cfg) 'java/exception-table #f))
+    (define table (hash-ref (Cfg-info cfg) 'java/exception-table #f))
     (define handler-bid (caddr (pvector-ref table 0)))
-    (define handler-blk (ordered-map-ref (Cfg-blocks cfg) handler-bid #f))
+    (define handler-blk (idmap-ref (Cfg-blocks cfg) handler-bid #f))
     (check-not-false handler-blk)
     (define insns (CfgBlock-insns handler-blk))
     (check-true (> (pvector-length insns) 0)
@@ -310,7 +310,7 @@
                        (mk-insn 'IRETURN))
                  #:desc "(I)I"))
     (define cfg (jvm-method->cfg m))
-    (for ([kv (in-ordered-map (Cfg-blocks cfg))])
+    (for ([kv (in-idmap (Cfg-blocks cfg))])
       (define insns (CfgBlock-insns (cdr kv)))
       (for ([insn (in-pvector insns)])
         (check-false (eq? (VfInsn-op insn) 'java/exception-ref)
@@ -331,7 +331,7 @@
                       (mk-insn 'RETURN))
                 #:desc "(I)V"))
     (define cfg (jvm-method->cfg m))
-    (define order (ordered-map-ref (Cfg-info cfg) 'java/block-order #f))
+    (define order (hash-ref (Cfg-info cfg) 'java/block-order #f))
     (check-not-false order "Cfg.info should carry 'java/block-order")
     (check-equal? (pvector-length order) 3)
     ;; Entry block must be the first element.
@@ -339,13 +339,13 @@
     ;; Every listed BlockId resolves in Cfg.blocks.
     (for ([bid (in-pvector order)])
       (check-pred BlockId? bid)
-      (check-not-false (ordered-map-ref (Cfg-blocks cfg) bid #f)
+      (check-not-false (idmap-ref (Cfg-blocks cfg) bid #f)
                        "block-order entry must exist in Cfg.blocks"))
     ;; No duplicates.
-    (define seen (for/fold ([s (ordered-map-empty block-id-compare)])
+    (define seen (for/fold ([s idmap-empty])
                            ([bid (in-pvector order)])
-                   (ordered-map-set s bid #t)))
-    (check-equal? (ordered-map-count seen) (pvector-length order)
+                   (idmap-set s bid #t)))
+    (check-equal? (idmap-count seen) (pvector-length order)
                   "block-order should list each BlockId exactly once"))
 
   (test-case "method without try/catch has no exception-table key"
@@ -355,10 +355,10 @@
                        (mk-insn 'IRETURN))
                  #:desc "(I)I"))
     (define cfg (jvm-method->cfg m))
-    (check-equal? (ordered-map-ref (Cfg-info cfg) 'java/exception-table #f)
+    (check-equal? (hash-ref (Cfg-info cfg) 'java/exception-table #f)
                   #f)
     ;; And no block carries covering-handlers.
-    (for ([kv (in-ordered-map (Cfg-blocks cfg))])
-      (check-equal? (ordered-map-ref (CfgBlock-info (cdr kv))
+    (for ([kv (in-idmap (Cfg-blocks cfg))])
+      (check-equal? (hash-ref (CfgBlock-info (cdr kv))
                                      'java/covering-handlers #f)
                     #f))))

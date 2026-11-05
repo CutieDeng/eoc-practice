@@ -28,10 +28,10 @@
 
 ;; State: (counter . blocks)
 ;; counter: integer for generating unique label IDs
-;; blocks: ordered-map from label (symbol) to CBlock
+;; blocks: hash from label (symbol) to CBlock
 
 (define (make-state counter)
-  (cons counter (ordered-map-empty symbol-compare)))
+  (cons counter (hash)))
 
 (define (state-counter st) (car st))
 (define (state-blocks st) (cdr st))
@@ -42,27 +42,27 @@
 (define (state-set-blocks st blocks)
   (cons (state-counter st) blocks))
 
-;; Ensure info is an ordered-map
-(define (ensure-ordered-map-info info)
+;; Ensure info is an immutable hash
+(define (ensure-info-hash info)
   (cond
-    [(ordered-map? info) info]
-    [(null? info) (ordered-map-empty symbol-compare)]
+    [(hash? info) info]
+    [(null? info) (hash)]
     [(list? info)
-     (for/fold ([m (ordered-map-empty symbol-compare)])
+     (for/fold ([m (hash)])
                ([pair info])
-       (ordered-map-set m (car pair) (cdr pair)))]
-    [else (error 'ensure-ordered-map-info "invalid info: ~a" info)]))
+       (hash-set m (car pair) (cdr pair)))]
+    [else (error 'ensure-info-hash "invalid info: ~a" info)]))
 
 ;; Get counter from info (default 0)
 (define (info-counter info)
-  (if (ordered-map? info)
-      (ordered-map-ref info 'counter 0)
+  (if (hash? info)
+      (hash-ref info 'counter 0)
       0))
 
 ;; Set counter in info
 (define (info-set-counter info counter)
-  (define om (ensure-ordered-map-info info))
-  (ordered-map-set om 'counter counter))
+  (define om (ensure-info-hash info))
+  (hash-set om 'counter counter))
 
 ;; Generate fresh label, returns (values label new-state)
 (define (fresh-label st base)
@@ -78,7 +78,7 @@
 ;; Add block to state, returns new-state
 (define (add-block st label tail)
   (state-set-blocks st
-    (ordered-map-set (state-blocks st) label (CBlock '() tail))))
+    (hash-set (state-blocks st) label (CBlock '() tail))))
 
 ;; ============================================================
 ;; Main Pass
@@ -91,10 +91,7 @@
      (define init-state (make-state counter))
      (define-values (start-tail final-state) (explicate-tail init-state body))
      (define final-state* (add-block final-state 'start start-tail))
-     ;; Convert ordered-map blocks to hash for compatibility with later passes
-     (define blocks-hash
-       (for/hash ([kv (in-ordered-map (state-blocks final-state*))])
-         (values (car kv) (cdr kv))))
+     (define blocks-hash (state-blocks final-state*))
      (CProgram (info-set-counter info (state-counter final-state*))
                blocks-hash)]))
 

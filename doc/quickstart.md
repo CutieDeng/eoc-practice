@@ -1,13 +1,12 @@
 # Quickstart
 
-Last Updated: 2026-04-19
+Last Updated: 2026-11-05
 
-适用范围: 新架构（`src/`）为主，附带旧流水线入口说明。
+适用范围: `src/`（根目录旧课程流水线已于 2026-11-05 删除）。
 
 ## 1. Prerequisites
 
-- Racket 8.x+
-- `gcc` 或 `clang`
+- Racket 9.3.13+（标准库需含 `racket/pvector`、`racket/intmap`、`racket/intbits`、`racket/graph`、`racket/compare`；无第三方包）
 - 可选: JDK（仅在需要重新生成 Java `.dat` 夹具时）
 
 快速检查：
@@ -15,7 +14,7 @@ Last Updated: 2026-04-19
 ```bash
 racket -v
 raco -v
-gcc --version
+racket -e '(require racket/pvector racket/intmap racket/graph) (displayln "ok")'
 ```
 
 ## 2. 最小可运行路径（推荐）
@@ -33,45 +32,20 @@ raco test src/driver/graph/graph-test.rkt
 - AArch64 IR 基本类型
 - 图算法驱动层
 
-## 3. 一次跑核心测试集
+## 3. 一次跑全部测试
 
 ```bash
-raco test \
-  src/component/java/transform/bbs-test.rkt \
-  src/component/java/transform/jvm-to-cfg-test.rkt \
-  src/component/java/transform/ssa-construct-test.rkt \
-  src/component/java/transform/cfg-to-rvsdg-test.rkt \
-  src/pipeline/java/pipeline-test.rkt \
-  src/driver/graph/graph-test.rkt
+make test            # = scripts/run-tests.sh
+make test-java
+make test-aarch64
+make test-driver
 ```
 
-## 4. 旧流水线入口（根目录）
+## 4. 常见故障与处理
 
-```bash
-make test
-# 或
-racket run-tests.rkt
-```
+### 故障 1: `collection not found` / `cannot open module file racket/pvector`
 
-说明：当前仓库状态下，这条链路默认不可直接通过（见下方故障 1）。
-
-## 5. 常见故障与处理
-
-### 故障 1: `make test` 报 `cannot open module file ... cutie-ftree ... main.rkt`
-
-现象示例：
-
-```text
-cannot open module file
-module path: cutie-ftree
-path: .../vendor/cutie-ftree.rkt/main.rkt
-```
-
-原因：旧代码里使用 `(require cutie-ftree)`，但当前 vendor 目录没有 `main.rkt` 集合入口。
-
-处理建议：
-- 优先使用 `src/` 下的 `raco test ...` 流程开展开发。
-- 若必须跑旧流水线，先统一 `cutie-ftree` 的 require 方式或补齐 collection 入口。
+原因：Racket 版本过旧，标准库没有 `racket/pvector` 等模块。升级到 9.3.13+。
 
 ### 故障 2: Java 管线测试找不到 `ClassTransform.dat`
 
@@ -89,12 +63,13 @@ racket src/frontend/java/java-tools/build.rkt --compile
 racket src/frontend/java/java-tools/build.rkt --analyze com/cutiedeng/ClassTransform --output test/integration/ClassTransform.dat
 ```
 
-## 6. 开发节奏建议
+## 5. 开发节奏建议
 
 - 改 `src/component/java/transform/*`：至少跑 Java transform + pipeline tests。
 - 改 `src/driver/*`：至少跑 `src/driver/graph/graph-test.rkt` 与相关组件测试。
 - 改 AArch64：至少跑 `src/component/aarch64/*-test.rkt`。
 
-## 7. 下一篇建议阅读
+## 6. 下一篇建议阅读
 
-- `doc/architecture.md`（待创建）：理解分层边界与模块放置规则。
+- [architecture.md](architecture.md)：分层边界与模块放置规则。
+- [roadmap.md](roadmap.md)：重构与开发规划。

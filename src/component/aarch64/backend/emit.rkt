@@ -15,8 +15,8 @@
          racket/port
          "../ir/types.rkt"
          "../ir/cfg.rkt"
-         cutie-ftree/pvector
-         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
+         "../../../kernel/data/data.rkt"
+         (only-in racket/graph vertex-id? vertex-id-val))
 
 (provide
  ;; Main entry points

@@ -11,7 +11,7 @@
 
 (require racket/set)
 (require "../../../kernel/ir/cfg/cfg.rkt")
-(require (except-in "../../../kernel/data/data.rkt" integer-compare))
+(require "../../../kernel/data/data.rkt")
 (require "../../../driver/dominance/dominance.rkt")
 (require "../../../driver/graph/graph.rkt")
 (require "../utils/graph-ops.rkt")
@@ -59,10 +59,10 @@
   (define get-preds (cfg-make-predecessors cfg))
 
   ;; Use driver algorithms
-  (define dom (compute-dominators block-id-compare block-ids entry get-preds))
-  (define idom (compute-idom block-id-compare block-ids entry get-preds))
-  (define dom-tree (compute-dominator-tree block-id-compare block-ids idom))
-  (define dom-frontier (compute-dominance-frontier block-id-compare
+  (define dom (compute-dominators block-ids entry get-preds))
+  (define idom (compute-idom block-ids entry get-preds))
+  (define dom-tree (compute-dominator-tree block-ids idom))
+  (define dom-frontier (compute-dominance-frontier
                                                    block-ids entry get-preds
                                                    #:idom idom))
 
@@ -95,27 +95,27 @@
   (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (compute-dominators block-id-compare block-ids entry get-preds))
+  (compute-dominators block-ids entry get-preds))
 
 ;; Compute immediate dominators for a CFG
 (define (cfg-compute-idom cfg)
   (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (compute-idom block-id-compare block-ids entry get-preds))
+  (compute-idom block-ids entry get-preds))
 
 ;; Compute dominator tree for a CFG
 (define (cfg-compute-dominator-tree cfg)
   (define block-ids (cfg-block-ids-pv cfg))
   (define idom (cfg-compute-idom cfg))
-  (compute-dominator-tree block-id-compare block-ids idom))
+  (compute-dominator-tree block-ids idom))
 
 ;; Compute dominance frontier for a CFG
 (define (cfg-compute-dominance-frontier cfg)
   (define block-ids (cfg-block-ids-pv cfg))
   (define entry (cfg-get-entry cfg))
   (define get-preds (cfg-make-predecessors cfg))
-  (compute-dominance-frontier block-id-compare block-ids entry get-preds))
+  (compute-dominance-frontier block-ids entry get-preds))
 
 ;; Compute post-immediate dominators for a CFG
 (define (cfg-compute-post-idom cfg)
@@ -123,4 +123,4 @@
   (define exit (cfg-get-exit cfg))
   (define get-succs (cfg-make-successors cfg))
   (when exit
-    (compute-post-idom block-id-compare block-ids exit get-succs)))
+    (compute-post-idom block-ids exit get-succs)))

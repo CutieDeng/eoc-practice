@@ -6,12 +6,16 @@
 ;;
 ;; Parameterized loop detection and analysis algorithms.
 ;; These do NOT depend on any specific graph representation.
-;; Uses pvector and ordered-map for all data structures.
+;;
+;; Data structures:
+;;   - sets of nodes (loop bodies, headers): immutable hash node -> #t
+;;     (prefab-serializable, unlike an opaque map)
+;;   - node -> X maps: immutable hash
+;;   - ordered collections: pvector, ordered by position in `nodes`
 ;;
 ;; ============================================================
 
 (require "../../kernel/data/data.rkt")
-(require "../graph/traversal.rkt")
 (require "../dominance/dominator.rkt")
 
 (provide
@@ -34,15 +38,13 @@
   get-innermost-loop)
 
 ;; ============================================================
-;; Set operations using ordered-map
+;; Set operations (immutable hash as set)
 ;; ============================================================
 
-(define (empty-set compare) (ordered-map-empty compare))
-(define (set-singleton compare x) (ordered-map-set (empty-set compare) x #t))
-(define (set-contains? s x) (ordered-map-has-key? s x))
-(define (set-add s x) (ordered-map-set s x #t))
-(define (set-count s) (length (ordered-map-keys s)))
-(define (set-elements s) (ordered-map-keys s))
+(define (set-singleton x) (hash x #t))
+(define (set-contains? s x) (hash-has-key? s x))
+(define (set-add s x) (hash-set s x #t))
+(define (set-count s) (hash-count s))
 
 ;; ============================================================
 ;; Loop Info Structure
@@ -50,7 +52,7 @@
 
 (struct LoopInfo
   (header      ; node - loop header
-   body        ; ordered-map (as set) - all nodes in loop
+   body        ; hash (as set) - all nodes in loop
    exits       ; pvector of nodes - exit nodes (have successors outside)
    back-edges  ; pvector of (cons node node) - (tail . header) pairs
    depth)      ; integer - nesting depth (0 = outermost)
@@ -72,23 +74,20 @@
 ;; Find all back edges in the graph
 ;; A back edge is an edge (n -> h) where h dominates n
 ;; Parameters:
-;;   node-compare     : comparator for nodes
 ;;   nodes            : pvector of nodes
 ;;   entry            : node
 ;;   get-successors   : node -> pvector of nodes
 ;;   get-predecessors : node -> pvector of nodes
 ;; Returns: pvector of (cons node node) - (tail . header) pairs
 ;;
-(define (find-back-edges node-compare nodes entry get-successors get-predecessors)
-  (define dom (compute-dominators node-compare nodes entry get-predecessors))
-
-  (for/fold ([result (pvector-empty)])
-            ([node (in-pvector nodes)])
-    (for/fold ([r result])
-              ([succ (in-pvector (get-successors node))])
-      (if (dominates? node-compare dom succ node)
-          (pvector-cons-right r (cons node succ))
-          r))))
+(define (find-back-edges nodes entry get-successors get-predecessors)
+  (define dom (compute-dominators nodes entry get-predecessors))
+  (for*/fold ([result (pvector-empty)])
+             ([node (in-pvector nodes)]
+              [succ (in-pvector (get-successors node))])
+    (if (dominates? dom succ node)
+        (pvector-cons-right result (cons node succ))
+        result)))
 
 ;; ============================================================
 ;; Natural Loop Detection
@@ -96,36 +95,34 @@
 
 ;; Find all natural loops
 ;; Parameters:
-;;   node-compare     : comparator for nodes
 ;;   nodes            : pvector of nodes
 ;;   entry            : node
 ;;   get-successors   : node -> pvector of nodes
 ;;   get-predecessors : node -> pvector of nodes
-;; Returns: pvector of LoopInfo
+;; Returns: pvector of LoopInfo, one per header, headers in `nodes` order
 ;;
-(define (find-natural-loops node-compare nodes entry get-successors get-predecessors)
+(define (find-natural-loops nodes entry get-successors get-predecessors)
   (define back-edges
-    (find-back-edges node-compare nodes entry get-successors get-predecessors))
+    (find-back-edges nodes entry get-successors get-predecessors))
 
   ;; Group back edges by header
   (define header->back-edges
-    (for/fold ([m (ordered-map-empty node-compare)])
+    (for/fold ([m (hash)])
               ([edge (in-pvector back-edges)])
       (define header (cdr edge))
-      (ordered-map-set m header
-        (pvector-cons-right (ordered-map-ref m header (pvector-empty)) edge))))
+      (hash-set m header
+                (pvector-cons-right (hash-ref m header (pvector-empty)) edge))))
 
-  ;; For each header, compute the loop body
+  ;; For each header (in `nodes` order), compute the loop body
   (for/fold ([result (pvector-empty)])
-            ([header (ordered-map-keys header->back-edges)])
-    (define edges (ordered-map-ref header->back-edges header (pvector-empty)))
+            ([header (in-pvector nodes)]
+             #:when (hash-has-key? header->back-edges header))
+    (define edges (hash-ref header->back-edges header))
     (define tails
       (for/pvector ([e (in-pvector edges)])
         (car e)))
 
     ;; Find all nodes in the loop using backward traversal
-    (define body-set (set-singleton node-compare header))
-
     (define (add-to-loop node current-body)
       (if (set-contains? current-body node)
           current-body
@@ -135,14 +132,15 @@
               (add-to-loop pred b)))))
 
     (define final-body
-      (for/fold ([body body-set])
+      (for/fold ([body (set-singleton header)])
                 ([tail (in-pvector tails)])
         (add-to-loop tail body)))
 
-    ;; Find exit nodes
+    ;; Find exit nodes (in `nodes` order)
     (define exits
       (for/fold ([ex (pvector-empty)])
-                ([node (set-elements final-body)])
+                ([node (in-pvector nodes)]
+                 #:when (set-contains? final-body node))
         (if (for/or ([succ (in-pvector (get-successors node))])
               (not (set-contains? final-body succ)))
             (pvector-cons-right ex node)
@@ -158,17 +156,16 @@
 
 ;; Find all loop headers
 ;; Parameters:
-;;   node-compare     : comparator for nodes
 ;;   nodes            : pvector of nodes
 ;;   entry            : node
 ;;   get-successors   : node -> pvector of nodes
 ;;   get-predecessors : node -> pvector of nodes
-;; Returns: ordered-map (as set)
+;; Returns: hash (as set)
 ;;
-(define (find-loop-headers node-compare nodes entry get-successors get-predecessors)
+(define (find-loop-headers nodes entry get-successors get-predecessors)
   (define back-edges
-    (find-back-edges node-compare nodes entry get-successors get-predecessors))
-  (for/fold ([s (empty-set node-compare)])
+    (find-back-edges nodes entry get-successors get-predecessors))
+  (for/fold ([s (hash)])
             ([edge (in-pvector back-edges)])
     (set-add s (cdr edge))))
 
@@ -178,34 +175,26 @@
 
 ;; Build loop nesting forest with proper depth
 ;; Parameters:
-;;   node-compare : comparator for nodes
-;;   loops        : pvector of LoopInfo - from find-natural-loops
+;;   loops : pvector of LoopInfo - from find-natural-loops
 ;; Returns: (values
-;;            updated-loops   : pvector of LoopInfo with correct depths
-;;            parent-map      : ordered-map loop-header -> parent-loop-header or #f
-;;            children-map    : ordered-map loop-header -> pvector of loop-header)
+;;            updated-loops : pvector of LoopInfo with correct depths
+;;            parent-map    : hash loop-header -> parent-loop-header or #f
+;;            children-map  : hash loop-header -> pvector of loop-header)
 ;;
-(define (build-loop-forest node-compare loops)
-  (define loop-by-header
-    (for/fold ([m (ordered-map-empty node-compare)])
-              ([loop (in-pvector loops)])
-      (ordered-map-set m (loop-info-header loop) loop)))
-
+(define (build-loop-forest loops)
   ;; Initialize children map
   (define initial-children-map
-    (for/fold ([m (ordered-map-empty node-compare)])
+    (for/fold ([m (hash)])
               ([loop (in-pvector loops)])
-      (ordered-map-set m (loop-info-header loop) (pvector-empty))))
+      (hash-set m (loop-info-header loop) (pvector-empty))))
 
   ;; Determine parent for each loop
   ;; Parent is the smallest loop that strictly contains this loop
   (define-values (parent-map children-map)
-    (for/fold ([parents (ordered-map-empty node-compare)]
+    (for/fold ([parents (hash)]
                [children initial-children-map])
               ([loop (in-pvector loops)])
       (define header (loop-info-header loop))
-      (define body (loop-info-body loop))
-
       ;; Find all loops that contain this loop's header (excluding self)
       (define candidates
         (for/fold ([cs (pvector-empty)])
@@ -214,7 +203,6 @@
                    (set-contains? (loop-info-body other) header))
               (pvector-cons-right cs other)
               cs)))
-
       (if (pvector-empty? candidates)
           (values parents children)
           ;; Find the smallest containing loop
@@ -228,15 +216,15 @@
                     (values best best-size))))
             (define parent-header (loop-info-header parent))
             (values
-              (ordered-map-set parents header parent-header)
-              (ordered-map-set children parent-header
-                (pvector-cons-right
-                  (ordered-map-ref children parent-header (pvector-empty))
-                  header)))))))
+              (hash-set parents header parent-header)
+              (hash-set children parent-header
+                        (pvector-cons-right
+                          (hash-ref children parent-header (pvector-empty))
+                          header)))))))
 
   ;; Compute depths
   (define (compute-depth header)
-    (define parent (ordered-map-ref parent-map header #f))
+    (define parent (hash-ref parent-map header #f))
     (if parent
         (+ 1 (compute-depth parent))
         0))

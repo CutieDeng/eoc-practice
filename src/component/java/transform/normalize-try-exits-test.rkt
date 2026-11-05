@@ -10,53 +10,41 @@
 
 (require rackunit
          racket/match
-         (only-in cutie-ftree/graph
-                  graph-empty graph-add-vertex graph-add-edge
-                  graph-vertex-count graph-edge-count)
          "normalize-try-exits.rkt"
+         "../../cfg/utils/graph-ops.rkt"
          "../../../kernel/ir/cfg/types.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (module+ test
   ;; ---------- Helpers ----------
-  ;; Grow a graph with N fresh vertices; returns (values g bids).
+  ;; N fresh BlockIds 0..n-1.  Edges are implied by terminators.
   (define (alloc-bids n)
-    (let loop ([i 0] [g graph-empty] [acc (pvector-empty)])
-      (cond
-        [(= i n) (values g acc)]
-        [else
-         (define-values (g* v) (graph-add-vertex g))
-         (loop (add1 i) g* (pvector-cons-right acc v))])))
-
-  (define (add-edges g edges)
-    (for/fold ([g g]) ([e (in-list edges)])
-      (define-values (g* _) (graph-add-edge g (car e) (cdr e)))
-      g*))
+    (for/pvector ([i (in-range n)]) (BlockId i)))
 
   (define (mk-cfg-block bid term #:insns [insns (pvector-empty)]
                                  #:phis [phis (pvector-empty)])
-    (CfgBlock bid phis insns term (ordered-map-empty symbol-compare)))
+    (CfgBlock bid phis insns term (hash)))
 
-  (define (mk-cfg graph blocks entry var-cnt info)
+  (define (mk-cfg blocks entry var-cnt info)
     (define blk-map
-      (for/fold ([m (ordered-map-empty block-id-compare)])
+      (for/fold ([m idmap-empty])
                 ([b (in-list blocks)])
-        (ordered-map-set m (CfgBlock-id b) b)))
-    (Cfg graph blk-map entry #f var-cnt 0 info))
+        (idmap-set m (CfgBlock-id b) b)))
+    (Cfg blk-map entry #f (length blocks) var-cnt 0 info))
 
   (define (mk-info #:block-order [order #f] #:table [table #f])
-    (let* ([m (ordered-map-empty symbol-compare)]
-           [m (if order (ordered-map-set m 'java/block-order order) m)]
-           [m (if table (ordered-map-set m 'java/exception-table table) m)])
+    (let* ([m (hash)]
+           [m (if order (hash-set m 'java/block-order order) m)]
+           [m (if table (hash-set m 'java/exception-table table) m)])
       m))
 
   ;; ---------- Test 1: no exception-table → identity ----------
   (test-case "normalize-try-exits is identity when no exception-table"
-    (define-values (g bids) (alloc-bids 1))
+    (define bids (alloc-bids 1))
     (define b0 (pvector-ref bids 0))
     (define blocks (list (mk-cfg-block b0 (Term:ret (pvector-empty)))))
     (define cfg
-      (mk-cfg g blocks b0 0
+      (mk-cfg blocks b0 0
               (mk-info #:block-order bids)))
     (define cfg* (normalize-try-exits cfg))
     (check-eq? cfg* cfg "no table ⇒ same object returned"))
@@ -65,10 +53,9 @@
   (test-case "zero-exit try window leaves the CFG unchanged"
     ;; One try block ending in Term:ret; handler unreachable but
     ;; present.  No edges leave the window, so the pass is a no-op.
-    (define-values (g0 bids) (alloc-bids 2))
+    (define bids (alloc-bids 2))
     (define try-bid     (pvector-ref bids 0))
     (define handler-bid (pvector-ref bids 1))
-    (define graph g0)  ; no edges: try returns, handler graph-unreachable
     (define blocks
       (list (mk-cfg-block try-bid
                           (Term:ret (pvector-empty))
@@ -79,11 +66,11 @@
     (define table (pvector (list try-bid handler-bid handler-bid
                                  "java/lang/Exception")))
     (define cfg
-      (mk-cfg graph blocks try-bid 10
+      (mk-cfg blocks try-bid 10
               (mk-info #:block-order bids #:table table)))
     (define cfg* (normalize-try-exits cfg))
-    (check-equal? (graph-vertex-count (Cfg-graph cfg*))
-                  (graph-vertex-count graph)
+    (check-equal? (cfg-block-count cfg*)
+                  (cfg-block-count cfg)
                   "zero-exit ⇒ no new blocks")
     (check-equal? (Cfg-var-cnt cfg*) 10 "no fresh VarIds allocated"))
 
@@ -91,11 +78,10 @@
   (test-case "single-exit try window leaves the CFG unchanged"
     ;; try-block has Term:jump to a single post-try block; handler
     ;; separate.  Since targets has cardinality 1, pass is a no-op.
-    (define-values (g0 bids) (alloc-bids 3))
+    (define bids (alloc-bids 3))
     (define try-bid     (pvector-ref bids 0))
     (define handler-bid (pvector-ref bids 1))
     (define post-bid    (pvector-ref bids 2))
-    (define graph (add-edges g0 (list (cons try-bid post-bid))))
     (define blocks
       (list (mk-cfg-block try-bid (Term:jump post-bid))
             (mk-cfg-block handler-bid (Term:ret (pvector-empty)))
@@ -104,14 +90,14 @@
       (pvector (list try-bid handler-bid handler-bid
                      "java/lang/Exception")))
     (define cfg
-      (mk-cfg graph blocks try-bid 5
+      (mk-cfg blocks try-bid 5
               (mk-info #:block-order bids #:table table)))
     (define cfg* (normalize-try-exits cfg))
     ;; No new blocks, no new edges, no new VarIds.
-    (check-equal? (graph-vertex-count (Cfg-graph cfg*))
-                  (graph-vertex-count graph))
-    (check-equal? (graph-edge-count (Cfg-graph cfg*))
-                  (graph-edge-count graph))
+    (check-equal? (cfg-block-count cfg*)
+                  (cfg-block-count cfg))
+    (check-equal? (cfg-edge-count cfg*)
+                  (cfg-edge-count cfg))
     (check-equal? (Cfg-var-cnt cfg*) 5))
 
   ;; ---------- Test 4: multi-exit via two Term:jump blocks ----------
@@ -119,14 +105,12 @@
     ;; W = {A, B}.  A → T1 via Term:jump.  B → T2 via Term:jump.
     ;; Post-normalization: A's Term:jump goes to joiner, B's Term:jump
     ;; goes to joiner; joiner's Term:switch dispatches to {T1, T2}.
-    (define-values (g0 bids) (alloc-bids 5))
+    (define bids (alloc-bids 5))
     (define A   (pvector-ref bids 0))
     (define B   (pvector-ref bids 1))
     (define H   (pvector-ref bids 2))
     (define T1  (pvector-ref bids 3))
     (define T2  (pvector-ref bids 4))
-    (define graph
-      (add-edges g0 (list (cons A T1) (cons B T2))))
     (define blocks
       (list (mk-cfg-block A (Term:jump T1))
             (mk-cfg-block B (Term:jump T2))
@@ -137,15 +121,15 @@
       (pvector (list A H H "java/lang/Exception")))
     ;; Window is [A, H) = {A, B} in block-order.
     (define cfg
-      (mk-cfg graph blocks A 50
+      (mk-cfg blocks A 50
               (mk-info #:block-order bids #:table table)))
     (define cfg* (normalize-try-exits cfg))
     ;; One new joiner block added.
-    (check-equal? (graph-vertex-count (Cfg-graph cfg*)) 6
+    (check-equal? (cfg-block-count cfg*) 6
                   "joiner block should be added (no forwarding needed)")
     ;; A's terminator is Term:jump to joiner; B's too.
-    (define A-blk* (ordered-map-ref (Cfg-blocks cfg*) A #f))
-    (define B-blk* (ordered-map-ref (Cfg-blocks cfg*) B #f))
+    (define A-blk* (idmap-ref (Cfg-blocks cfg*) A #f))
+    (define B-blk* (idmap-ref (Cfg-blocks cfg*) B #f))
     (check-pred Term:jump? (CfgBlock-terminator A-blk*))
     (check-pred Term:jump? (CfgBlock-terminator B-blk*))
     (define joiner (Term:jump-target (CfgBlock-terminator A-blk*)))
@@ -164,7 +148,7 @@
     (check-true (and (integer? a-sel) (integer? b-sel)))
     (check-not-equal? a-sel b-sel "distinct exit targets ⇒ distinct selector indexes")
     ;; Joiner block: Term:switch with 2 cases, phi merging sel-vars.
-    (define joiner-blk (ordered-map-ref (Cfg-blocks cfg*) joiner #f))
+    (define joiner-blk (idmap-ref (Cfg-blocks cfg*) joiner #f))
     (check-not-false joiner-blk)
     (define joiner-term (CfgBlock-terminator joiner-blk))
     (check-pred Term:switch? joiner-term)
@@ -179,7 +163,7 @@
     (check-equal? (Term:switch-value joiner-term)
                   (PhiInsn-output sel-phi))
     ;; Block-order grew by exactly 1 (only joiner, no forwarding).
-    (define order* (ordered-map-ref (Cfg-info cfg*) 'java/block-order #f))
+    (define order* (hash-ref (Cfg-info cfg*) 'java/block-order #f))
     (check-equal? (pvector-length order*) 6)
     (check-equal? (pvector-ref order* 5) joiner
                   "joiner is appended last in block-order")

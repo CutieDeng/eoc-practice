@@ -16,14 +16,14 @@
 (require rackunit
          "builder.rkt"
          "../../../kernel/ir/rvsdg/rvsdg.rkt"
-         (except-in "../../../kernel/data/data.rkt" integer-compare))
+         "../../../kernel/data/data.rkt")
 
 (module+ test
   ;; Helpers reused across test cases.
   (define (node-count r)
-    (ordered-map-count (Region-node->value r)))
+    (idmap-count (Region-node->value r)))
   (define (node-ops r)
-    (for/list ([kv (in-ordered-map (Region-node->value r))])
+    (for/list ([kv (in-idmap (Region-node->value r))])
       (define v (cdr kv))
       (cond
         [(Simple? v) (Simple-op v)]
@@ -31,7 +31,7 @@
         [(Throw? v) 'throw]
         [else (object-name v)])))
   (define (first-kappa r)
-    (for/or ([kv (in-ordered-map (Region-node->value r))])
+    (for/or ([kv (in-idmap (Region-node->value r))])
       (and (Kappa? (cdr kv)) (cdr kv))))
 
   ;; Build a terminated try-region.  If n-ctx >= 1, returns the first
@@ -69,7 +69,7 @@
     (check-equal? (pvector-length outs) 3)
     (check-equal? (node-count r1) 1)
     (define values-list
-      (for/list ([kv (in-ordered-map (Region-node->value r1))]) (cdr kv)))
+      (for/list ([kv (in-idmap (Region-node->value r1))]) (cdr kv)))
     (check-equal? (length values-list) 1)
     (check-pred Simple? (car values-list))
     (check-equal? (Simple-op (car values-list)) '(region-arg 3)))
@@ -80,7 +80,7 @@
     (check-equal? (pvector-length ins) 2)
     (check-equal? (node-count r1) 1)
     (define v
-      (cdar (for/list ([kv (in-ordered-map (Region-node->value r1))]) kv)))
+      (cdar (for/list ([kv (in-idmap (Region-node->value r1))]) kv)))
     (check-pred Simple? v)
     (check-equal? (Simple-op v) '(region-result 2)))
 
@@ -91,7 +91,7 @@
     (check-pred OutputId? exn-out)
     ;; The exn output is the last of the region-arg's N+1 outputs.
     (define arg-node-op
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (define v (cdr kv))
         (and (Simple? v) (Simple-op v))))
     (check-equal? arg-node-op '(region-arg 3))
@@ -106,7 +106,7 @@
     (check-equal? (pvector-length ctx-outs) 0)
     (check-pred OutputId? exn-out)
     (define arg-node-op
-      (for/or ([kv (in-ordered-map (Region-node->value r))])
+      (for/or ([kv (in-idmap (Region-node->value r))])
         (define v (cdr kv))
         (and (Simple? v) (Simple-op v))))
     (check-equal? arg-node-op '(region-arg 1)))
@@ -134,8 +134,8 @@
     ;; Kappa node exists in parent, with exactly 1 input and 0 outputs.
     (define kappa (first-kappa parent2))
     (check-pred Kappa? kappa)
-    (define kin-info (ordered-map-ref (Region-node->input parent2) knid))
-    (define kout-info (ordered-map-ref (Region-node->output parent2) knid))
+    (define kin-info (idmap-ref (Region-node->input parent2) knid))
+    (define kout-info (idmap-ref (Region-node->output parent2) knid))
     (check-equal? (cdr kin-info) 1 "terminal Kappa should take N=1 ctx input")
     (check-equal? (cdr kout-info) 0 "terminal Kappa should have 0 outputs")
     ;; Handlers field carries the catch-type.
@@ -147,7 +147,7 @@
     (check-eq? (Kappa-try-region kappa) try-r)
     ;; Parent wire count: one wire from param output to Kappa's
     ;; single input port.
-    (check-equal? (ordered-map-count (Region-wire->input parent2)) 1))
+    (check-equal? (idmap-count (Region-wire->input parent2)) 1))
 
   (test-case "install-kappa-terminal: handler list order preserved (catch-all last)"
     ;; Two handlers, catch-all last.  Asserts pvector order survives
@@ -212,14 +212,14 @@
       (install-kappa-convergent parent1 ctx-oids try-r handlers m-out))
     (define kappa (first-kappa parent2))
     (check-pred Kappa? kappa)
-    (define kin-info (ordered-map-ref (Region-node->input parent2) knid))
-    (define kout-info (ordered-map-ref (Region-node->output parent2) knid))
+    (define kin-info (idmap-ref (Region-node->input parent2) knid))
+    (define kout-info (idmap-ref (Region-node->output parent2) knid))
     (check-equal? (cdr kin-info) n-ctx "convergent Kappa should take N ctx inputs")
     (check-equal? (cdr kout-info) m-out "convergent Kappa should surface M outputs")
     (check-equal? (pvector-length out-oids) m-out)
     (for ([o (in-pvector out-oids)]) (check-pred OutputId? o))
     ;; N wires from param to Kappa's ctx ports.
-    (check-equal? (ordered-map-count (Region-wire->input parent2)) n-ctx))
+    (check-equal? (idmap-count (Region-wire->input parent2)) n-ctx))
 
   (test-case "install-kappa-convergent: zero-ctx still produces M outputs"
     (define m-out 1)
@@ -243,10 +243,10 @@
     (define-values (parent1 knid out-oids)
       (install-kappa-convergent parent0 (pvector-empty) try-r handlers m-out))
     (check-equal? (pvector-length out-oids) m-out)
-    (define kin-info (ordered-map-ref (Region-node->input parent1) knid))
+    (define kin-info (idmap-ref (Region-node->input parent1) knid))
     (check-equal? (cdr kin-info) 0
                   "zero-ctx convergent Kappa should have 0 input ports")
-    (check-equal? (ordered-map-count (Region-wire->input parent1)) 0))
+    (check-equal? (idmap-count (Region-wire->input parent1)) 0))
 
   (test-case "install-kappa-terminal: zero-ctx Kappa is permitted"
     (define try-r (mk-trivial-try-region 0))
@@ -256,10 +256,10 @@
     (define parent0 (region-empty))
     (define-values (parent1 knid)
       (install-kappa-terminal parent0 (pvector-empty) try-r handlers))
-    (define kin-info (ordered-map-ref (Region-node->input parent1) knid))
+    (define kin-info (idmap-ref (Region-node->input parent1) knid))
     (check-equal? (cdr kin-info) 0
                   "Kappa with no ctx vars should have 0 input ports")
-    (check-equal? (ordered-map-count (Region-wire->input parent1)) 0)))
+    (check-equal? (idmap-count (Region-wire->input parent1)) 0)))
 
 ;; remove-duplicates is not re-exported by kernel/data; inline it.
 (define (remove-duplicates xs)

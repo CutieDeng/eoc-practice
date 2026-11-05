@@ -13,15 +13,12 @@
 
 (require racket/match
          racket/list
-         racket/dict
+         racket/intmap
          "../ir/types.rkt"
          "../ir/cfg.rkt"
          "../analysis/liveness.rkt"
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
-         cutie-ftree/bitset
-         cutie-ftree/comparator
-         (only-in cutie-ftree/graph vertex-id? vertex-id-val))
+         "../../../kernel/data/data.rkt"
+         (only-in racket/graph vertex-id? vertex-id-val))
 
 (provide
  ;; Main entry point
@@ -79,7 +76,7 @@
 ;; ============================================================================
 
 (struct AllocationResult (
-  assignment        ; ordered-map[VReg-id -> PhysicalReg]
+  assignment        ; hash[VReg-id -> PhysicalReg]
   spilled          ; bitset - vreg IDs that need to be spilled
   callee-saved-used ; bitset - physical register indices used
   success?         ; Boolean
@@ -91,24 +88,23 @@
 
 ;; Build vreg-id <-> integer mapping
 (struct VRegIndex (
-  id->idx    ; ordered-map[symbol -> int]
+  id->idx    ; hash[symbol -> int]
   idx->id    ; pvector[int -> symbol]
   count      ; total count
 ) #:prefab)
 
 (define (build-vreg-index vregs)
   (define-values (id->idx idx->id)
-    (for/fold ([m (ordered-map-empty symbol-compare)]
+    (for/fold ([m (hash)]
                [v (pvector-empty)])
               ([vreg vregs]
                [i (in-naturals)])
-      (values (ordered-map-set m (vreg-id vreg) i)
+      (values (hash-set m (vreg-id vreg) i)
               (pvector-cons-right v (vreg-id vreg)))))
   (VRegIndex id->idx idx->id (length vregs)))
 
 (define (vreg-id->idx index vid)
-  (define result (ordered-map-query (VRegIndex-id->idx index) vid))
-  (and result (cdr result)))
+  (hash-ref (VRegIndex-id->idx index) vid #f))
 
 (define (idx->vreg-id index idx)
   (pvector-ref (VRegIndex-idx->id index) idx))
@@ -122,20 +118,20 @@
 
 (define (make-empty-igraph n)
   (for/pvector ([_ (in-range n)])
-    bitset-empty))
+    intbits-empty))
 
 (define (igraph-add-edge g v1 v2)
   (let* ([neighbors1 (pvector-ref g v1)]
          [neighbors2 (pvector-ref g v2)]
-         [g1 (pvector-set g v1 (bitset-add neighbors1 v2))]
-         [g2 (pvector-set g1 v2 (bitset-add neighbors2 v1))])
+         [g1 (pvector-set g v1 (intbits-set neighbors1 v2))]
+         [g2 (pvector-set g1 v2 (intbits-set neighbors2 v1))])
     g2))
 
 (define (igraph-neighbors g v)
   (pvector-ref g v))
 
 (define (igraph-degree g v)
-  (bitset-count (igraph-neighbors g v)))
+  (intbits-count (igraph-neighbors g v)))
 
 ;; ============================================================================
 ;; Collect Virtual Registers
@@ -175,9 +171,7 @@
     (define block (cfg-get-block cfg bid))
     (if (not block)
         graph
-        (let* ([vid-val (get-block-id-val bid)]
-               [block-query (ordered-map-query block-info vid-val)]
-               [block-liveness (and block-query (cdr block-query))])
+        (let* ([block-liveness (hash-ref block-info bid #f)])
           (if (not block-liveness)
               graph
               (let ([insn-liveness (BlockLiveness-insn-liveness block-liveness)])
@@ -192,8 +186,8 @@
                   (for*/fold ([g2 g])
                              ([d defs]
                               #:when (vreg? d)
-                              [l (in-bitset live-after)])
-                    (define d-idx (dict-ref id->idx (vreg-id d) #f))
+                              [l (in-intbits live-after)])
+                    (define d-idx (hash-ref id->idx (vreg-id d) #f))
                     (cond
                       [(not d-idx) g2]
                       [(= d-idx l) g2]  ; Skip self
@@ -206,29 +200,29 @@
 (define (color-graph graph num-vertices num-colors)
   ;; Simplify phase: remove nodes with degree < num-colors
   (define-values (stack removed)
-    (let simplify ([stk (pvector-empty)] [rem bitset-empty])
+    (let simplify ([stk (pvector-empty)] [rem intbits-empty])
       ;; Find vertex with degree < num-colors (not yet removed)
       (define found-v
         (for/first ([v (in-range num-vertices)]
-                    #:when (and (not (bitset-member? rem v))
-                                (< (bitset-count (bitset-subtract (igraph-neighbors graph v) rem))
+                    #:when (and (not (intbits-ref rem v))
+                                (< (intbits-count (intbits-subtract (igraph-neighbors graph v) rem))
                                    num-colors)))
           v))
       (if found-v
           (simplify (pvector-cons-right stk found-v)
-                    (bitset-add rem found-v))
+                    (intbits-set rem found-v))
           (values stk rem))))
 
   ;; Remaining high-degree nodes -> potential spills.
   (define remaining
     (for/pvector ([v (in-range num-vertices)]
-                  #:when (not (bitset-member? removed v)))
+                  #:when (not (intbits-ref removed v)))
       v))
 
   (define-values (final-stack initial-spills)
     (cond
       [(= (pvector-length remaining) 0)
-       (values stack bitset-empty)]
+       (values stack intbits-empty)]
       [else
        ;; Add all remaining to stack; mark highest-degree as spill.
        (define highest-degree-node
@@ -236,36 +230,36 @@
                        (for/fold ([best (pvector-ref remaining 0)]
                                   [best-deg -1])
                                  ([v (in-pvector remaining)])
-                         (define deg (bitset-count
-                                       (bitset-subtract (igraph-neighbors graph v) removed)))
+                         (define deg (intbits-count
+                                       (intbits-subtract (igraph-neighbors graph v) removed)))
                          (if (> deg best-deg)
                              (values v deg)
                              (values best best-deg)))])
            best))
        (values (pvector-append stack remaining)
-               (bitset-add bitset-empty highest-degree-node))]))
+               (intbits-set intbits-empty highest-degree-node))]))
 
   ;; Select phase: assign colors
   (define-values (coloring to-spill)
-    (for/fold ([col (ordered-map-empty integer-compare)]
+    (for/fold ([col intmap-empty]
                [spills initial-spills])
               ([i (in-range (sub1 (pvector-length final-stack)) -1 -1)])
       (define v (pvector-ref final-stack i))
-      (if (bitset-member? spills v)
+      (if (intbits-ref spills v)
           (values col spills)
           ;; Find available color
           (let* ([neighbor-colors
-                  (for/fold ([cs bitset-empty])
-                            ([n (in-bitset (igraph-neighbors graph v))])
-                    (define c (dict-ref col n #f))
-                    (if c (bitset-add cs c) cs))]
+                  (for/fold ([cs intbits-empty])
+                            ([n (in-intbits (igraph-neighbors graph v))])
+                    (define c (intmap-ref col n #f))
+                    (if c (intbits-set cs c) cs))]
                  [available-color
                   (for/first ([c (in-range num-colors)]
-                              #:when (not (bitset-member? neighbor-colors c)))
+                              #:when (not (intbits-ref neighbor-colors c)))
                     c)])
             (if available-color
-                (values (ordered-map-set col v available-color) spills)
-                (values col (bitset-add spills v)))))))
+                (values (intmap-set col v available-color) spills)
+                (values col (intbits-set spills v)))))))
 
   (values coloring to-spill))
 
@@ -281,9 +275,9 @@
   (if (null? all-vregs)
       ;; No virtual registers, nothing to allocate
       (AllocationResult
-       (ordered-map-empty symbol-compare)
-       bitset-empty
-       bitset-empty
+       (hash)
+       intbits-empty
+       intbits-empty
        #t)
 
       (let ()
@@ -293,9 +287,9 @@
 
         ;; Step 3: Build vreg info by class
         (define vreg-by-id
-          (for/fold ([m (ordered-map-empty symbol-compare)])
+          (for/fold ([m (hash)])
                     ([v all-vregs])
-            (ordered-map-set m (vreg-id v) v)))
+            (hash-set m (vreg-id v) v)))
 
         ;; Separate by class
         (define gpr-vregs (filter (lambda (v) (eq? (vreg-class v) 'gpr)) all-vregs))
@@ -325,20 +319,20 @@
         ;; Step 5: Map colors to physical registers
         (define (assign-class coloring index allocatable asgn callee-used)
           (for/fold ([a asgn] [c callee-used])
-                    ([kv (in-ordered-map coloring)])
+                    ([kv (in-intmap-pairs coloring)])
             (define idx (car kv))
             (define color (cdr kv))
             (define vid (idx->vreg-id index idx))
             (define phys-reg (list-ref allocatable color))
-            (values (ordered-map-set a vid phys-reg)
+            (values (hash-set a vid phys-reg)
                     (if (and (eq? allocatable gpr-allocatable)
                              (member phys-reg gpr-callee-saved))
-                        (bitset-add c color)
+                        (intbits-set c color)
                         c))))
 
         (define-values (asgn1 callee1)
           (assign-class gpr-coloring gpr-index gpr-allocatable
-                        (ordered-map-empty symbol-compare) bitset-empty))
+                        (hash) intbits-empty))
         (define-values (asgn2 callee2)
           (assign-class sve-coloring sve-index sve-allocatable asgn1 callee1))
         (define-values (assignment callee-saved-used)
@@ -346,15 +340,15 @@
 
         ;; Combine spills (convert from indices back to vreg-ids)
         (define all-spills
-          (bitset-union
-           (bitset-union gpr-spills sve-spills)
+          (intbits-union
+           (intbits-union gpr-spills sve-spills)
            pred-spills))
 
         (AllocationResult
          assignment
          all-spills
          callee-saved-used
-         (bitset-empty? all-spills)))))
+         (intbits-empty? all-spills)))))
 
 ;; ============================================================================
 ;; Apply Allocation to CFG
@@ -376,7 +370,7 @@
 (define (rewrite-insn insn assignment)
   (define (rewrite-reg r)
     (if (vreg? r)
-        (dict-ref assignment (vreg-id r) r)
+        (hash-ref assignment (vreg-id r) r)
         r))
 
   (define (rewrite-mem m)

@@ -6,6 +6,7 @@
 
 (require rackunit)
 (require "graph.rkt")
+(require racket/intmap)
 (require "../../kernel/data/data.rkt")
 
 ;; ============================================================
@@ -23,15 +24,15 @@
       (1 . 2) (1 . 4)
       (3 . 4)))
 
-  (define adj (ordered-map-empty integer-compare))
+  (define adj intmap-empty)
   (for ([e edges])
     (define src (car e))
     (define dst (cdr e))
-    (define existing (ordered-map-ref adj src (pvector-empty)))
-    (set! adj (ordered-map-set adj src (pvector-cons-right existing dst))))
+    (define existing (intmap-ref adj src (pvector-empty)))
+    (set! adj (intmap-set adj src (pvector-cons-right existing dst))))
 
   (lambda (node)
-    (ordered-map-ref adj node (pvector-empty))))
+    (intmap-ref adj node (pvector-empty))))
 
 ;; Create predecessors from edges
 (define (make-test-predecessors)
@@ -40,15 +41,15 @@
       (1 . 2) (1 . 4)
       (3 . 4)))
 
-  (define pred (ordered-map-empty integer-compare))
+  (define pred intmap-empty)
   (for ([e edges])
     (define src (car e))
     (define dst (cdr e))
-    (define existing (ordered-map-ref pred dst (pvector-empty)))
-    (set! pred (ordered-map-set pred dst (pvector-cons-right existing src))))
+    (define existing (intmap-ref pred dst (pvector-empty)))
+    (set! pred (intmap-set pred dst (pvector-cons-right existing src))))
 
   (lambda (node)
-    (ordered-map-ref pred node (pvector-empty))))
+    (intmap-ref pred node (pvector-empty))))
 
 ;; Test nodes
 (define test-nodes (list->pvector '(0 1 2 3 4)))
@@ -61,15 +62,6 @@
   (for/or ([e (in-pvector pv)])
     (equal? e elem)))
 
-(define (pvector-index-of pv elem)
-  (for/first ([e (in-pvector pv)]
-              [i (in-naturals)]
-              #:when (equal? e elem))
-    i))
-
-(define (pvector-last pv)
-  (pvector-ref pv (- (pvector-length pv) 1)))
-
 ;; ============================================================
 ;; Traversal Tests
 ;; ============================================================
@@ -79,7 +71,7 @@
 
     (test-case "dfs-preorder"
       (define get-succ (make-test-graph))
-      (define result (dfs-preorder integer-compare get-succ 0))
+      (define result (dfs-preorder get-succ 0))
       (check-equal? (pvector-ref result 0) 0)
       (check-true (pvector-contains? result 1))
       (check-true (pvector-contains? result 2))
@@ -88,13 +80,13 @@
 
     (test-case "dfs-postorder"
       (define get-succ (make-test-graph))
-      (define result (dfs-postorder integer-compare get-succ 0))
+      (define result (dfs-postorder get-succ 0))
       ;; Last visited should be start
       (check-equal? (pvector-last result) 0))
 
     (test-case "bfs"
       (define get-succ (make-test-graph))
-      (define result (bfs integer-compare get-succ 0))
+      (define result (bfs get-succ 0))
       (check-equal? (pvector-ref result 0) 0)
       ;; Level 1 nodes should come before level 2
       (check-true (< (pvector-index-of result 1) (pvector-index-of result 2)))
@@ -102,12 +94,12 @@
 
     (test-case "reachable-from"
       (define get-succ (make-test-graph))
-      (define result (reachable-from integer-compare get-succ 0))
+      (define result (reachable-from get-succ 0))
       (check-equal? (pvector-length result) 5))
 
     (test-case "find-path"
       (define get-succ (make-test-graph))
-      (define path (find-path integer-compare get-succ 0 4))
+      (define path (find-path get-succ 0 4))
       (check-not-false path)
       (check-equal? (pvector-ref path 0) 0)
       (check-equal? (pvector-last path) 4))))
@@ -122,7 +114,7 @@
     (test-case "topology-sort on DAG"
       (define get-succ (make-test-graph))
       (define get-pred (make-test-predecessors))
-      (define result (topology-sort integer-compare test-nodes get-succ get-pred))
+      (define result (topology-sort test-nodes get-succ get-pred))
       (check-not-false result)
       ;; Verify topological order: all edges go forward
       (for ([i (in-range (pvector-length result))])
@@ -146,7 +138,7 @@
           [(1) (list->pvector '(0))]
           [(2) (list->pvector '(1))]
           [else (pvector-empty)]))
-      (define result (topology-sort integer-compare (list->pvector '(0 1 2)) get-succ get-pred))
+      (define result (topology-sort (list->pvector '(0 1 2)) get-succ get-pred))
       (check-false result))))
 
 ;; ============================================================
@@ -159,13 +151,13 @@
     (test-case "scc-kosaraju on DAG"
       (define get-succ (make-test-graph))
       (define get-pred (make-test-predecessors))
-      (define sccs (scc-kosaraju integer-compare test-nodes get-succ get-pred))
+      (define sccs (scc-kosaraju test-nodes get-succ get-pred))
       ;; DAG has 5 SCCs (each node is its own SCC)
       (check-equal? (pvector-length sccs) 5))
 
     (test-case "scc-tarjan on DAG"
       (define get-succ (make-test-graph))
-      (define sccs (scc-tarjan integer-compare test-nodes get-succ))
+      (define sccs (scc-tarjan test-nodes get-succ))
       (check-equal? (pvector-length sccs) 5))
 
     (test-case "scc-tarjan finds cycle"
@@ -179,7 +171,7 @@
           [(3) (pvector-empty)]
           [else (pvector-empty)]))
       (define nodes (list->pvector '(0 1 2 3)))
-      (define sccs (scc-tarjan integer-compare nodes get-succ))
+      (define sccs (scc-tarjan nodes get-succ))
       ;; Should have 2 SCCs
       (check-equal? (pvector-length sccs) 2)
       ;; One SCC should have 3 nodes
@@ -196,7 +188,7 @@
           [(3) (pvector-empty)]
           [else (pvector-empty)]))
       (define nodes (list->pvector '(0 1 2 3)))
-      (define-values (node->scc-id scc-nodes scc-succ) (condensation-graph integer-compare nodes get-succ))
+      (define-values (node->scc-id scc-nodes scc-succ) (condensation-graph nodes get-succ))
 
       ;; All cycle nodes should be in same SCC
       (check-equal? (scc-id node->scc-id 0) (scc-id node->scc-id 1))

@@ -26,27 +26,27 @@
 ;; State Management
 ;; ============================================================
 
-;; Ensure info is an ordered-map
-(define (ensure-ordered-map-info info)
+;; Ensure info is an immutable hash
+(define (ensure-info-hash info)
   (cond
-    [(ordered-map? info) info]
-    [(null? info) (ordered-map-empty symbol-compare)]
+    [(hash? info) info]
+    [(null? info) (hash)]
     [(list? info)
-     (for/fold ([m (ordered-map-empty symbol-compare)])
+     (for/fold ([m (hash)])
                ([pair info])
-       (ordered-map-set m (car pair) (cdr pair)))]
-    [else (error 'ensure-ordered-map-info "invalid info: ~a" info)]))
+       (hash-set m (car pair) (cdr pair)))]
+    [else (error 'ensure-info-hash "invalid info: ~a" info)]))
 
 ;; Get counter from info (default 0)
 (define (info-counter info)
-  (if (ordered-map? info)
-      (ordered-map-ref info 'counter 0)
+  (if (hash? info)
+      (hash-ref info 'counter 0)
       0))
 
 ;; Set counter in info
 (define (info-set-counter info counter)
-  (define om (ensure-ordered-map-info info))
-  (ordered-map-set om 'counter counter))
+  (define om (ensure-info-hash info))
+  (hash-set om 'counter counter))
 
 ;; Generate fresh temporary variable, returns (values new-var new-counter)
 (define (fresh-temp counter)
@@ -153,10 +153,10 @@
 ;; Wrap expression with bindings (pvector, outermost first).
 ;; Iterate right-to-left so bindings[0] ends up as the outermost Let.
 (define (wrap-bindings bindings exp)
-  (pvector-foldr (lambda (body binding)
-                   (Let (car binding) (cdr binding) body))
-                 exp
-                 bindings))
+  (pvector-fold-right bindings
+                      exp
+                      (lambda (binding body)
+                        (Let (car binding) (cdr binding) body))))
 
 ;; rco-exp: main entry point, returns (values new-exp counter)
 (define (rco-exp counter exp)

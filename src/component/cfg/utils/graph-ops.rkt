@@ -13,7 +13,7 @@
 
 (require racket/match)
 (require "../../../kernel/ir/cfg/cfg.rkt")
-(require (except-in "../../../kernel/data/data.rkt" integer-compare))
+(require "../../../kernel/data/data.rkt")
 
 (provide
   ;; Graph operation closures
@@ -42,7 +42,10 @@
 
   ;; Block sequence accessors
   in-cfg-blocks
-  in-cfg-block-ids)
+  in-cfg-block-ids
+  cfg-block-count
+  cfg-edge-count
+  cfg-fresh-block-id)
 
 ;; ============================================================
 ;; Graph Operations (Closures for Driver)
@@ -62,11 +65,11 @@
 ;; Returns: BlockId -> pvector[BlockId]
 ;;
 (define (cfg-make-predecessors cfg)
-  ;; Build predecessor map once (ordered-map keyed by BlockId).
+  ;; Build predecessor map once (idmap keyed by BlockId).
   (define pred-map
-    (for/fold ([m (ordered-map-empty block-id-compare)])
+    (for/fold ([m idmap-empty])
               ([bid (in-list (cfg-all-block-ids cfg))])
-      (ordered-map-set m bid (pvector-empty))))
+      (idmap-set m bid (pvector-empty))))
 
   (define pred-map*
     (for/fold ([m pred-map])
@@ -78,11 +81,11 @@
          (for/fold ([m m])
                    ([succ (in-pvector (terminator-successors
                                         (CfgBlock-terminator block)))])
-           (define cur (ordered-map-ref m succ (pvector-empty)))
-           (ordered-map-set m succ (pvector-cons-right cur bid)))])))
+           (define cur (idmap-ref m succ (pvector-empty)))
+           (idmap-set m succ (pvector-cons-right cur bid)))])))
 
   (lambda (block-id)
-    (ordered-map-ref pred-map* block-id (pvector-empty))))
+    (idmap-ref pred-map* block-id (pvector-empty))))
 
 ;; ============================================================
 ;; CFG Accessors
@@ -92,13 +95,13 @@
 (define (cfg-all-block-ids cfg)
   (define blocks (Cfg-blocks cfg))
   (if blocks
-      (ordered-map-keys blocks)
+      (idmap-keys blocks)
       '()))
 
 ;; Get a block by ID
 (define (cfg-get-block cfg block-id)
   (define blocks (Cfg-blocks cfg))
-  (and blocks (ordered-map-ref blocks block-id #f)))
+  (and blocks (idmap-ref blocks block-id #f)))
 
 ;; Get entry block ID
 (define (cfg-get-entry cfg)
@@ -116,13 +119,13 @@
 (define (cfg-get-info cfg key [default #f])
   (define info (Cfg-info cfg))
   (if info
-      (ordered-map-ref info key default)
+      (hash-ref info key default)
       default))
 
 ;; Set a value in the info map (functional update)
 (define (cfg-set-info cfg key value)
-  (define old-info (or (Cfg-info cfg) (ordered-map-empty symbol-compare)))
-  (define new-info (ordered-map-set old-info key value))
+  (define old-info (or (Cfg-info cfg) (hash)))
+  (define new-info (hash-set old-info key value))
   (struct-copy Cfg cfg [info new-info]))
 
 ;; Update a value in the info map with a function
@@ -138,8 +141,8 @@
 ;; Set/replace a block in the CFG
 (define (cfg-set-block cfg block)
   (define bid (CfgBlock-id block))
-  (define blocks (or (Cfg-blocks cfg) (ordered-map-empty block-id-compare)))
-  (define new-blocks (ordered-map-set blocks bid block))
+  (define blocks (or (Cfg-blocks cfg) idmap-empty))
+  (define new-blocks (idmap-set blocks bid block))
   (struct-copy Cfg cfg [blocks new-blocks]))
 
 ;; Append an instruction to a block
@@ -164,15 +167,34 @@
 (define (in-cfg-blocks cfg)
   (define blocks (Cfg-blocks cfg))
   (if blocks
-      (in-ordered-map-values blocks)
+      (in-idmap-values blocks)
       (in-list '())))
 
 ;; Sequence of all block ids in the CFG (empty sequence if none).
 (define (in-cfg-block-ids cfg)
   (define blocks (Cfg-blocks cfg))
   (if blocks
-      (in-ordered-map-keys blocks)
+      (in-idmap-keys blocks)
       (in-list '())))
+
+;; Number of blocks.
+(define (cfg-block-count cfg)
+  (define blocks (Cfg-blocks cfg))
+  (if blocks (idmap-count blocks) 0))
+
+;; Number of control-flow edges, counting one edge per terminator
+;; successor slot (so a Term:cond with both arms to the same block
+;; counts 2).
+(define (cfg-edge-count cfg)
+  (for/sum ([blk (in-cfg-blocks cfg)])
+    (pvector-length (terminator-successors (CfgBlock-terminator blk)))))
+
+;; Allocate a fresh BlockId.  Returns (values cfg* bid); the caller
+;; is responsible for eventually inserting a block under bid.
+(define (cfg-fresh-block-id cfg)
+  (define n (Cfg-block-cnt cfg))
+  (values (struct-copy Cfg cfg [block-cnt (add1 n)])
+          (BlockId n)))
 
 ;; ============================================================
 ;; Terminator Helpers
@@ -187,7 +209,7 @@
      (pvector then-target else-target)]
     [(Term:switch _ cases default)
      ;; cases is pvector[(Pairof Integer BlockId)].
-     (pvector-cons-left (pvector-map cdr cases) default)]
+     (pvector-cons-left (pvector-map cases cdr) default)]
     [(Term:ret _) (pvector-empty)]
     [(Term:throw _) (pvector-empty)]
     [(Term:unreachable) (pvector-empty)]

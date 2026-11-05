@@ -6,11 +6,11 @@
 ;;
 ;; The kernel layer provides foundational data structures:
 ;;
-;; 1. Data structures (from cutie-ftree):
+;; 1. Data structures (Racket standard library, via data/data.rkt):
 ;;    - pvector: persistent vector
-;;    - ordered-map: ordered dictionary
-;;    - bitset: bit set
-;;    - graph: immutable graph
+;;    - idmap: typed-id keyed table (intmap underneath)
+;;    - intmap / intbits: integer-keyed map / bit set
+;;    - graph: immutable graph (aarch64 AsmCfg only)
 ;;    - comparators: integer-compare, symbol-compare, string-compare
 ;;
 ;; 2. IR type definitions:
@@ -21,7 +21,7 @@
 ;;
 ;; Design principles:
 ;;    - Pure data definitions only (no algorithms)
-;;    - Zero external dependencies (except cutie-ftree)
+;;    - Zero dependencies outside the Racket standard library
 ;;    - Maximal stability (changes rarely)
 ;;
 ;; Usage:

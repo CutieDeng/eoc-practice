@@ -1,12 +1,31 @@
-CC     = gcc
 RACKET = racket
-RM     = rm
+RACO   = raco
 
-runtime.o: runtime.cc runtime.h
-	$(CC) -x c++ -c -std=c++17 -g -arch x86_64 runtime.cc
+.PHONY: test test-java test-aarch64 test-driver clean
 
-test: runtime.o
-	$(RACKET) run-tests.rkt
+# Full suite: every *-test.rkt under src/ and test/ + the aarch64 integration script.
+test:
+	./scripts/run-tests.sh
+
+test-java:
+	$(RACO) test src/component/java/transform/bbs-test.rkt \
+	             src/component/java/transform/jvm-to-cfg-test.rkt \
+	             src/component/java/transform/ssa-construct-test.rkt \
+	             src/component/java/transform/normalize-try-exits-test.rkt \
+	             src/component/java/transform/cfg-to-rvsdg-test.rkt \
+	             src/pipeline/java/pipeline-test.rkt
+
+test-aarch64:
+	$(RACO) test src/component/aarch64/ir/types-test.rkt \
+	             src/component/aarch64/ir/cfg-test.rkt \
+	             src/component/aarch64/frontend/parser-test.rkt \
+	             src/component/aarch64/interp/base-test.rkt \
+	             src/component/aarch64/interp/sve-test.rkt \
+	             src/component/aarch64/backend/regalloc-test.rkt
+	$(RACKET) test/integration/aarch64/basic.rkt
+
+test-driver:
+	$(RACO) test src/driver/graph/graph-test.rkt src/kernel/data/idmap.rkt
 
 clean:
-	$(RM) -f *.o *.out *.exe *.s *~
+	find src test -type d -name compiled -prune -exec rm -rf {} +

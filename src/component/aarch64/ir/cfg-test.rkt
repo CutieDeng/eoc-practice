@@ -5,9 +5,7 @@
 (require rackunit
          rackunit/text-ui
          racket/match
-         cutie-ftree/pvector
-         cutie-ftree/ordered-map
-         cutie-ftree/bitset
+         "../../../kernel/data/data.rkt"
          "../ir/types.rkt"
          "../ir/cfg.rkt")
 
@@ -294,9 +292,9 @@
      (define cfg6 (cfg-add-block cfg5 block3))
 
      (define reachable (cfg-reachable-blocks cfg6))
-     (check-true (bitset-member? reachable 0))   ; bid1
-     (check-true (bitset-member? reachable 1))   ; bid2
-     (check-false (bitset-member? reachable 2))))) ; bid3 unreachable
+     (check-true (intbits-ref reachable 0))   ; bid1
+     (check-true (intbits-ref reachable 1))   ; bid2
+     (check-false (intbits-ref reachable 2))))) ; bid3 unreachable
 
 ;; ============================================================================
 ;; Persistence Tests

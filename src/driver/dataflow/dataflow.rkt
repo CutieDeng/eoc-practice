@@ -1,14 +1,6 @@
 #lang racket/base
 
-;; ============================================================
-;; Driver: Dataflow Module
-;; ============================================================
-;;
-;; Re-exports all dataflow analysis components.
-;; ============================================================
+;; Driver: dataflow analyses (currently the liveness framework).
 
-(require "framework.rkt"
-         "liveness.rkt")
-
-(provide (all-from-out "framework.rkt")
-         (all-from-out "liveness.rkt"))
+(require "liveness.rkt")
+(provide (all-from-out "liveness.rkt"))

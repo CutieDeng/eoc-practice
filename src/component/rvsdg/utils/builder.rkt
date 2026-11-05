@@ -19,7 +19,7 @@
 ;; These are pure functional operations over the prefab Region.
 ;; ============================================================
 
-(require (except-in "../../../kernel/data/data.rkt" integer-compare)
+(require "../../../kernel/data/data.rkt"
          "../../../kernel/ir/rvsdg/rvsdg.rkt")
 
 (provide
@@ -53,18 +53,18 @@
 ;; Empty region
 ;; ============================================================
 
-(define (region-empty [info-cmp symbol-compare])
+(define (region-empty)
   (Region
-    (ordered-map-empty info-cmp)        ; info
-    (ordered-map-empty wire-id-compare)  ; wire->input
-    (ordered-map-empty wire-id-compare)  ; wire->output
-    (ordered-map-empty input-id-compare) ; input->wire
-    (ordered-map-empty input-id-compare) ; input->node
-    (ordered-map-empty output-id-compare); output->wire
-    (ordered-map-empty output-id-compare); output->node
-    (ordered-map-empty node-id-compare)  ; node->input
-    (ordered-map-empty node-id-compare)  ; node->output
-    (ordered-map-empty node-id-compare)  ; node->value
+    (hash)                               ; info (symbol-keyed)
+    idmap-empty  ; wire->input
+    idmap-empty  ; wire->output
+    idmap-empty ; input->wire
+    idmap-empty ; input->node
+    idmap-empty; output->wire
+    idmap-empty; output->node
+    idmap-empty  ; node->input
+    idmap-empty  ; node->output
+    idmap-empty  ; node->value
     0 0 0 0))                            ; wire/input/output/node counts
 
 ;; ============================================================
@@ -88,17 +88,17 @@
   ;; Register ownership of each port back to this node.
   (define input->node*
     (for/fold ([m (Region-input->node r)]) ([iid (in-pvector in-ids)])
-      (ordered-map-set m iid nid)))
+      (idmap-set m iid nid)))
   (define output->node*
     (for/fold ([m (Region-output->node r)]) ([oid (in-pvector out-ids)])
-      (ordered-map-set m oid nid)))
+      (idmap-set m oid nid)))
 
   (define node->input*
-    (ordered-map-set (Region-node->input r) nid (cons (InputId input-start) n-in)))
+    (idmap-set (Region-node->input r) nid (cons (InputId input-start) n-in)))
   (define node->output*
-    (ordered-map-set (Region-node->output r) nid (cons (OutputId output-start) n-out)))
+    (idmap-set (Region-node->output r) nid (cons (OutputId output-start) n-out)))
   (define node->value*
-    (ordered-map-set (Region-node->value r) nid value))
+    (idmap-set (Region-node->value r) nid value))
 
   (values
     (struct-copy Region r
@@ -124,10 +124,10 @@
   (define wid (WireId (Region-wire-cnt r)))
   (values
     (struct-copy Region r
-      [wire->output (ordered-map-set (Region-wire->output r) wid src-out)]
-      [wire->input  (ordered-map-set (Region-wire->input r) wid dst-in)]
-      [output->wire (ordered-map-set (Region-output->wire r) src-out wid)]
-      [input->wire  (ordered-map-set (Region-input->wire r) dst-in wid)]
+      [wire->output (idmap-set (Region-wire->output r) wid src-out)]
+      [wire->input  (idmap-set (Region-wire->input r) wid dst-in)]
+      [output->wire (idmap-set (Region-output->wire r) src-out wid)]
+      [input->wire  (idmap-set (Region-input->wire r) dst-in wid)]
       [wire-cnt (add1 (Region-wire-cnt r))])
     wid))
 
