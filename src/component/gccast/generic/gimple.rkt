@@ -11,10 +11,11 @@
 ;;   glabel / ggoto / greturn / gswitch / gbind / gpredict / gnop
 ;;
 ;; Operands are T nodes (decls, SSA names, constants, MEM_REF trees).
-;; A `seq` is an append-only queue (gimple_seq).
+;; A `seq` (gimple_seq) is a mutable cell around a pvector; gbind vars,
+;; gcall args and gswitch cases are pvectors.
 ;; ============================================================
 
-(require racket/list "tree.rkt")
+(require racket/list "../../../kernel/data/data.rkt" "tree.rkt")
 
 (provide (struct-out gassign) (struct-out gcall) (struct-out gcond) (struct-out glabel)
          (struct-out ggoto) (struct-out greturn) (struct-out gswitch) (struct-out gbind)
@@ -23,7 +24,7 @@
          gimple-build-goto gimple-build-return gimple-build-switch gimple-build-bind gimple-build-predict
          gimple-cond-get-ops-from-tree extract-ops-from-tree
          gimple-seq-may-fallthru gimple-stmt-may-fallthru
-         (struct-out seq) make-seq seq-add! seq-add-seq! seq->list seq-empty? seq-last seq-first seq-length)
+         (struct-out seq) make-seq seq-add! seq-add-seq! seq->list in-seq seq-empty? seq-last seq-first seq-length seq-replace-last!)
 
 (struct gassign ([lhs #:mutable] code [rhs1 #:mutable] [rhs2 #:mutable] [rhs3 #:mutable]) #:transparent)
 (struct gcall ([lhs #:mutable] fn args fntype internal?) #:transparent)
@@ -38,18 +39,20 @@
 
 ;; ---- sequences --------------------------------------------------------
 
-(struct seq ([items #:mutable] [count #:mutable]))   ; items kept reversed
-(define (make-seq) (seq '() 0))
-(define (seq-add! s g) (set-seq-items! s (cons g (seq-items s))) (set-seq-count! s (add1 (seq-count s))))
+(struct seq ([items #:mutable]))                 ; pvector of statements, in order
+(define (make-seq) (seq (pvector-empty)))
+(define (seq-add! s g) (set-seq-items! s (pvector-cons-right (seq-items s) g)))
 (define (seq-add-seq! dst src)
-  (when src
-    (set-seq-items! dst (append (seq-items src) (seq-items dst)))
-    (set-seq-count! dst (+ (seq-count dst) (seq-count src)))))
-(define (seq->list s) (reverse (seq-items s)))
-(define (seq-empty? s) (null? (seq-items s)))
-(define (seq-last s) (if (null? (seq-items s)) #f (car (seq-items s))))
-(define (seq-first s) (if (null? (seq-items s)) #f (last (seq-items s))))
-(define (seq-length s) (seq-count s))
+  (when src (set-seq-items! dst (pvector-append (seq-items dst) (seq-items src)))))
+(define (seq->list s) (pvector->list (seq-items s)))
+(define (in-seq s) (in-pvector (seq-items s)))
+(define (seq-empty? s) (pvector-empty? (seq-items s)))
+(define (seq-last s) (if (seq-empty? s) #f (pvector-last (seq-items s))))
+(define (seq-first s) (if (seq-empty? s) #f (pvector-first (seq-items s))))
+(define (seq-length s) (pvector-length (seq-items s)))
+(define (seq-replace-last! s g)
+  (define items (seq-items s))
+  (set-seq-items! s (pvector-set items (sub1 (pvector-length items)) g)))
 
 ;; ---- builders ---------------------------------------------------------
 

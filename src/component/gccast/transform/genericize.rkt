@@ -17,6 +17,7 @@
 ;; ============================================================
 
 (require racket/list
+         "../../../kernel/data/data.rkt"
          "../generic/tree.rkt")
 
 (provide c-genericize!)
@@ -25,26 +26,29 @@
 
 (define bc-break 0)
 (define bc-continue 1)
-(define bc-label (make-vector 2 '()))          ; stacks of LABEL_DECLs
+;; two label stacks (pvectors, top = last element)
+(define bc-stacks (pvector (pvector-empty) (pvector-empty)))
+(define (bc-stack bc) (pvector-ref bc-stacks bc))
+(define (set-bc-stack! bc v) (set! bc-stacks (pvector-set bc-stacks bc v)))
 (define bc-hash-map (make-parameter (make-hasheq)))
 
 (define (begin-bc-block bc)
   (define label (create-artificial-label))
-  (vector-set! bc-label bc (cons label (vector-ref bc-label bc)))
+  (set-bc-stack! bc (pvector-cons-right (bc-stack bc) label))
   (set-attr! label (if (= bc bc-break) 'label-break 'label-continue) #t)
   label)
 
 (define (finish-bc-block! block-ref bc label)
-  (unless (eq? label (car (vector-ref bc-label bc)))
+  (unless (eq? label (pvector-last (bc-stack bc)))
     (error 'finish-bc-block "label stack mismatch"))
   (when (tree-used label)
     (append-to-statement-list! (build-label-expr label) block-ref))
-  (vector-set! bc-label bc (cdr (vector-ref bc-label bc))))
+  (set-bc-stack! bc (pvector-drop-right (bc-stack bc) 1)))
 
 (define (get-bc-label bc)
-  (define stack (vector-ref bc-label bc))
-  (when (null? stack) (error 'get-bc-label "break/continue outside of a loop or switch"))
-  (define label (car stack))
+  (define stack (bc-stack bc))
+  (when (pvector-empty? stack) (error 'get-bc-label "break/continue outside of a loop or switch"))
+  (define label (pvector-last stack))
   (set-tree-used! label #t)
   label)
 
@@ -72,11 +76,11 @@
 (define (walk-children! t func pset)
   (case (tree-code t)
     [(bind_expr)
-     (for ([d (in-list (bind-expr-vars t))])
+     (for ([d (in-pvector (bind-expr-vars t))])
        (when (decl-initial d) (walk-tree! (attr-ref d 'initial) func pset)))
      (walk-tree! (op-ref t 1) func pset)]
     [(statement_list)
-     (for ([i (in-range (length (statement-list-stmts t)))])
+     (for ([i (in-range (pvector-length (statement-list-stmts t)))])
        (walk-tree! (stmt-ref t i) func pset))]
     [else
      (when (or (expr-p t))
@@ -84,8 +88,8 @@
          (walk-tree! (op-ref t i) func pset)))]))
 
 (define (stmt-ref sl i)
-  (ref (lambda () (list-ref (statement-list-stmts sl) i))
-       (lambda (v) (set-statement-list-stmts! sl (list-set (statement-list-stmts sl) i v)))))
+  (ref (lambda () (pvector-ref (statement-list-stmts sl) i))
+       (lambda (v) (set-statement-list-stmts! sl (pvector-set (statement-list-stmts sl) i v)))))
 
 ;; ---- genericize_c_loop ----------------------------------------------
 
@@ -215,12 +219,12 @@
      (when (tree-side-effects stmt)
        (define nondebug 0)
        (define clear? #t)
-       (for ([i (in-range (length (statement-list-stmts stmt)))])
-         (define t (list-ref (statement-list-stmts stmt) i))
+       (for ([i (in-range (pvector-length (statement-list-stmts stmt)))])
+         (define t (pvector-ref (statement-list-stmts stmt) i))
          (unless (eq? (tree-code t) 'debug_begin_stmt)
            (when (< nondebug 2) (set! nondebug (add1 nondebug))))
          (walk-tree! (stmt-ref stmt i) func pset)
-         (define t* (list-ref (statement-list-stmts stmt) i))
+         (define t* (pvector-ref (statement-list-stmts stmt) i))
          (when (and (not (eq? (tree-code t*) 'debug_begin_stmt))
                     (or (> nondebug 1) (tree-side-effects t*)))
            (set! clear? #f)))
@@ -230,8 +234,8 @@
 
 ;; c_genericize (C only): walk the body with a pset.
 (define (c-genericize! fndecl body-ref)
-  (vector-set! bc-label 0 '())
-  (vector-set! bc-label 1 '())
+  (set-bc-stack! bc-break (pvector-empty))
+  (set-bc-stack! bc-continue (pvector-empty))
   (parameterize ([bc-hash-map (make-hasheq)]
                  [current-function-decl fndecl])
     (define pset (make-hasheq))

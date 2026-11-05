@@ -15,6 +15,7 @@
 ;; ============================================================
 
 (require racket/list racket/match
+         "../../../kernel/data/data.rkt"
          "../generic/tree.rkt"
          "../generic/gimple.rkt")
 
@@ -36,12 +37,12 @@
 ;; ------------------------------------------------------------
 (struct gctx (prev
               [bind-stack #:mutable]
-              [temps #:mutable]              ; newest first
+              [temps #:mutable]              ; pvector, creation order
               [conditions #:mutable]
               [conditional-cleanups #:mutable]
               [exit-label #:mutable]
               [return-temp #:mutable]
-              [case-labels #:mutable]        ; #f or list (newest first)
+              [case-labels #:mutable]        ; #f or pvector (in order)
               [in-switch-expr #:mutable]
               into-ssa
               allow-rhs-cond-expr
@@ -54,22 +55,22 @@
 (define (ctx) (the-ctx))
 
 (define (push-gimplify-context! into-ssa rhs-cond-ok)
-  (the-ctx (gctx (the-ctx) '() '() 0 (make-seq) #f #f #f #f into-ssa rhs-cond-ok #f #f #f #f)))
+  (the-ctx (gctx (the-ctx) (pvector-empty) (pvector-empty) 0 (make-seq) #f #f #f #f into-ssa rhs-cond-ok #f #f #f #f)))
 
 ;; pop_gimplify_context: temporaries go to BODY's GIMPLE_BIND.
 (define (pop-gimplify-context! body)
   (define c (ctx))
-  (unless (null? (gctx-bind-stack c)) (error 'pop-gimplify-context "bind stack not empty"))
+  (unless (pvector-empty? (gctx-bind-stack c)) (error 'pop-gimplify-context "bind stack not empty"))
   (the-ctx (gctx-prev c))
   (when body (declare-vars! (gctx-temps c) body)))
 
-;; declare_vars (debug_info = false): temps (newest first) reversed, then existing vars
+;; declare_vars (debug_info = false): temps in creation order, then existing vars
 (define (declare-vars! temps bind)
-  (unless (null? temps)
-    (set-gbind-vars! bind (append (reverse temps) (gbind-vars bind)))))
+  (unless (pvector-empty? temps)
+    (set-gbind-vars! bind (pvector-append temps (gbind-vars bind)))))
 
-(define (gimple-push-bind-expr! b) (set-gctx-bind-stack! (ctx) (cons b (gctx-bind-stack (ctx)))))
-(define (gimple-pop-bind-expr!) (set-gctx-bind-stack! (ctx) (cdr (gctx-bind-stack (ctx)))))
+(define (gimple-push-bind-expr! b) (set-gctx-bind-stack! (ctx) (pvector-cons-right (gctx-bind-stack (ctx)) b)))
+(define (gimple-pop-bind-expr!) (set-gctx-bind-stack! (ctx) (pvector-drop-right (gctx-bind-stack (ctx)) 1)))
 (define (gimple-conditional-context) (> (gctx-conditions (ctx)) 0))
 (define (gimple-push-condition!) (set-gctx-conditions! (ctx) (add1 (gctx-conditions (ctx)))))
 (define (gimple-pop-condition! pre)
@@ -83,7 +84,7 @@
 (define (gimple-add-tmp-var! tmp)
   (set-attr! tmp 'context (cons 'function_decl (decl-uid (current-function-decl))))
   (set-decl-seen-in-bind-expr! tmp #t)
-  (set-gctx-temps! (ctx) (cons tmp (gctx-temps (ctx)))))
+  (set-gctx-temps! (ctx) (pvector-cons-right (gctx-temps (ctx)) tmp)))
 
 (define (create-tmp-var type [prefix #f])
   (define v (create-tmp-var-raw type prefix))
@@ -205,7 +206,7 @@
   (if (is-gimple-reg-type (tree-type t))
       (is-gimple-val t)
       (or (is-gimple-val t) (is-gimple-lvalue t)
-          (and (eq? (tree-code t) 'constructor) (null? (constructor-elts t)))
+          (and (eq? (tree-code t) 'constructor) (pvector-empty? (constructor-elts t)))
           (eq? (tree-code t) 'call_expr))))
 (define (rhs-predicate-for lhs) (if (is-gimple-reg lhs) is-gimple-reg-rhs-or-call is-gimple-mem-rhs-or-call))
 (define (initial-rhs-predicate-for lhs) (if (is-gimple-reg-type (tree-type lhs)) is-gimple-reg-rhs-or-call is-gimple-mem-rhs-or-call))
@@ -304,11 +305,11 @@
             (set-tree-side-effects! x #t) (set-tree-type! x (void-type))
             (define l (statement-list-stmts x))
             (cond
-              [(null? l) (set! p #f)]
+              [(pvector-empty? l) (set! p #f)]
               [else
-               (define i (sub1 (length l)))
-               (set! p (ref (lambda () (list-ref (statement-list-stmts x) i))
-                            (lambda (v) (set-statement-list-stmts! x (list-set (statement-list-stmts x) i v)))))
+               (define i (sub1 (pvector-length l)))
+               (set! p (ref (lambda () (pvector-ref (statement-list-stmts x) i))
+                            (lambda (v) (set-statement-list-stmts! x (pvector-set (statement-list-stmts x) i v)))))
                (loop)])]
            [(compound_expr)
             (let cloop ([q p])
@@ -437,10 +438,10 @@
   (define temp (voidify-wrapper-expr sl #f))
   (let loop ()
     (define l (statement-list-stmts sl))
-    (unless (null? l)
-      (define b (box (car l)))
+    (unless (pvector-empty? l)
+      (define b (box (pvector-ref l 0)))
       (gimplify-stmt (box-ref b) pre)
-      (set-statement-list-stmts! sl (cdr (statement-list-stmts sl)))
+      (set-statement-list-stmts! sl (pvector-drop (statement-list-stmts sl) 1))
       (loop)))
   (cond [temp (ref-set! r temp) GS-OK]
         [else GS-ALL-DONE]))
@@ -449,8 +450,8 @@
 (define (preprocess-case-labels labels)
   (define default #f)
   (define cases
-    (for/list ([l labels] #:unless (and (not (case-low l)) (begin (set! default l) #t))) l))
-  (values (sort cases < #:key (lambda (c) (integer-cst-value (case-low c)))) default))
+    (for/list ([l (in-pvector labels)] #:unless (and (not (case-low l)) (begin (set! default l) #t))) l))
+  (values (list->pvector (sort cases < #:key (lambda (c) (integer-cst-value (case-low c))))) default))
 
 (define (gimplify-switch-expr r pre)
   (define sw (ref-get r))
@@ -460,12 +461,12 @@
     [else
      (define body-seq (make-seq))
      (define saved-labels (gctx-case-labels (ctx)))
-     (set-gctx-case-labels! (ctx) '())
+     (set-gctx-case-labels! (ctx) (pvector-empty))
      (define old-in-switch (gctx-in-switch-expr (ctx)))
      (set-gctx-in-switch-expr! (ctx) #t)
      (gimplify-stmt (op-ref sw 1) body-seq)
      (set-gctx-in-switch-expr! (ctx) old-in-switch)
-     (define labels (reverse (gctx-case-labels (ctx))))
+     (define labels (gctx-case-labels (ctx)))
      (set-gctx-case-labels! (ctx) saved-labels)
      (define-values (cases default-case) (preprocess-case-labels labels))
      (define add-bind #f)
@@ -489,7 +490,7 @@
         (define bb (make-seq))
         (seq-add! bb switch-stmt)
         (seq-add-seq! bb body-seq)
-        (seq-add! pre (gimple-build-bind '() bb #f))]
+        (seq-add! pre (gimple-build-bind (pvector-empty) bb #f))]
        [else
         (seq-add! pre switch-stmt)
         (seq-add-seq! pre body-seq)])
@@ -504,7 +505,7 @@
   (let loop ([c (ctx)])
     (cond
       [(not c) (error 'gimplify-case-label-expr "case label outside switch")]
-      [(gctx-case-labels c) (set-gctx-case-labels! c (cons e (gctx-case-labels c)))]
+      [(gctx-case-labels c) (set-gctx-case-labels! c (pvector-cons-right (gctx-case-labels c) e))]
       [else (loop (gctx-prev c))]))
   (seq-add! pre (gimple-build-label (case-label e)))
   GS-ALL-DONE)
@@ -604,7 +605,7 @@
 
 (define (gimplify-compound-lval r pre post fallback)
   (define loc (tree-loc (ref-get r)))
-  (define expr-stack '())
+  (define expr-stack (pvector-empty))     ; outermost first, like GCC's expr_stack
   (define p r)
   (let loop ()
     (define x (ref-get p))
@@ -613,15 +614,13 @@
     (define x* (ref-get p))
     (cond
       [(handled-component-p x*)
-       (set! expr-stack (cons x* expr-stack))
+       (set! expr-stack (pvector-cons-right expr-stack x*))
        (set! p (op-ref x* 0))
        (loop)]
       [(and (memq (tree-code x*) '(var_decl parm_decl)) (= (gimplify-var-or-parm-decl p) GS-OK)) (loop)]
       [else (void)]))
-  ;; expr-stack is innermost-first here; GCC's vector is outermost-first.
-  (define stack-outer-first (reverse expr-stack))
   (define need-non-reg #f)
-  (for ([t stack-outer-first])
+  (for ([t (in-pvector expr-stack)])
     (case (tree-code t)
       [(array_ref array_range_ref) (set! need-non-reg #t)]
       [(component_ref) (set! need-non-reg #t)]
@@ -633,7 +632,7 @@
      (when (and need-non-reg (fb? fallback fb-rvalue)) (prepare-gimple-addressable! p pre))
      (define reg-operations (is-gimple-reg (ref-get p)))
      (define ret2
-       (for/fold ([ret ret]) ([t (in-list expr-stack)])     ; innermost first (pop order)
+       (for/fold ([ret ret]) ([t (in-pvector (pvector-reverse expr-stack))])     ; innermost first (pop order)
          (define r1
            (case (tree-code t)
              [(array_ref array_range_ref)
@@ -753,8 +752,8 @@
     [(eq? (tree-code e) 'goto_expr) e]
     [(not (eq? (tree-code e) 'statement_list)) #f]
     [else
-     (define l (filter (lambda (s) (not (eq? (tree-code s) 'debug_begin_stmt))) (statement-list-stmts e)))
-     (and (= (length l) 1) (find-goto (car l)))]))
+     (define l (pvector-filter (statement-list-stmts e) (lambda (s) (not (eq? (tree-code s) 'debug_begin_stmt)))))
+     (and (= (pvector-length l) 1) (find-goto (pvector-ref l 0)))]))
 (define (find-goto-label e)
   (define d (find-goto e))
   (and d (eq? (tree-code (goto-destination d)) 'label_decl) d))
@@ -764,8 +763,8 @@
   (cond
     [(not e) #f]
     [(eq? (tree-code e) 'statement_list)
-     (define l (filter (lambda (s) (not (eq? (tree-code s) 'debug_begin_stmt))) (statement-list-stmts e)))
-     (and (= (length l) 1) (rexpr-location (car l)))]
+     (define l (pvector-filter (statement-list-stmts e) (lambda (s) (not (eq? (tree-code s) 'debug_begin_stmt)))))
+     (and (= (pvector-length l) 1) (rexpr-location (pvector-ref l 0)))]
     [else (tree-loc e)]))
 
 ;; block_may_fallthru (tree.cc), C subset
@@ -1115,7 +1114,7 @@
   (define ctor (tree-operand e 1))
   (define object (tree-operand e 0))
   (cond
-    [(null? (constructor-elts ctor))
+    [(pvector-empty? (constructor-elts ctor))
      ;; zero-initialization: object = {}  (kept as a CONSTRUCTOR rhs)
      GS-UNHANDLED]
     [else
@@ -1194,7 +1193,7 @@
            g)]
       [else g]))
   (unless (eq? g g*)
-    (set-seq-items! pre (cons g* (cdr (seq-items pre))))))
+    (seq-replace-last! pre g*)))
 
 (define (gimplify-modify-expr r pre post want-value)
   (define e (ref-get r))
@@ -1656,7 +1655,7 @@
       (let ([first (seq-first seq)])
         (cond
           [(and first (gbind? first) (= (seq-length seq) 1)) first]
-          [(not first) (define nb (gimple-build-bind '() (make-seq) #f)) nb]
-          [else (gimple-build-bind '() seq #f)])))
+          [(not first) (define nb (gimple-build-bind (pvector-empty) (make-seq) #f)) nb]
+          [else (gimple-build-bind (pvector-empty) seq #f)])))
     (pop-gimplify-context! outer-bind)
     outer-bind))

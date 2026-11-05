@@ -10,6 +10,7 @@
 ;; ============================================================
 
 (require racket/string racket/list racket/match racket/math
+         "../../../kernel/data/data.rkt"
          "../generic/tree.rkt"
          "../generic/gimple.rkt")
 
@@ -227,10 +228,10 @@
        [(abs_expr absu_expr) (format "~a <~a>" (string-upcase (symbol->string code)) (print-expr (tree-operand e 0)))]
        [(constructor)
         (define elts (constructor-elts e))
-        (if (null? elts) "{}"
-            (format "{~a}" (string-join (for/list ([p elts]) (format "~a~a" (if (and (car p) (eq? (tree-code (car p)) 'field_decl)) (format ".~a=" (decl-name (car p))) "") (print-expr (cdr p)))) ", ")))]
+        (if (pvector-empty? elts) "{}"
+            (format "{~a}" (string-join (for/list ([p (in-pvector elts)]) (format "~a~a" (if (and (car p) (eq? (tree-code (car p)) 'field_decl)) (format ".~a=" (decl-name (car p))) "") (print-expr (cdr p)))) ", ")))]
        [(cond_expr) (format "~a ? ~a : ~a" (print-expr (tree-operand e 0)) (print-expr (tree-operand e 1)) (print-expr (tree-operand e 2)))]
-       [(call_expr) (format "~a (~a)" (print-expr (call-expr-fn e)) (string-join (map print-expr (call-expr-args e)) ", "))]
+       [(call_expr) (format "~a (~a)" (print-expr (call-expr-fn e)) (string-join (for/list ([a (in-pvector (call-expr-args e))]) (print-expr a)) ", "))]
        [else
         (cond
           [(hash-ref binary-op code #f)
@@ -280,22 +281,22 @@
   (match g
     [(gbind vars body _)
      (fprintf out "~a{\n" pad)
-     (for ([v vars]) (fprintf out "~a  ~a ~a;\n" pad (print-type (tree-type v)) (decl-print-name v)))
-     (unless (null? vars) (fprintf out "\n"))
-     (for ([s (seq->list body)]) (print-stmt s (+ indent 2) out))
+     (for ([v (in-pvector vars)]) (fprintf out "~a  ~a ~a;\n" pad (print-type (tree-type v)) (decl-print-name v)))
+     (unless (pvector-empty? vars) (fprintf out "\n"))
+     (for ([s (in-seq body)]) (print-stmt s (+ indent 2) out))
      (fprintf out "~a}\n" pad)]
     [(gassign lhs _ _ _ _) (fprintf out "~a~a = ~a;\n" pad (print-expr lhs) (print-rhs g))]
     [(gcall lhs fn args _ _)
      (fprintf out "~a~a~a (~a);\n" pad (if lhs (string-append (print-expr lhs) " = ") "")
               (print-expr (if (eq? (tree-code fn) 'addr_expr) (tree-operand fn 0) fn))
-              (string-join (map print-expr args) ", "))]
+              (string-join (for/list ([a (in-pvector args)]) (print-expr a)) ", "))]
     [(gcond code l r t f)
      (fprintf out "~aif (~a ~a ~a) goto ~a; else goto ~a;\n" pad (print-expr l) (hash-ref binary-op code "?") (print-expr r) (label-name t) (label-name f))]
     [(glabel l) (fprintf out "~a~a:\n" pad (label-name l))]
     [(ggoto l) (fprintf out "~agoto ~a;\n" pad (label-name l))]
     [(greturn v) (fprintf out "~areturn~a;\n" pad (if v (string-append " " (print-expr v)) ""))]
     [(gswitch i d cs)
-     (fprintf out "~aswitch (~a) <~a>\n" pad (print-expr i) (string-join (cons (print-case d) (map print-case cs)) ", "))]
+     (fprintf out "~aswitch (~a) <~a>\n" pad (print-expr i) (string-join (cons (print-case d) (for/list ([c (in-pvector cs)]) (print-case c))) ", "))]
     [(gpredict p o)
      (fprintf out "~a// predicted ~a by ~a predictor.\n" pad (if (eq? o 'TAKEN) "likely" "unlikely") (hash-ref predictor-names p (symbol->string p)))]
     [(gnop) (void)]
@@ -306,7 +307,7 @@
   (define ftype (tree-type fndecl))
   (define params (decl-arguments fndecl))
   (fprintf out "~a ~a (~a)\n" (print-type (tree-type ftype)) (decl-name fndecl)
-           (string-join (for/list ([p params]) (format "~a ~a" (print-type (tree-type p)) (decl-print-name p))) ", "))
+           (string-join (for/list ([p (in-pvector params)]) (format "~a ~a" (print-type (tree-type p)) (decl-print-name p))) ", "))
   (print-stmt bind 0 out)
   (fprintf out "\n\n"))
 

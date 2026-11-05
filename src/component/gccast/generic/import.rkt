@@ -15,6 +15,7 @@
 ;; ============================================================
 
 (require racket/list racket/match
+         "../../../kernel/data/data.rkt"
          "tree.rkt"
          "../../../kernel/ir/gccast/types.rkt"
          "../../../frontend/gccast/reader.rkt")
@@ -36,32 +37,35 @@
   (define nodes (Fn-nodes fn))
   (define n (vector-length nodes))
   ;; pass 1: shells
+  ;; Fn-nodes is a Racket vector because that is the dump's literal
+  ;; syntax; everything built from it is a pvector.
   (define shells
-    (for/vector ([nd (in-vector nodes)])
-      (T (Node-code nd) #f (Node-loc nd) (vector) (make-hasheq))))
+    (for/pvector ([nd (in-vector nodes)])
+      (T (Node-code nd) #f (Node-loc nd) (pvector-empty) (make-hasheq))))
   (define (res v)
     (cond
-      [(TreeId? v) (vector-ref shells (TreeId-id v))]
+      [(TreeId? v) (pvector-ref shells (TreeId-id v))]
       [(Wide? v) (wide->integer v)]
+      [(null? v) (pvector-empty)]                 ; empty vars/arguments/fields/elts/stmts
       [(pair? v)
-       (if (list? v) (map res v) (cons (res (car v)) (res (cdr v))))]
+       (if (list? v) (list->pvector (map res v)) (cons (res (car v)) (res (cdr v))))]
       [else v]))
   ;; pass 2: fill
-  (for ([nd (in-vector nodes)] [t (in-vector shells)])
+  (for ([nd (in-vector nodes)] [t (in-pvector shells)])
     (set-tree-type! t (res (Node-type nd)))
     (for ([p (in-list (Node-fields nd))])
       (define key (car p)) (define val (cdr p))
       (case key
-        [(ops) (set-T-ops! t (list->vector (map res val)))]
+        [(ops) (set-T-ops! t (list->pvector (map res val)))]
         [(context) (set-attr! t 'context val)]        ; (code . uid), not a ref
         [(mode) (set-attr! t 'mode val)]
         [else (set-attr! t key (res val))])))
   ;; TREE_CONSTANT on constants
-  (for ([t (in-vector shells)])
+  (for ([t (in-pvector shells)])
     (when (eq? (tree-code-class (tree-code t)) 'tcc_constant) (set-attr! t 'constant #t)))
   (install-global-types! shells)
-  (values (vector-ref shells (TreeId-id (Fn-decl fn)))
-          (and (Fn-body fn) (vector-ref shells (TreeId-id (Fn-body fn))))))
+  (values (pvector-ref shells (TreeId-id (Fn-decl fn)))
+          (and (Fn-body fn) (pvector-ref shells (TreeId-id (Fn-body fn))))))
 
 ;; ------------------------------------------------------------
 ;; Global type nodes
@@ -77,7 +81,7 @@
     [else #f]))
 
 (define (find-type shells pred)
-  (for/first ([t (in-vector shells)] #:when (and (type-p t) (pred t))) t))
+  (for/first ([t (in-pvector shells)] #:when (and (type-p t) (pred t))) t))
 
 (define (synth-type code name #:precision [prec #f] #:unsigned [uns #f] #:mode [mode #f] #:size [size #f] #:pointee [pointee #f])
   (define name-node (and name (make-tree 'identifier_node #:attrs (list (cons 'id name)))))

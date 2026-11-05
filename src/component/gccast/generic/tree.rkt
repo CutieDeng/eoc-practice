@@ -11,9 +11,12 @@
 ;; and converted back to prefab GIMPLE afterwards.
 ;;
 ;; One struct for every node.  `code` is GCC's lowercase tree code
-;; name ('plus_expr), `ops` the operand vector of expression-class
+;; name ('plus_expr), `ops` the operand pvector of expression-class
 ;; nodes, `attrs` a mutable hasheq for everything else (decl/type
 ;; fields, flags, constant values, STATEMENT_LIST contents ...).
+;; Every sequence is a pvector (operands, STATEMENT_LIST statements,
+;; BIND_EXPR vars, TYPE_FIELDS, DECL_ARGUMENTS, CONSTRUCTOR elts);
+;; in-place operand updates replace the node's pvector.
 ;; Accessors are named after the GCC macros they stand for.
 ;;
 ;; Tree-code classes and operand counts come from the per-GCC-version
@@ -25,7 +28,8 @@
 ;; function; see doc/roadmap.md 6.3 for the licensing note.
 ;; ============================================================
 
-(require racket/list racket/string racket/match racket/vector
+(require racket/list racket/string racket/match
+         "../../../kernel/data/data.rkt"
          "../../../frontend/gccast/reader.rkt")
 
 (provide (struct-out T)
@@ -92,7 +96,7 @@
                    [else ""]))))
 
 (define (make-tree code #:type [type #f] #:loc [loc #f] #:ops [ops '()] #:attrs [attrs '()])
-  (T code type loc (list->vector ops) (make-hasheq attrs)))
+  (T code type loc (if (pvector? ops) ops (list->pvector ops)) (make-hasheq attrs)))
 
 (define (attr t key [default #f]) (hash-ref (T-attrs t) key default))
 (define (set-attr! t key v) (hash-set! (T-attrs t) key v))
@@ -107,18 +111,16 @@
 
 (define (tree-operand t i)
   (define ops (T-ops t))
-  (if (< i (vector-length ops)) (vector-ref ops i) #f))
+  (if (< i (pvector-length ops)) (pvector-ref ops i) #f))
 (define (set-tree-operand! t i v)
-  (define ops (T-ops t))
-  (when (>= i (vector-length ops))
-    (define n (make-vector (add1 i) #f))
-    (vector-copy! n 0 ops)
-    (set-T-ops! t n))
-  (vector-set! (T-ops t) i v))
+  (define ops
+    (let grow ([ops (T-ops t)])
+      (if (>= i (pvector-length ops)) (grow (pvector-cons-right ops #f)) ops)))
+  (set-T-ops! t (pvector-set ops i v)))
 (define (tree-operand-length t)
   ;; VL_EXP: operand 0 is the count (INTEGER_CST) in GCC; in this
-  ;; representation we keep the real vector length.
-  (vector-length (T-ops t)))
+  ;; representation we keep the real pvector length.
+  (pvector-length (T-ops t)))
 
 ;; ------------------------------------------------------------
 ;; tree* : a settable place
@@ -213,7 +215,7 @@
 (define (build3 code type a b c) (build* code type (list a b c)))
 (define (build4 code type a b c d) (build* code type (list a b c d)))
 (define (copy-node t)
-  (T (T-code t) (T-type t) (T-loc t) (vector-copy (T-ops t)) (hash-copy (T-attrs t))))
+  (T (T-code t) (T-type t) (T-loc t) (T-ops t) (hash-copy (T-attrs t))))
 
 (define (wrap-int type n)
   ;; sign/zero-extend n to the type's precision (fold_convert_const semantics)
@@ -229,7 +231,7 @@
   (cond
     [(or (integral-type-p type) (pointer-type-p type)) (build-int-cst type 0)]
     [(scalar-float-type-p type) (build-real-cst type 0.0)]
-    [else (make-tree 'constructor #:type type #:attrs (list (cons 'elts '()) (cons 'constant #t)))]))
+    [else (make-tree 'constructor #:type type #:attrs (list (cons 'elts (pvector-empty)) (cons 'constant #t)))]))
 (define (build-real-cst type x)
   (make-tree 'real_cst #:type type #:attrs (list (cons 'real x) (cons 'constant #t))))
 
@@ -294,7 +296,7 @@
 (define (decl-ignored t) (attr t 'ignored #f))
 (define (decl-initial t) (attr t 'initial #f))
 (define (set-decl-initial! t v) (set-attr! t 'initial v))
-(define (decl-arguments t) (attr t 'arguments '()))
+(define (decl-arguments t) (attr t 'arguments (pvector-empty)))
 (define (decl-result t) (attr t 'result #f))
 (define (decl-context-uid t) (let ([c (attr t 'context #f)]) (and c (cdr c))))
 (define (decl-register t) (attr t 'register #f))
@@ -312,7 +314,7 @@
 (define (type-quals t) (attr t 'quals 0))
 (define (type-size t) (attr t 'size #f))
 (define (type-size-unit t) (attr t 'size-unit #f))
-(define (type-fields t) (attr t 'fields '()))
+(define (type-fields t) (attr t 'fields (pvector-empty)))
 (define (type-domain t) (attr t 'domain #f))
 (define (type-arg-types t) (attr t 'arg-types #f))
 (define (type-min-value t) (attr t 'min #f))
@@ -326,12 +328,12 @@
 (define (string-cst-bytes t) (attr t 'bytes))
 
 ;; BIND_EXPR: operands (vars body block); vars kept as a list in attrs
-(define (bind-expr-vars t) (attr t 'vars '()))
+(define (bind-expr-vars t) (attr t 'vars (pvector-empty)))
 (define (set-bind-expr-vars! t vs) (set-attr! t 'vars vs))
 (define (bind-expr-body t) (tree-operand t 1))
 (define (bind-expr-block t) (tree-operand t 2))
 
-(define (statement-list-stmts t) (attr t 'stmts '()))
+(define (statement-list-stmts t) (attr t 'stmts (pvector-empty)))
 (define (set-statement-list-stmts! t l) (set-attr! t 'stmts l))
 
 (define (tree-purpose t) (attr t 'purpose #f))
@@ -339,7 +341,7 @@
 (define (tree-chain t) (attr t 'chain #f))
 (define (set-tree-chain! t v) (set-attr! t 'chain v))
 
-(define (constructor-elts t) (attr t 'elts '()))
+(define (constructor-elts t) (attr t 'elts (pvector-empty)))
 (define (case-low t) (tree-operand t 0))
 (define (case-high t) (tree-operand t 1))
 (define (case-label t) (tree-operand t 2))
@@ -352,7 +354,7 @@
 (define (call-expr-nargs t) (max 0 (- (tree-operand-length t) 3)))
 (define (call-expr-arg t i) (tree-operand t (+ 3 i)))
 (define (set-call-expr-arg! t i v) (set-tree-operand! t (+ 3 i) v))
-(define (call-expr-args t) (for/list ([i (in-range (call-expr-nargs t))]) (call-expr-arg t i)))
+(define (call-expr-args t) (for/pvector ([i (in-range (call-expr-nargs t))]) (call-expr-arg t i)))
 (define (call-expr-internal? t) (attr t 'internal #f))
 
 (define (ssa-name-version t) (attr t 'version))
@@ -518,16 +520,16 @@
   (cond [(not e) #f]
         [(eq? (tree-code e) 'statement_list)
          (define l (statement-list-stmts e))
-         (if (null? l) #f (expr-first (car l)))]
+         (if (pvector-empty? l) #f (expr-first (pvector-ref l 0)))]
         [else e]))
 (define (expr-last e)
   (cond [(not e) #f]
         [(eq? (tree-code e) 'statement_list)
          (define l (statement-list-stmts e))
-         (if (null? l) #f (expr-last (last l)))]
+         (if (pvector-empty? l) #f (expr-last (pvector-last l)))]
         [else e]))
 
-(define (make-statement-list) (make-tree 'statement_list #:type (void-type) #:attrs (list (cons 'stmts '()) (cons 'side-effects #t))))
+(define (make-statement-list) (make-tree 'statement_list #:type (void-type) #:attrs (list (cons 'stmts (pvector-empty)) (cons 'side-effects #t))))
 
 ;; append_to_statement_list_1
 (define (append-to-statement-list-1! t r)
@@ -539,13 +541,13 @@
         (ref-set! r t)]
        [else
         (define sl (make-statement-list))
-        (set-statement-list-stmts! sl (list t))
+        (set-statement-list-stmts! sl (pvector t))
         (ref-set! r sl)])]
     [(eq? (tree-code lst) 'statement_list)
-     (set-statement-list-stmts! lst (append (statement-list-stmts lst) (list t)))]
+     (set-statement-list-stmts! lst (pvector-cons-right (statement-list-stmts lst) t))]
     [else
      (define sl (make-statement-list))
-     (set-statement-list-stmts! sl (list lst t))
+     (set-statement-list-stmts! sl (pvector lst t))
      (ref-set! r sl)]))
 
 ;; append_to_statement_list: skip statements without side effects
@@ -579,7 +581,7 @@
   (define se
     (or (and (eq? (tree-code-class (tree-code t)) 'tcc_reference) (tree-this-volatile t))
         (and (eq? (tree-code t) 'call_expr) #t)
-        (for/or ([o (in-vector (T-ops t))]) (and o (tree-side-effects o)))))
+        (for/or ([o (in-pvector (T-ops t))]) (and o (tree-side-effects o)))))
   (set-tree-side-effects! t (and se #t)))
 
 ;; ------------------------------------------------------------
@@ -649,4 +651,4 @@
     [(zero? depth) (format "~a" t)]
     [else
      (list* (tree-code t)
-            (for/list ([o (in-vector (T-ops t))]) (tree->datum o (sub1 depth))))]))
+            (for/list ([o (in-pvector (T-ops t))]) (tree->datum o (sub1 depth))))]))
