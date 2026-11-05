@@ -1,7 +1,7 @@
 RACKET = racket
 RACO   = raco
 
-.PHONY: test test-java test-aarch64 test-driver clean
+.PHONY: test test-java test-aarch64 test-driver test-gccast gccast-plugin clean
 
 # Full suite: every *-test.rkt under src/ and test/ + the aarch64 integration script.
 test:
@@ -26,6 +26,14 @@ test-aarch64:
 
 test-driver:
 	$(RACO) test src/driver/graph/graph-test.rkt src/kernel/data/idmap.rkt
+
+test-gccast:
+	$(RACO) test src/frontend/gccast/reader-test.rkt gccast-plugin/gen/treedef.rkt
+
+# Build the GCC plugin for the default gcc (override: make gccast-plugin GCC=gcc-15)
+GCC ?= gcc-15
+gccast-plugin:
+	$(RACKET) gccast-plugin/build.rkt --gcc $(GCC) --fixtures test/integration/gccast
 
 clean:
 	find src test -type d -name compiled -prune -exec rm -rf {} +

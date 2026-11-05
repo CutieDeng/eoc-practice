@@ -5,7 +5,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 FILES=$(find src test -name '*-test.rkt' | sort)
 # shellcheck disable=SC2086
-raco test $FILES src/kernel/data/idmap.rkt
+raco test $FILES src/kernel/data/idmap.rkt gccast-plugin/gen/treedef.rkt
 rc=$?
 racket test/integration/aarch64/basic.rkt || rc=1
 exit $rc
