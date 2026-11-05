@@ -16,11 +16,16 @@
 ;;   #s(Wide precision limbs)                INTEGER_CST wider than a host word
 ;;
 ;; Field conventions (see gccast.cc):
-;;   expressions          : ((ops ref ...) [(side-effects . #t)] [(vars ref ...)])  vars: BIND_EXPR only
+;;   expressions          : ((ops ref ...) [side-effects] [volatile] [readonly]
+;;                          [constant] [internal flags: CALL_EXPR] [vars: BIND_EXPR])
 ;;   declarations         : uid name public static external artificial
-;;                          readonly volatile size [initial | arguments result |
-;;                          offset bit-offset bit-field | arg-type]
-;;   types                : uid name size align quals [main-variant precision
+;;                          readonly volatile addressable used ignored register
+;;                          [not-gimple-reg] [context] size size-unit
+;;                          [initial | arguments result | offset bit-offset
+;;                          bit-field | arg-type | forced]
+;;   types                : uid name size align quals addressable mode
+;;                          [canonical-uid] [string-flag] [prototype] size-unit
+;;                          [main-variant precision
 ;;                          unsigned min max domain fields arg-types values]
 ;;   constants            : value | hex | bytes | real imag
 ;;   exceptional          : id | purpose value chain | elts | vars subblocks | stmts

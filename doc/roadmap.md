@@ -233,20 +233,47 @@ gccast-plugin/
 | component | 复用 `cfg-to-rvsdg` | 要求：op 透传；`Term:*` 形态在已支持列表内 |
 | pipeline | `pipeline/gccast/pipeline.rkt` | 走 `pass.rkt`：`read → lower-control → ssa → memory-state → cfg->rvsdg`，`run-pass` 校验 `requires` |
 
-### 6.3 新增共用工作：内存状态线程化
+### 6.3 GENERIC → GIMPLE：对齐 GCC trunk 的降级模块（决策 12）
+
+目标：读入的 PRE_GENERICIZE GENERIC 先按 GCC 自己的算法降到 GIMPLE，再进现有的 `Cfg → SSA → RVSDG`。算法参照 `/Users/cutiedeng/Y2026/M10/D28/gcc.git`（trunk 17.0.0，`352a0b5fc55`）；对齐基准是本机 gcc-15 对同一源码的 `-fdump-tree-{original,gimple,lower,cfg}`（`build.rkt` 已随夹具一起生成到 `test/integration/gccast/<name>.<ver>.{original,gimple,lower,cfg}`）。trunk 与 15.2 在 C 子集上的差异逐条记录。
+
+GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）：
+
+| GCC | 参照文件 | Racket 模块 | 基准 dump |
+|---|---|---|---|
+| `c_genericize`：FOR/WHILE/DO/SWITCH/BREAK/CONTINUE_STMT → LOOP/COND/GOTO/LABEL/SWITCH_EXPR | `c-family/c-gimplify.cc`（`genericize_c_loop` 等，1064 行） | `transform/genericize.rkt` | `.original` |
+| `gimplify_function_tree`：GENERIC → 高层 GIMPLE（`gbind`/`gcond`/`gassign` 三地址/`gcall`/`gswitch`/`greturn`） | `gimplify.cc` 非 OMP 部分（约 1 万行；核心 `gimplify_expr`、`gimplify_modify_expr(_rhs)`、`gimplify_cond_expr`、`shortcut_cond_expr`、`gimplify_compound_lval`、`gimplify_self_mod_expr`、`gimplify_call_expr`、`gimplify_bind_expr`、`gimplify_return_expr`、`gimplify_switch_expr`、`gimplify_loop_expr`、`internal_get_tmp_var`）+ `gimple-expr.cc` 谓词（`is_gimple_val/reg/lvalue/...`、`useless_type_conversion_p`） | `generic/tree.rkt`（可变 GENERIC 树 + GCC 宏同名访问器）、`transform/gimplify.rkt` | `.gimple` |
+| `lower_function_body`：拍平 `gbind`、合并 return | `gimple-low.cc` | `transform/gimple-low.rkt` | `.lower` |
+| `build_gimple_cfg`：按 label/goto/cond/switch/return 切块建边 | `tree-cfg.cc` | `transform/gimple-to-cfg.rkt`（产出 kernel `Cfg`） | `.cfg` |
+
+实现约定：
+- 对齐测试：我方 `gimple-print.rkt` 按 `gimple-pretty-print.cc` 的文本格式输出，与基准 dump 做规范化 diff（`D.NNNN`、`_N`、`name.K_N` 按首次出现顺序重编号；GCC 的 `tmp_var_id_num` 是翻译单元全局计数，SSA 版本号每函数从 1 起）。
+- 已确认的 -O0 行为（从 15.2 dump 读出，与 trunk 源码一致）：`gimplify_body` 以 `into_ssa=true` 进入，`internal_get_tmp_var` 对寄存器类型直接造 SSA 名（`_1`），有名字的来源得 `n.0_16`；`create_tmp_var` 造的 `D.NNNN`（`iftmp`、`retval`、`return_temp`）在 bind 头部声明；`maybe_fold_stmt` 在 -O0 也运行，至少 `get_symbol_constant_value` 可见（`static const double half` 被替换为 `5.0e-1`）；`i < 10` 已由前端折叠为 `i <= 9`，`?:` 已折叠为 `MAX_EXPR`，这些发生在插件取树之前。
+- 暂不实现：OpenMP/OpenACC、EH（`TRY_*`、`CLEANUP_POINT_EXPR` 只透传）、VLA（`gimplify_type_sizes`/`WITH_SIZE_EXPR`）、`asm`、`va_arg`、`TARGET_EXPR`、`gimplify_init_constructor` 的完整形态（首批只做标量初始化）、`fold_stmt` 的 match.pd 规则（只做常量折叠与只读符号替换，其余按基准 diff 逐条补）。
+- 目标相关量：`aggregate_value_p`（结构体是否经内存返回）按 AArch64 AAPCS64 近似为"聚合且大于 16 字节"，以参数形式暴露。
+- 许可：这些模块是 GCC（GPLv3）算法的逐函数改写，属派生作品；放在 `src/component/gccast/` 并在文件头标注来源与 GPLv3，仓库其余部分维持 MIT。是否接受这一许可混合由用户决定。
+
+里程碑 3 改为：`basic.c`、`struct.c`、`calls.c` 三个夹具的 `.gimple` 规范化 diff 为空（12.5.0 与 15.2.0 两套基准）；随后 `.lower`、`.cfg`；最后接 `ssa-construct`/`cfg-to-rvsdg`。
+
+### 6.4 新增共用工作：内存状态线程化
 
 `component/cfg/transform/thread-memory-state.rkt`：对非寄存器 lvalue 的写、解引用读、调用，引入一个线性 `MemState` VarId 作为额外输入/输出，SSA 后 `cfg-to-rvsdg` 自然得到状态边。Java 链路可同样接入（GETFIELD/PUTFIELD/INVOKE*）。
 
-### 6.4 里程碑
+### 6.5 里程碑
 
 | # | 内容 | 状态（2026-11-05） |
 |---|---|---|
 | 1 | 空插件在 macOS gcc-15 上加载（验证 `-fplugin` 可用） | 完成：gcc-15 15.2.0 与 gcc@12 12.5.0 都能加载；`PRE_GENERICIZE` 对 C/C++ 函数触发 |
 | 2 | `.dat` 能被 `reader.rkt` 读成 `TU`，节点表引用闭合 | 完成：`gccast-plugin/` 骨架 + `src/kernel/ir/gccast/types.rkt` + `src/frontend/gccast/reader.rkt`；夹具 `test/integration/gccast/{basic.c,struct.c,method.cc}.{12.5.0,15.2.0}.dat`；`reader-test.rkt` 10 项（含按访问宏名取 `FOR_COND`/`FOR_BODY`，12 与 15 操作数个数不同但同一测试通过） |
-| 3 | `lower-control` 处理 if/while/for/switch/return，`gccast → Cfg → SSA → RVSDG` 跑通，RVSDG 形态与同构 Java 方法一致 | 待做 |
+| 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（6 项） |
+| 3b | GIMPLE → lower → Cfg（`gimple-low.rkt`、`gimple-to-cfg.rkt`），对齐 `.lower`/`.cfg`，再接 `ssa-construct`/`cfg-to-rvsdg` | 待做；实现规格见 `doc/gimple-lower-cfg-spec.md`（lower 的 return 合并与 -O0 非 artificial return label、make_blocks/make_edges 规则、`cleanup_tree_cfg` 在 -O0 的实际行为、dump 格式） |
 | 4 | 指针、结构体、数组、调用 + 内存状态边 | 待做 |
 
-实现备注：
+实现备注（3a，gimplify 对齐过程中确认的 GCC 行为）：
+- 基准 dump 里 `_1`、`n.0_16` 这类名字说明 `gimplify_body` 以 `into_ssa=true` 运行：寄存器类型的形式临时量直接是 SSA 名，有名来源时标识符为 `create_tmp_var_name(name)`（`tmp_var_id_num` 翻译单元全局）；`create_tmp_var` 产生的 `D.NNNN` 只有 `iftmp`/`retval`/return_temp。
+- `maybe_fold_stmt` 在 -O0 生效且可见：可交换运算与条件按 `tree_swap_operands_p` 规范化操作数顺序（`acc + _19`，常量靠右、SSA 名靠右、decl 靠右）；只读静态变量的常量初值被代入（`half.2_22 = 5.0e-1`）。
+- -O0 的标签劫持规则依赖源码位置：`if (c) break;` 因 COND_EXPR 与 BREAK 生成的 GOTO 位置不同而不劫持，生成 `<L1>: goto <break>; <L2>:`；循环出口 `COND_EXPR` 的两个 GOTO 没有位置，所以劫持。genericize 必须像 `build1_loc` 一样给 break/continue 的 GOTO 带位置。
+- 未覆盖（见 6.3）：CLOBBER 清理（局部聚合/取址变量会生成 `try { } finally { x ={v} {CLOBBER(eos)}; }`）、`gimplify_init_constructor` 完整形态、builtin 折叠、VLA、EH。
 - 插件产物固定命名 `gccast.so`（macOS 也是）：GCC 以去掉 `.so` 后的文件名作为插件名解析 `-fplugin-arg-<name>-*`，`.dylib` 会匹配不上。
 - 不输出 decl 的 `TREE_CHAIN`：命名空间级声明的 chain 是全部兄弟声明（含 builtin），`method.cc` 曾因此膨胀到 16 022 节点；改为只在拥有链的构造上物化列表（`BIND_EXPR` 的 `vars`、`TYPE_FIELDS`、`DECL_ARGUMENTS`、`BLOCK` 的 `vars`）后为 87 节点。
 - 每个函数独立节点表：`PRE_GENERICIZE` 回调内同步序列化，指针→下标映射只在该函数内有效，避免 GC 复用地址造成跨函数别名；跨函数的类型/声明同一性靠 `DECL_UID`/`TYPE_UID` 恢复。
@@ -284,3 +311,4 @@ Phase 0 之前不能跑任何测试，是唯一的硬前置。Phase 1 #3（支�
 9. 类型信息放 `Cfg-info` 中 `VarId → type` 的 intmap。
 10. 内存状态边：AST 无虚拟操作数；在 lowering 之后线程化内存状态，再由 cfg-to-rvsdg 建状态边。Java 链路目前也没有内存状态边（已验证 `cfg-to-rvsdg.rkt` 无 state 处理，仅有 `current-exn-out`），该工作对两个前端共用。
 11. **GCC 插件源码由 Racket 生成器按版本生成**（细节见 6.1），本机以 gcc-15 为主、gcc@12 作第二版本做兼容验证。
+12. **GENERIC → GIMPLE 降级按 GCC trunk 算法逐函数改写**（6.3），用 gcc-15 的 `-fdump-tree-*` 作对齐基准；在 `alpha` 分支开发。

@@ -36,6 +36,7 @@
 #include "tree.h"
 #include "tree-iterator.h"
 #include "real.h"
+#include "calls.h"
 
 #include <cstdio>
 #include <cstring>
@@ -145,7 +146,11 @@ struct Serializer {
       case tcc_declaration: decl(t, code, o); break;
       case tcc_type:        type(t, code, o); break;
       case tcc_constant:    constant(t, code, o); break;
-      case tcc_exceptional: exceptional(t, code, o); break;
+      case tcc_exceptional:
+        exceptional(t, code, o);
+        // genericize/gimplify test TREE_SIDE_EFFECTS on STATEMENT_LISTs and constructors
+        if (TREE_SIDE_EFFECTS(t)) field_bool(o, "side-effects", true);
+        break;
       default:              operands(t, code, o); break;   // unary/binary/comparison/reference/statement/vl_exp/expression
     }
     o += "))";
@@ -157,6 +162,13 @@ struct Serializer {
     for (int i = 0; i < n; i++) { o += ' '; ref(o, TREE_OPERAND(t, i)); }
     o += ')';
     if (TREE_SIDE_EFFECTS(t)) field_bool(o, "side-effects", true);
+    if (TREE_THIS_VOLATILE(t)) field_bool(o, "volatile", true);
+    if (TREE_READONLY(t)) field_bool(o, "readonly", true);
+    if (TREE_CONSTANT(t)) field_bool(o, "constant", true);
+    if (code == CALL_EXPR) {
+      if (CALL_EXPR_FN(t) == NULL_TREE) field_bool(o, "internal", true);
+      field_int(o, "flags", call_expr_flags(t));
+    }
     // Decl chains are not emitted on the decls themselves (a namespace-
     // scope decl's chain is every sibling declaration, builtins included);
     // the one GENERIC construct that owns a decl chain spells it out here.
@@ -175,7 +187,22 @@ struct Serializer {
     field_bool(o, "artificial", DECL_ARTIFICIAL(t));
     field_bool(o, "readonly", TREE_READONLY(t));
     field_bool(o, "volatile", TREE_THIS_VOLATILE(t));
+    field_bool(o, "addressable", TREE_ADDRESSABLE(t));
+    field_bool(o, "used", TREE_USED(t));
+    field_bool(o, "ignored", DECL_IGNORED_P(t));
+    field_bool(o, "register", DECL_REGISTER(t));
+    if (VAR_P(t) || code == PARM_DECL || code == RESULT_DECL)
+      field_bool(o, "not-gimple-reg", DECL_NOT_GIMPLE_REG_P(t));
+    // context: uid + code of DECL_CONTEXT (function / translation unit / record ...)
+    if (DECL_CONTEXT(t)) {
+      tree c = DECL_CONTEXT(t);
+      field(o, "context"); o += "(";
+      o += get_tree_code_name(TREE_CODE(c)); o += " . ";
+      if (DECL_P(c)) put_int(o, DECL_UID(c)); else if (TYPE_P(c)) put_int(o, TYPE_UID(c)); else o += "#f";
+      o += "))";
+    }
     field_ref(o, "size", DECL_SIZE(t));
+    field_ref(o, "size-unit", DECL_SIZE_UNIT(t));
     switch (code) {
       case VAR_DECL:
       case CONST_DECL:
@@ -193,6 +220,9 @@ struct Serializer {
       case PARM_DECL:
         field_ref(o, "arg-type", DECL_ARG_TYPE(t));
         break;
+      case LABEL_DECL:
+        field_bool(o, "forced", FORCED_LABEL(t));
+        break;
       default: break;
     }
   }
@@ -203,6 +233,12 @@ struct Serializer {
     field_ref(o, "size", TYPE_SIZE(t));
     field_int(o, "align", TYPE_ALIGN(t));
     field_int(o, "quals", TYPE_QUALS(t));
+    field_bool(o, "addressable", TREE_ADDRESSABLE(t));
+    field_str(o, "mode", GET_MODE_NAME(TYPE_MODE(t)));
+    if (TYPE_CANONICAL(t)) field_int(o, "canonical-uid", TYPE_UID(TYPE_CANONICAL(t)));
+    if (code == ARRAY_TYPE) field_bool(o, "string-flag", TYPE_STRING_FLAG(t));
+    if (code == FUNCTION_TYPE || code == METHOD_TYPE) field_bool(o, "prototype", prototype_p(t));
+    field_ref(o, "size-unit", TYPE_SIZE_UNIT(t));
     if (TYPE_MAIN_VARIANT(t) != t) field_ref(o, "main-variant", TYPE_MAIN_VARIANT(t));
     if (INTEGRAL_TYPE_P(t) || SCALAR_FLOAT_TYPE_P(t)) {
       field_int(o, "precision", TYPE_PRECISION(t));

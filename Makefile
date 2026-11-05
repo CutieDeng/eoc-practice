@@ -28,7 +28,8 @@ test-driver:
 	$(RACO) test src/driver/graph/graph-test.rkt src/kernel/data/idmap.rkt
 
 test-gccast:
-	$(RACO) test src/frontend/gccast/reader-test.rkt gccast-plugin/gen/treedef.rkt
+	$(RACO) test src/frontend/gccast/reader-test.rkt gccast-plugin/gen/treedef.rkt \
+	             src/component/gccast/transform/gimplify-test.rkt
 
 # Build the GCC plugin for the default gcc (override: make gccast-plugin GCC=gcc-15)
 GCC ?= gcc-15

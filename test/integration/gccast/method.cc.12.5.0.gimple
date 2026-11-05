@@ -1,0 +1,20 @@
+int h (const struct S & s)
+{
+  int D.3989;
+
+  _1 = S::get (s);
+  D.3989 = _1 + 1;
+  return D.3989;
+}
+
+
+int S::get (const struct S * const this)
+{
+  int D.3991;
+
+  _1 = this->x;
+  D.3991 = _1 * 2;
+  return D.3991;
+}
+
+

@@ -1,0 +1,60 @@
+
+;; Function sum (sum, funcdef_no=0, decl_uid=3612, cgraph_uid=1, symbol_order=2)
+
+long unsigned int sum (const struct P * ps, int n)
+{
+  long unsigned int acc;
+  long unsigned int D.3625;
+
+  acc = 0;
+  goto <D.3619>;
+  <D.3620>:
+  _1 = (long unsigned int) n;
+  _2 = _1 * 12;
+  _3 = ps + _2;
+  _4 = _3->x;
+  _5 = _4 * 2;
+  _6 = (long unsigned int) n;
+  _7 = _6 * 12;
+  _8 = ps + _7;
+  _9 = _8->y;
+  _10 = _5 + _9;
+  _11 = (long unsigned int) _10;
+  acc = acc + _11;
+  _12 = (long unsigned int) n;
+  _13 = _12 * 12;
+  _14 = ps + _13;
+  _15 = _14->tag;
+  if (_15 == 122) goto <D.3623>; else goto <D.3624>;
+  <D.3623>:
+  goto <D.3618>;
+  <D.3624>:
+  <D.3619>:
+  n.0_16 = n;
+  n = n.0_16 + -1;
+  if (n.0_16 > 0) goto <D.3620>; else goto <D.3618>;
+  <D.3618>:
+  switch (n) <default: <D.3617>, case 0: <D.3615>, case 1: <D.3616>>
+  <D.3615>:
+  acc = acc + 1;
+  goto <D.3621>;
+  <D.3616>:
+  acc = acc + 2;
+  <D.3617>:
+  acc = acc + 3;
+  <D.3621>:
+  msg.1_17 = msg;
+  _18 = *msg.1_17;
+  _19 = (long unsigned int) _18;
+  _20 = acc + _19;
+  _21 = (double) n;
+  half.2_22 = 5.0e-1;
+  _23 = _21 * half.2_22;
+  _24 = (long unsigned int) _23;
+  D.3625 = _20 + _24;
+  goto <D.3626>;
+  <D.3626>:
+  return D.3625;
+}
+
+

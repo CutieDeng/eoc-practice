@@ -92,6 +92,13 @@
         (run/ok (if cxx? gxx gcc)
                 (string-append "-fplugin=" (path->string lib))
                 (string-append "-fplugin-arg-gccast-out=" (path->string dat))
+                ;; GCC's own lowering dumps are the alignment oracle for
+                ;; src/component/gccast/transform/*
+                "-O0"
+                (string-append "-fdump-tree-original=" (path->string (build-path out (string-append name ".original"))))
+                (string-append "-fdump-tree-gimple=" (path->string (build-path out (string-append name ".gimple"))))
+                (string-append "-fdump-tree-lower=" (path->string (build-path out (string-append name ".lower"))))
+                (string-append "-fdump-tree-cfg=" (path->string (build-path out (string-append name ".cfg"))))
                 "-c" name "-o" (if (eq? (system-type 'os) 'windows) "NUL" "/dev/null")))
       (define tu (call-with-input-file dat read))
       (unless (and (vector? (struct->vector tu)) (eq? (prefab-struct-key tu) 'TU))
@@ -101,7 +108,11 @@
               (for/sum ([fn fns]) (vector-length (vector-ref (struct->vector fn) 4))))
       (when fixtures
         (make-directory* fixtures)
-        (copy-file dat (build-path fixtures (string-append name "." ver ".dat")) #t)))))
+        (copy-file dat (build-path fixtures (string-append name "." ver ".dat")) #t)
+        (for ([ext '("original" "gimple" "lower" "cfg")])
+          (define src (build-path out (string-append name "." ext)))
+          (when (file-exists? src)
+            (copy-file src (build-path fixtures (string-append name "." ver "." ext)) #t)))))))
 
 (module+ main
   (define gccs '()) (define tests? #t) (define fixtures #f)

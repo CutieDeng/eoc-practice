@@ -1,0 +1,14 @@
+
+;; Function int S::get() const (null)
+;; enabled by -tree-original
+
+
+return <retval> = (int) ((const struct S *) this)->x * 2;
+
+
+;; Function int h(const S&) (null)
+;; enabled by -tree-original
+
+
+<<cleanup_point return <retval> = S::get ((const struct S *) s) + 1>>;
+

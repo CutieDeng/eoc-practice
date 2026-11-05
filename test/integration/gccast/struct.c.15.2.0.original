@@ -1,0 +1,33 @@
+
+;; Function sum (null)
+;; enabled by -tree-original
+
+
+{
+  long unsigned int acc = 0;
+
+    long unsigned int acc = 0;
+  goto <D.4476>;
+  <D.4477>:;
+  acc = (long unsigned int) ((int) (ps + (sizetype) ((long unsigned int) n * 12))->x * 2 + (int) (ps + (sizetype) ((long unsigned int) n * 12))->y) + acc;
+  if ((ps + (sizetype) ((long unsigned int) n * 12))->tag == 122)
+    {
+      goto <D.4475>;
+    }
+  <D.4476>:;
+  if (n--  > 0) goto <D.4477>; else goto <D.4475>;
+  <D.4475>:;
+  switch (n)
+    {
+      case 0:;
+      acc++ ;
+      goto <D.4478>;
+      case 1:;
+      acc = acc + 2;
+      default:;
+      acc = acc + 3;
+      <D.4478>:;
+    }
+  return ((long unsigned int) *msg + acc) + (long unsigned int) ((double) n * (double) half);
+}
+

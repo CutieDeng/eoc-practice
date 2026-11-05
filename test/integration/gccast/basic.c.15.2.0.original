@@ -1,0 +1,40 @@
+
+;; Function f (null)
+;; enabled by -tree-original
+
+
+{
+  if (a > 0)
+    {
+      return a + 1;
+    }
+  else
+    {
+      return -a;
+    }
+}
+
+
+;; Function g (null)
+;; enabled by -tree-original
+
+
+{
+  int s = 0;
+
+    int s = 0;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.4472>;
+    <D.4471>:;
+    s = s + i;
+    i++ ;
+    <D.4472>:;
+    if (i <= 9) goto <D.4471>; else goto <D.4469>;
+    <D.4469>:;
+  }
+  return s;
+}
+
