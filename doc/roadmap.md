@@ -264,7 +264,9 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 
 ### 6.4 新增共用工作：内存状态线程化
 
-`component/cfg/transform/thread-memory-state.rkt`：对非寄存器 lvalue 的写、解引用读、调用，引入一个线性 `MemState` VarId 作为额外输入/输出，SSA 后 `cfg-to-rvsdg` 自然得到状态边。Java 链路可同样接入（GETFIELD/PUTFIELD/INVOKE*）。
+GIMPLE 侧完成（2026-11-06）：内存状态就是 GCC 的虚拟操作数 `.MEM`，作为泛型 SSA 端口的最后一个变量（`component/gimple/ssa.rkt`）：读内存（内存引用、非寄存器对象、每条 `return`、pure 调用）的语句有 VUSE，写内存（内存 lhs、非 const/pure 调用、clobber）的语句有 VDEF（同时 VUSE 旧状态）；名字存在语句 flags 的 `'vuse`/`'vdef`，分配顺序为 uses、VDEF、实定义，与 GCC 的版本号一致。对齐基准 `-fdump-tree-ssa-vops`（`.ssavops` 夹具）：`# .MEM_N = VDEF <.MEM_M>`、`# VUSE <.MEM_M>`、`.MEM` 的 PHI 在三个 C 夹具 × gcc 12/15 上逐行相同（`ssa-test.rkt` 12 项）。RVSDG 适配器（`component/gimple/rvsdg.rkt`）把 VUSE 作 load/store/call 的最后一个输入、VDEF 作额外输出、`return` 带上最终状态、`.MEM_N(D)` 作参数——状态边由此自然进入 Lambda/Gamma/Theta。-O0 只有一条 `.MEM` 链，没有别名分区，比 GCC -O1+ 保守。
+
+Java 侧待做：`jvm-to-cfg` 的 GETFIELD/PUTFIELD/INVOKE* 以同样方式接入（Java 端口的 `variables` 多一个状态变量）。原设想的独立 pass `component/cfg/transform/thread-memory-state.rkt` 不再需要。
 
 ### 6.5 里程碑
 

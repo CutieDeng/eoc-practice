@@ -21,7 +21,7 @@
          "ssa.rkt")
 
 (provide print-function print-lowered-function print-cfg-function print-ssa-function print-type print-expr
-         print-declarator print-stmt print-cond-rhs print-cfg-mode decl-print-name label-name)
+         print-declarator print-stmt print-cond-rhs print-cfg-mode print-vops? decl-print-name label-name)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -101,6 +101,8 @@
 
 ;; dump_gimple_switch appends the edge probability ("[INV]") once a CFG exists
 (define print-cfg-mode (make-parameter #f))
+;; -vops: "# .MEM_N = VDEF <.MEM_M>" / "# VUSE <.MEM_M>" before a statement
+(define print-vops? (make-parameter #f))
 
 ;; SSA_NAME: identifier_version, var-name_version or _version; default
 ;; definitions carry "(D)"
@@ -392,12 +394,20 @@
     (for ([i (in-pvector bbs)])
       (define b (cfg-block cfg i))
       (fprintf out "  <bb ~a> :\n" i)
-      (for ([ph (in-pvector (GBlock-phis b))])
+      ;; dump_phi_nodes: virtual PHIs only with -vops
+      (for ([ph (in-pvector (GBlock-phis b))]
+            #:when (or (print-vops?) (not (virtual-operand? (gphi-var ph)))))
         (fprintf out "  # ~a = PHI <~a>\n" (print-expr st (gphi-result ph))
                  (string-join (for/list ([arg (in-pvector (gphi-args ph))])
                                 (format "~a(~a)" (if (cdr arg) (print-expr st (cdr arg)) "<null>") (car arg)))
                               ", ")))
-      (for ([g (in-pvector (GBlock-stmts b))]) (print-stmt st g (if (glabel? g) 0 2) out))
+      (for ([g (in-pvector (GBlock-stmts b))])
+        (when (print-vops?)
+          (define vd (stmt-vdef g)) (define vu (stmt-vuse g))
+          (cond
+            [vd (fprintf out "  # ~a = VDEF <~a>\n" (print-expr st vd) (print-expr st vu))]
+            [vu (fprintf out "  # VUSE <~a>\n" (print-expr st vu))]))
+        (print-stmt st g (if (glabel? g) 0 2) out))
       ;; dump_implicit_edges
       (define last (bb-last-stmt cfg i))
       (cond

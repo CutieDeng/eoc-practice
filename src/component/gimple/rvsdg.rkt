@@ -27,8 +27,12 @@
 ;;                                version order ('java/ssa-param-names
 ;;                                / 'java/max-local as the structurizer
 ;;                                expects)
-;; Memory stays as opaque load/store placeholders until the memory
-;; state threading of roadmap 6.4.
+;; Memory state (roadmap 6.4): the SSA pass threads GCC's virtual
+;; operand .MEM through every memory-touching statement (ssa.rkt); here
+;; the VUSE name becomes the last input of a load / store / call and
+;; the VDEF name an extra output, and a return carries the final state
+;; as an extra value.  The default definition .MEM_N(D) is one of the
+;; "parameters", so the state enters the Lambda like any argument.
 ;;
 ;; (gimple->rvsdg st fndecl cfg) -> Lambda
 ;; ============================================================
@@ -126,6 +130,12 @@
      (define v (VarId (cs-next c1)))
      (values v (pvector-cons-right extra (mk-insn '(gimple . const) (pvector x) (pvector v))) (cs (add1 (cs-next c1))))]))
 
+(define (vuse-in g) (let ([v (stmt-vuse g)]) (if v (pvector (ssa-var v)) (pvector-empty))))
+(define (vdef-out g) (let ([v (stmt-vdef g)]) (if v (pvector (ssa-var v)) (pvector-empty))))
+;; a memory/call instruction: state in last, state out after the real outputs
+(define (mk-stateful op inputs outputs g)
+  (mk-insn op (pvector-append inputs (vuse-in g)) (pvector-append outputs (vdef-out g))))
+
 (define (stmt-views st c g)
   ;; -> (values insns c)
   (cond
@@ -140,7 +150,7 @@
           ;; a plain load
           [(and (eq? (gimple-rhs-class st code) 'single) (memory-ref? st (gassign-rhs1 g)))
            (define-values (ins shape) (ref-inputs st (gassign-rhs1 g)))
-           (values (pvector (mk-insn '(gimple . load) (pvector-cons-right ins shape) (pvector out))) c)]
+           (values (pvector (mk-stateful '(gimple . load) (pvector-cons-right ins shape) (pvector out) g)) c)]
           [else
            (define-values (ins extra c1) (operands st c rhs-trees))
            (values (pvector-cons-right extra (mk-insn (cons 'gimple code) ins (pvector out))) c1)])]
@@ -148,7 +158,7 @@
         ;; store: the rhs is a single operand (GIMPLE memory stores are is_gimple_val rhs)
         (define-values (val extra c1) (operand st c (gassign-rhs1 g)))
         (define-values (ins shape) (ref-inputs st lhs))
-        (values (pvector-cons-right extra (mk-insn '(gimple . store) (pvector-cons-right (pvector-cons-right ins shape) val) (pvector-empty))) c1)])]
+        (values (pvector-cons-right extra (mk-stateful '(gimple . store) (pvector-cons-right (pvector-cons-right ins shape) val) (pvector-empty) g)) c1)])]
     [(gcall? g)
      (define fn (gcall-fn g))
      (define name (cond [(and (eq? (tree-code fn) 'addr_expr) (decl-name (tree-operand fn 0))) => values]
@@ -157,13 +167,14 @@
      (define-values (ins extra c1) (operands st c (pvector->list (gcall-args g))))
      (define lhs (gcall-lhs g))
      (cond
-       [(not lhs) (values (pvector-cons-right extra (mk-insn (list 'gimple 'call name) ins (pvector-empty))) c1)]
+       [(not lhs) (values (pvector-cons-right extra (mk-stateful (list 'gimple 'call name) ins (pvector-empty) g)) c1)]
        [(eq? (tree-code lhs) 'ssa_name)
-        (values (pvector-cons-right extra (mk-insn (list 'gimple 'call name) ins (pvector (ssa-var lhs)))) c1)]
+        (values (pvector-cons-right extra (mk-stateful (list 'gimple 'call name) ins (pvector (ssa-var lhs)) g)) c1)]
        [else
+        ;; the call's VDEF covers the store into the memory lhs as well
         (define v (VarId (cs-next c1)))
         (define-values (sins shape) (ref-inputs st lhs))
-        (values (pvector-append extra (pvector (mk-insn (list 'gimple 'call name) ins (pvector v))
+        (values (pvector-append extra (pvector (mk-stateful (list 'gimple 'call name) ins (pvector v) g)
                                                (mk-insn '(gimple . store) (pvector-cons-right (pvector-cons-right sins shape) v) (pvector-empty))))
                 (cs (add1 (cs-next c1))))])]
     [else (values (pvector-empty) c)]))     ; labels, predicts, nops carry nothing
@@ -199,11 +210,13 @@
                (Term:switch v cases (BlockId (label-to-block* cfg (case-label (gswitch-default-case last)))))
                c2)]
       [(greturn? last)
+       ;; the final memory state is returned alongside the value
+       (define state (vuse-in last))
        (cond
          [(greturn-retval last)
           (define-values (v extra c2) (as-var st c1 (greturn-retval last)))
-          (values (pvector-append insns extra) (Term:ret (pvector v)) c2)]
-         [else (values insns (Term:ret (pvector-empty)) c1)])]
+          (values (pvector-append insns extra) (Term:ret (pvector-append (pvector v) state)) c2)]
+         [else (values insns (Term:ret state) c1)])]
       [(= (pvector-length succs) 1) (values insns (Term:jump (dest (pvector-first succs))) c1)]
       [(pvector-empty? succs) (values insns (Term:unreachable) c1)]
       [else (error 'gimple->rvsdg "block ~a: ~a successors without a control statement" i (pvector-length succs))]))

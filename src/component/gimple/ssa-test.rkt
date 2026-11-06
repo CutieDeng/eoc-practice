@@ -25,24 +25,26 @@
   (define-values (cfg* st3) (build-ssa st2 decl cfg))
   (values decl cfg* locals st3))
 
-;; (values text st cfgs)
-(define (ssa-tu tu)
+;; (values text st cfgs); VOPS? selects the -vops dump format
+(define (ssa-tu tu [vops? #f])
   (define o (open-output-string))
   (define-values (st* cfgs)
-    (for/fold ([st (import-tu tu)] [cfgs '()] #:result (values st (reverse cfgs))) ([fn (in-list (TU-fns tu))])
-      (define-values (decl cfg locals st1) (ssa-fn st fn))
-      (print-ssa-function st1 decl locals cfg o)
-      (values st1 (cons cfg cfgs))))
+    (parameterize ([print-vops? vops?])
+      (for/fold ([st (import-tu tu)] [cfgs '()] #:result (values st (reverse cfgs))) ([fn (in-list (TU-fns tu))])
+        (define-values (decl cfg locals st1) (ssa-fn st fn))
+        (print-ssa-function st1 decl locals cfg o)
+        (values st1 (cons cfg cfgs)))))
   (values (get-output-string o) st* cfgs))
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c")])
-    (test-case (format "~a ~a: ssa dump aligns with GCC" name ver)
+         [name '("basic.c" "calls.c" "struct.c")]
+         [oracle '("ssa" "ssavops")])
+    (test-case (format "~a ~a: ~a dump aligns with GCC" name ver oracle)
       (define tu (read-gccast-file (build-path fixtures (format "~a.~a.dat" name ver))))
-      (define-values (text st cfgs) (ssa-tu tu))
+      (define-values (text st cfgs) (ssa-tu tu (equal? oracle "ssavops")))
       (define ours (normalize-gimple-text text))
-      (define gcc (normalize-gimple-text (file->string (build-path fixtures (format "~a.~a.ssa" name ver)))))
+      (define gcc (normalize-gimple-text (file->string (build-path fixtures (format "~a.~a.~a" name ver oracle)))))
       (unless (string=? ours gcc)
         (fail (format "mismatch (~a ~a)\n~a\n--- ours ---\n~a\n--- gcc ---\n~a" name ver (first-diff ours gcc) ours gcc)))
       (for ([cfg (in-list cfgs)])

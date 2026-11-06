@@ -7,15 +7,23 @@
 ;; The GIMPLE port of the generic SSA driver (driver/ssa/construct.rkt):
 ;;   - variables: the is_gimple_reg declarations (VAR/PARM/RESULT_DECL
 ;;     that are scalar, not addressable, not volatile) mentioned by the
-;;     function, in DECL_UID order (insert_phi_nodes sorts by uid);
-;;   - defs: the lhs of an assignment or call when it is such a decl;
-;;     uses: every such decl inside an operand tree (lhs memory
-;;     references included);
+;;     function, in DECL_UID order (insert_phi_nodes sorts by uid), plus
+;;     the virtual operand `.MEM` (gimple_vop) last;
+;;   - real defs: the lhs of an assignment or call when it is such a
+;;     decl; real uses: every such decl inside an operand tree;
+;;   - virtual operands (tree-ssa-operands.cc): a statement that reads
+;;     memory (a memory reference or a non-register object outside an
+;;     ADDR_EXPR, every GIMPLE_RETURN, a pure call) has a VUSE; one that
+;;     writes memory (memory lhs, a call that is neither const nor pure,
+;;     a clobber) has a VDEF (which also uses the old state).  The
+;;     renamer stores the names in the statement flags 'vuse / 'vdef;
+;;     the order of allocation is uses, then the VDEF, then the real def
+;;     (that is the version order GCC produces);
 ;;   - names: make_ssa_name on the decl; default definitions carry the
 ;;     'default-def flag (printed x_N(D));
 ;;   - after renaming, SSA names of DECL_IGNORED_P variables are made
 ;;     anonymous (SSA_NAME_VAR cleared, identifier kept), as
-;;     pass_build_ssa::execute does.
+;;     pass_build_ssa::execute does; `.MEM` keeps its variable.
 ;; Policies: pruned, children in RPO, PHI results named at insertion.
 ;;
 ;; (build-ssa st fndecl cfg) -> (values cfg st)
@@ -31,13 +39,19 @@
          "gimplify.rkt"
          "cfg.rkt")
 
-(provide build-ssa ssa-names-in-version-order)
+(provide build-ssa ssa-names-in-version-order virtual-operand? stmt-vuse stmt-vdef)
 
 ;; adapter value
-(struct ga (st cfg))
+(struct ga (st cfg vop))     ; vop: the .MEM declaration
 
 (define (reg-decl? st t)
   (and t (memq (tree-code t) '(var_decl parm_decl result_decl)) (is-gimple-reg st t)))
+
+(define (virtual-operand? d) (and d (tree-attr d 'virtual #f) #t))
+(define (stmt-vuse g) (stmt-flag g 'vuse #f))
+(define (stmt-vdef g) (stmt-flag g 'vdef #f))
+
+;; ---- real operands ----------------------------------------------------
 
 ;; every is_gimple_reg decl occurrence inside an operand tree, in operand order
 (define (tree-reg-uses st t)
@@ -56,7 +70,7 @@
     [(pvector-empty? (tree-ops t)) t]
     [else (tree-set-ops t (for/pvector ([o (in-pvector (tree-ops t))]) (subst-reg-uses st o f)))]))
 
-;; the statement's definition (a reg decl) or #f
+;; the statement's real definition (a reg decl) or #f
 (define (stmt-def st g)
   (cond
     [(gassign? g) (and (reg-decl? st (gassign-lhs g)) (gassign-lhs g))]
@@ -78,24 +92,65 @@
 
 (define (stmt-uses st g) (append* (for/list ([t (in-list (stmt-use-trees st g))]) (tree-reg-uses st t))))
 
-;; rewrite the statement: uses through USE-F, the def (if any) to DEF-NAME
-(define (rewrite-stmt st g use-f def-name)
-  (define (u t) (subst-reg-uses st t use-f))
+;; ---- virtual operands ---------------------------------------------------
+
+;; does T access memory (get_expr_operands adds a virtual operand)?
+;; Objects under an ADDR_EXPR are not accessed.
+(define (tree-touches-memory? st t)
+  (cond
+    [(not t) #f]
+    [else
+     (case (tree-code t)
+       [(ssa_name integer_cst real_cst addr_expr) #f]
+       [(var_decl parm_decl result_decl) (not (is-gimple-reg st t))]
+       [(string_cst const_decl) #t]
+       [(mem_ref target_mem_ref array_ref array_range_ref component_ref realpart_expr imagpart_expr bit_field_ref) #t]
+       [else (for/or ([o (in-pvector (tree-ops t))]) (tree-touches-memory? st o))])]))
+
+;; (values vuse? vdef?) for a statement (parse_ssa_operands / maybe_add_call_vops)
+(define (stmt-vops st g)
   (cond
     [(gassign? g)
-     (define rhs1 (u (gassign-rhs1 g)))
-     ;; gimple_assign_rhs_code: for a GIMPLE_SINGLE_RHS the code is TREE_CODE (rhs1)
-     (define code (if (eq? (gimple-rhs-class st (gassign-code g)) 'single) (tree-code rhs1) (gassign-code g)))
-     (gassign (gassign-loc g) (gassign-flags g) (or def-name (u (gassign-lhs g))) code
-              rhs1 (u (gassign-rhs2 g)) (u (gassign-rhs3 g)))]
+     (define lhs-mem (and (not (stmt-def st g)) (tree-touches-memory? st (gassign-lhs g))))
+     (define rhs-mem (for/or ([t (list (gassign-rhs1 g) (gassign-rhs2 g) (gassign-rhs3 g))]) (tree-touches-memory? st t)))
+     (values (or lhs-mem rhs-mem) lhs-mem)]
     [(gcall? g)
-     (gcall (gcall-loc g) (gcall-flags g) (or def-name (u (gcall-lhs g))) (u (gcall-fn g))
-            (for/pvector ([x (in-pvector (gcall-args g))]) (u x)) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g))]
-    [(gcond? g) (gcond (gcond-loc g) (gcond-flags g) (gcond-code g) (u (gcond-lhs g)) (u (gcond-rhs g))
-                       (gcond-true-label g) (gcond-false-label g))]
-    [(gswitch? g) (gswitch (gswitch-loc g) (gswitch-flags g) (u (gswitch-index g)) (gswitch-default-case g) (gswitch-cases g))]
-    [(greturn? g) (greturn (greturn-loc g) (greturn-flags g) (u (greturn-retval g)))]
-    [else g]))
+     (define ecf (gcall-ecf g))
+     (define const? (flag? ecf ECF-CONST))
+     (define pure? (flag? ecf ECF-PURE))
+     (define call-vdef (not (or const? pure?)))
+     (define lhs-mem (and (gcall-lhs g) (not (stmt-def st g)) (tree-touches-memory? st (gcall-lhs g))))
+     (define args-mem (for/or ([t (in-pvector (gcall-args g))]) (tree-touches-memory? st t)))
+     (values (or call-vdef pure? lhs-mem args-mem) (or call-vdef lhs-mem))]
+    [(greturn? g) (values #t #f)]
+    [else (values #f #f)]))
+
+(define (flag? bits b) (not (zero? (bitwise-and bits b))))
+
+;; rewrite the statement: real uses through USE-F, the real def (if any)
+;; to DEF-NAME, the virtual operands into the flags
+(define (rewrite-stmt st g use-f def-name vuse vdef)
+  (define (u t) (subst-reg-uses st t use-f))
+  (define (vops g*)
+    (let* ([g* (if vuse (stmt-set-flag g* 'vuse vuse) g*)]
+           [g* (if vdef (stmt-set-flag g* 'vdef vdef) g*)])
+      g*))
+  (vops
+   (cond
+     [(gassign? g)
+      (define rhs1 (u (gassign-rhs1 g)))
+      ;; gimple_assign_rhs_code: for a GIMPLE_SINGLE_RHS the code is TREE_CODE (rhs1)
+      (define code (if (eq? (gimple-rhs-class st (gassign-code g)) 'single) (tree-code rhs1) (gassign-code g)))
+      (gassign (gassign-loc g) (gassign-flags g) (or def-name (u (gassign-lhs g))) code
+               rhs1 (u (gassign-rhs2 g)) (u (gassign-rhs3 g)))]
+     [(gcall? g)
+      (gcall (gcall-loc g) (gcall-flags g) (or def-name (u (gcall-lhs g))) (u (gcall-fn g))
+             (for/pvector ([x (in-pvector (gcall-args g))]) (u x)) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g))]
+     [(gcond? g) (gcond (gcond-loc g) (gcond-flags g) (gcond-code g) (u (gcond-lhs g)) (u (gcond-rhs g))
+                        (gcond-true-label g) (gcond-false-label g))]
+     [(gswitch? g) (gswitch (gswitch-loc g) (gswitch-flags g) (u (gswitch-index g)) (gswitch-default-case g) (gswitch-cases g))]
+     [(greturn? g) (greturn (greturn-loc g) (greturn-flags g) (u (greturn-retval g)))]
+     [else g])))
 
 ;; ------------------------------------------------------------
 ;; the port
@@ -103,36 +158,44 @@
 
 (define (block-stmts a i) (GBlock-stmts (cfg-block (ga-cfg a) i)))
 (define (block-phis a i) (GBlock-phis (cfg-block (ga-cfg a) i)))
-(define (update-block a i f) (ga (ga-st a) (set-block (ga-cfg a) (f (cfg-block (ga-cfg a) i)))))
+(define (update-block a i f) (ga (ga-st a) (set-block (ga-cfg a) (f (cfg-block (ga-cfg a) i))) (ga-vop a)))
 
+;; every reg decl defined or used anywhere, by DECL_UID; then .MEM when
+;; any statement has a virtual operand
 (define (variables a)
-  ;; every reg decl defined or used anywhere, by DECL_UID
   (define st (ga-st a))
-  (define found
-    (for*/fold ([m intmap-empty]) ([i (in-pvector (cfg-bbs (ga-cfg a)))] [g (in-pvector (block-stmts a i))])
+  (define-values (found any-vop)
+    (for*/fold ([m intmap-empty] [any #f]) ([i (in-pvector (cfg-bbs (ga-cfg a)))] [g (in-pvector (block-stmts a i))])
       (define d (stmt-def st g))
-      (for/fold ([m (if d (intmap-set m (decl-uid d) d) m)]) ([u (in-list (stmt-uses st g))])
-        (intmap-set m (decl-uid u) u))))
-  (for/pvector ([p (in-list (intmap->literal-datum found))]) (cdr p)))
+      (define-values (vu vd) (stmt-vops st g))
+      (values (for/fold ([m (if d (intmap-set m (decl-uid d) d) m)]) ([u (in-list (stmt-uses st g))])
+                (intmap-set m (decl-uid u) u))
+              (or any vu vd))))
+  (define regs (for/pvector ([p (in-list (intmap->literal-datum found))]) (cdr p)))
+  (if any-vop (pvector-cons-right regs (ga-vop a)) regs))
 
-;; kills and upward-exposed uses of a block (mark_def_sites)
+;; kills and upward-exposed uses of a block (mark_def_sites), virtual
+;; operand included
 (define (block-summary a i)
   (define st (ga-st a))
+  (define vop (ga-vop a))
   (define-values (kills ups _seen)
     (for/fold ([kills (pvector-empty)] [ups (pvector-empty)] [killed intbits-empty]) ([g (in-pvector (block-stmts a i))])
+      (define-values (vu vd) (stmt-vops st g))
+      (define uses (append (stmt-uses st g) (if vu (list vop) '())))
       (define ups*
-        (for/fold ([ups ups]) ([u (in-list (stmt-uses st g))])
+        (for/fold ([ups ups]) ([u (in-list uses)])
           (if (or (intbits-ref killed (decl-uid u)) (pvector-index-of ups u)) ups (pvector-cons-right ups u))))
-      (define d (stmt-def st g))
-      (cond
-        [(and d (not (intbits-ref killed (decl-uid d))))
-         (values (pvector-cons-right kills d) ups* (intbits-set killed (decl-uid d)))]
-        [else (values kills ups* killed)])))
+      (define defs (append (if vd (list vop) '()) (let ([d (stmt-def st g)]) (if d (list d) '()))))
+      (for/fold ([kills kills] [ups ups*] [killed killed]) ([d (in-list defs)])
+        (if (intbits-ref killed (decl-uid d))
+            (values kills ups killed)
+            (values (pvector-cons-right kills d) ups (intbits-set killed (decl-uid d)))))))
   (values kills ups))
 
 (define (new-name a var kind)
   (define-values (name st) (make-ssa-name (ga-st a) var))
-  (values (if (eq? kind 'default) (tree-set-attr name 'default-def #t) name) (ga st (ga-cfg a))))
+  (values (if (eq? kind 'default) (tree-set-attr name 'default-def #t) name) (ga st (ga-cfg a) (ga-vop a))))
 
 (define (insert-phi a i var name)
   (define args (for/pvector ([p (in-pvector (cfg-preds (ga-cfg a) i))]) (cons p #f)))
@@ -154,28 +217,33 @@
                               (for/pvector ([arg (in-pvector (gphi-args ph))])
                                 (if (= (car arg) pred) (cons pred name) arg))))))
 
-;; rewrite_stmt for every statement of the block
+;; rewrite_stmt for every statement of the block: real uses, VUSE, VDEF,
+;; real def
 (define (rename-stmts a i acc use def)
+  (define vop (ga-vop a))
   (define-values (stmts* a* acc*)
     (for/fold ([out (pvector-empty)] [a a] [acc acc] #:result (values out a acc)) ([g (in-pvector (block-stmts a i))])
       (define st (ga-st a))
-      ;; uses, in operand order, each resolved once
       (define-values (map1 a1 acc1)
         (for/fold ([m intmap-empty] [a a] [acc acc]) ([u (in-list (stmt-uses st g))])
           (cond
             [(intmap-has-key? m (decl-uid u)) (values m a acc)]
             [else (let-values ([(n a acc) (use a acc u)]) (values (intmap-set m (decl-uid u) n) a acc))])))
+      (define-values (vu? vd?) (stmt-vops st g))
+      (define-values (vuse a2 acc2) (if vu? (use a1 acc1 vop) (values #f a1 acc1)))
+      (define-values (vdef a3 acc3) (if vd? (def a2 acc2 vop) (values #f a2 acc2)))
       (define d (stmt-def st g))
-      (define-values (dn a2 acc2) (if d (def a1 acc1 d) (values #f a1 acc1)))
-      (values (pvector-cons-right out (rewrite-stmt st g (lambda (t) (intmap-ref map1 (decl-uid t))) dn)) a2 acc2)))
+      (define-values (dn a4 acc4) (if d (def a3 acc3 d) (values #f a3 acc3)))
+      (values (pvector-cons-right out (rewrite-stmt st g (lambda (t) (intmap-ref map1 (decl-uid t))) dn vuse vdef)) a4 acc4)))
   (values (update-block a* i (lambda (b) (block-set-stmts b stmts*))) acc*))
 
 ;; pass_build_ssa::execute's tail: SSA names of DECL_IGNORED_P variables
-;; become anonymous (the identifier survives: iftmp.0_5, _23)
+;; become anonymous (the identifier survives: iftmp.0_5, _23); the
+;; virtual operand keeps its variable
 (define (anonymize st name)
   (define v (ssa-name-var name))
   (cond
-    [(and v (not (tree-attr name 'default-def #f)) (var-p v) (decl-flag st v 'ignored))
+    [(and v (not (tree-attr name 'default-def #f)) (var-p v) (not (virtual-operand? v)) (decl-flag st v 'ignored))
      (tree-set-attr (tree-set-attr name 'var #f) 'identifier (decl-name v))]
     [else name]))
 
@@ -193,10 +261,10 @@
     (define phis* (for/pvector ([ph (in-pvector (GBlock-phis b))])
                     (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (an (gphi-result ph))
                           (for/pvector ([arg (in-pvector (gphi-args ph))]) (cons (car arg) (an (cdr arg)))))))
-    (define stmts* (for/pvector ([g (in-pvector (GBlock-stmts b))]) (rewrite-stmt st g an #f)))
+    (define stmts* (for/pvector ([g (in-pvector (GBlock-stmts b))]) (rewrite-stmt st g an #f (stmt-vuse g) (stmt-vdef g))))
     (set-block c (block-set-stmts (block-set-phis b phis*) stmts*))))
 
-(define (finish a) (ga (ga-st a) (anonymize-cfg (ga-st a) (ga-cfg a))))
+(define (finish a) (ga (ga-st a) (anonymize-cfg (ga-st a) (ga-cfg a)) (ga-vop a)))
 
 (define gimple-port
   (ssa-port (lambda (a) ENTRY)
@@ -211,18 +279,30 @@
             new-name insert-phi phis set-phi-result set-phi-arg rename-stmts finish
             #t 'rpo 'insert))
 
-(define (build-ssa st fndecl cfg)
-  (define a (ssa-construct gimple-port (ga (gs-set-fndecl st fndecl) cfg)))
-  (values (ga-cfg a) (ga-st a)))
+;; create_vop_var: the ".MEM" VAR_DECL (artificial, ignored, virtual);
+;; its uid is fresh, so it sorts after every real declaration
+(define (make-vop st)
+  (let/st st ([uid (fresh-uid st)])
+    (values (make-tree 'var_decl #:type (void-type st)
+                       #:attrs (list (cons 'uid uid) (cons 'name ".MEM") (cons 'artificial #t) (cons 'ignored #t)
+                                     (cons 'virtual #t) (cons 'used #t)))
+            st)))
 
-;; all SSA names of the function in version order (for the dump's declaration list)
+(define (build-ssa st fndecl cfg)
+  (let/st st ([vop (make-vop (gs-set-fndecl st fndecl))])
+    (define a (ssa-construct gimple-port (ga st cfg vop)))
+    (values (ga-cfg a) (ga-st a))))
+
+;; all SSA names of the function in version order (for the dump's
+;; declaration list), virtual operands included
 (define (ssa-names-in-version-order cfg)
   (define (collect-tree t acc)
     (cond
       [(not t) acc]
       [(eq? (tree-code t) 'ssa_name) (intmap-set acc (ssa-name-version t) t)]
       [else (for/fold ([acc acc]) ([o (in-pvector (tree-ops t))]) (collect-tree o acc))]))
-  (define (collect-stmt g acc)
+  (define (collect-stmt g acc0)
+    (define acc (collect-tree (stmt-vdef g) (collect-tree (stmt-vuse g) acc0)))
     (cond
       [(gassign? g) (for/fold ([acc acc]) ([t (list (gassign-lhs g) (gassign-rhs1 g) (gassign-rhs2 g) (gassign-rhs3 g))]) (collect-tree t acc))]
       [(gcall? g) (for/fold ([acc acc]) ([t (append (list (gcall-lhs g) (gcall-fn g)) (pvector->list (gcall-args g)))]) (collect-tree t acc))]

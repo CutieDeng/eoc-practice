@@ -1,0 +1,95 @@
+
+;; Function twice (twice, funcdef_no=0, decl_uid=3608, cgraph_uid=1, symbol_order=0)
+
+int twice (int v)
+{
+  int D.3617;
+  int _2;
+
+  <bb 2> :
+  _2 = v_1(D) * 2;
+
+  <bb 3> :
+<L0>:
+  # VUSE <.MEM_3(D)>
+  return _2;
+
+}
+
+
+
+;; Function use (use, funcdef_no=1, decl_uid=3613, cgraph_uid=2, symbol_order=1)
+
+int use (int a, int b, int * p)
+{
+  int r;
+  int D.3626;
+  int _1;
+  int r.0_2;
+  int * _3;
+  int _4;
+  int _5;
+  int _6;
+  int _23;
+
+  <bb 2> :
+  r_9 = 0;
+  if (a_10(D) > 0)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 3> :
+  if (b_11(D) <= 9)
+    goto <bb 4>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 4> :
+  # .MEM_13 = VDEF <.MEM_12(D)>
+  r_14 = ext (a_10(D), b_11(D));
+  goto <bb 8>; [INV]
+
+  <bb 5> :
+  if (a_10(D) == 0)
+    goto <bb 7>; [INV]
+  else
+    goto <bb 6>; [INV]
+
+  <bb 6> :
+  if (p_15(D) == 0B)
+    goto <bb 7>; [INV]
+  else
+    goto <bb 8>; [INV]
+
+  <bb 7> :
+  # .MEM_16 = VDEF <.MEM_12(D)>
+  r_17 = twice (b_11(D));
+
+  <bb 8> :
+  # r_7 = PHI <r_14(4), r_9(6), r_17(7)>
+  # .MEM_8 = PHI <.MEM_13(4), .MEM_12(D)(6), .MEM_16(7)>
+  _1 = MAX_EXPR <b_11(D), a_10(D)>;
+  r_18 = r_7 + _1;
+  r.0_2 = r_18;
+  r_19 = r.0_2 + 1;
+  # .MEM_20 = VDEF <.MEM_8>
+  *p_15(D) = r.0_2;
+  _3 = p_15(D) + 4;
+  _4 = -r_19;
+  # .MEM_21 = VDEF <.MEM_20>
+  *_3 = _4;
+  # VUSE <.MEM_21>
+  _5 = *p_15(D);
+  # .MEM_22 = VDEF <.MEM_21>
+  _6 = twice (_5);
+  _23 = r_19 + _6;
+
+  <bb 9> :
+<L7>:
+  # VUSE <.MEM_22>
+  return _23;
+
+}
+
+

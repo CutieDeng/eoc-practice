@@ -1,0 +1,115 @@
+
+;; Function sum (sum, funcdef_no=0, decl_uid=3612, cgraph_uid=1, symbol_order=2)
+
+long unsigned int sum (const struct P * ps, int n)
+{
+  long unsigned int acc;
+  long unsigned int D.3625;
+  long unsigned int _1;
+  long unsigned int _2;
+  const struct P * _3;
+  int _4;
+  int _5;
+  long unsigned int _6;
+  long unsigned int _7;
+  const struct P * _8;
+  int _9;
+  int _10;
+  long unsigned int _11;
+  long unsigned int _12;
+  long unsigned int _13;
+  const struct P * _14;
+  char _15;
+  int n.0_16;
+  const char * msg.1_17;
+  char _18;
+  long unsigned int _19;
+  long unsigned int _20;
+  double _21;
+  double half.2_22;
+  double _23;
+  long unsigned int _24;
+  long unsigned int _39;
+
+  <bb 2> :
+  acc_30 = 0;
+  goto <bb 5>; [INV]
+
+  <bb 3> :
+  _1 = (long unsigned int) n_32;
+  _2 = _1 * 12;
+  _3 = ps_33(D) + _2;
+  # VUSE <.MEM_34(D)>
+  _4 = _3->x;
+  _5 = _4 * 2;
+  _6 = (long unsigned int) n_32;
+  _7 = _6 * 12;
+  _8 = ps_33(D) + _7;
+  # VUSE <.MEM_34(D)>
+  _9 = _8->y;
+  _10 = _5 + _9;
+  _11 = (long unsigned int) _10;
+  acc_35 = acc_26 + _11;
+  _12 = (long unsigned int) n_32;
+  _13 = _12 * 12;
+  _14 = ps_33(D) + _13;
+  # VUSE <.MEM_34(D)>
+  _15 = _14->tag;
+  if (_15 == 122)
+    goto <bb 4>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 4> :
+  goto <bb 6>; [INV]
+
+  <bb 5> :
+  # n_25 = PHI <n_31(D)(2), n_32(3)>
+  # acc_26 = PHI <acc_30(2), acc_35(3)>
+  n.0_16 = n_25;
+  n_32 = n.0_16 + -1;
+  if (n.0_16 > 0)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 6>; [INV]
+
+  <bb 6> :
+  # acc_27 = PHI <acc_35(4), acc_26(5)>
+  switch (n_32) <default: <L7> [INV], case 0: <L5> [INV], case 1: <L6> [INV]>
+
+  <bb 7> :
+<L5>:
+  acc_37 = acc_27 + 1;
+  goto <bb 10>; [INV]
+
+  <bb 8> :
+<L6>:
+  acc_36 = acc_27 + 2;
+
+  <bb 9> :
+  # acc_28 = PHI <acc_27(6), acc_36(8)>
+<L7>:
+  acc_38 = acc_28 + 3;
+
+  <bb 10> :
+  # acc_29 = PHI <acc_37(7), acc_38(9)>
+  # VUSE <.MEM_34(D)>
+  msg.1_17 = msg;
+  # VUSE <.MEM_34(D)>
+  _18 = *msg.1_17;
+  _19 = (long unsigned int) _18;
+  _20 = acc_29 + _19;
+  _21 = (double) n_32;
+  half.2_22 = 5.0e-1;
+  _23 = _21 * half.2_22;
+  _24 = (long unsigned int) _23;
+  _39 = _20 + _24;
+
+  <bb 11> :
+<L9>:
+  # VUSE <.MEM_34(D)>
+  return _39;
+
+}
+
+

@@ -1,0 +1,105 @@
+
+;; Function locals (locals, funcdef_no=0, decl_uid=3610, cgraph_uid=1, symbol_order=0)
+
+int locals (int n)
+{
+  int inner[2];
+  int i;
+  int addr;
+  int s;
+  struct P p;
+  int arr[4];
+  int D.3623;
+  int _1;
+  int _2;
+  int _3;
+  int _4;
+  int _5;
+  int _6;
+  int _7;
+  int _8;
+  int _9;
+  int _10;
+  int _11;
+  int _12;
+  int addr.0_13;
+  int _32;
+
+  <bb 2> :
+  s_16 = 0;
+  # .MEM_18 = VDEF <.MEM_17(D)>
+  addr = 5;
+  # .MEM_20 = VDEF <.MEM_18>
+  arr[0] = n_19(D);
+  _1 = n_19(D) + 1;
+  # .MEM_21 = VDEF <.MEM_20>
+  arr[1] = _1;
+  # VUSE <.MEM_21>
+  _2 = arr[0];
+  # VUSE <.MEM_21>
+  _3 = arr[1];
+  _4 = _2 + _3;
+  # .MEM_22 = VDEF <.MEM_21>
+  arr[2] = _4;
+  # .MEM_23 = VDEF <.MEM_22>
+  arr[3] = 0;
+  # VUSE <.MEM_23>
+  _5 = arr[2];
+  # .MEM_24 = VDEF <.MEM_23>
+  p.x = _5;
+  # .MEM_25 = VDEF <.MEM_24>
+  _6 = take (&addr);
+  # .MEM_26 = VDEF <.MEM_25>
+  p.y = _6;
+  i_27 = 0;
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  # VUSE <.MEM_26>
+  _7 = arr[i_15];
+  s_36 = s_14 + _7;
+  i_37 = i_15 + 1;
+
+  <bb 4> :
+  # s_14 = PHI <s_16(2), s_36(3)>
+  # i_15 = PHI <i_27(2), i_37(3)>
+  if (i_15 <= 3)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  # .MEM_28 = VDEF <.MEM_26>
+  inner[0] = s_14;
+  # VUSE <.MEM_28>
+  _8 = p.x;
+  # .MEM_29 = VDEF <.MEM_28>
+  inner[1] = _8;
+  # VUSE <.MEM_29>
+  _9 = inner[0];
+  # VUSE <.MEM_29>
+  _10 = inner[1];
+  s_30 = _9 + _10;
+  # .MEM_31 = VDEF <.MEM_29>
+  inner ={v} {CLOBBER(eol)};
+  # VUSE <.MEM_31>
+  _11 = p.y;
+  _12 = s_30 + _11;
+  # VUSE <.MEM_31>
+  addr.0_13 = addr;
+  _32 = _12 + addr.0_13;
+  # .MEM_33 = VDEF <.MEM_31>
+  arr ={v} {CLOBBER(eol)};
+  # .MEM_34 = VDEF <.MEM_33>
+  p ={v} {CLOBBER(eol)};
+  # .MEM_35 = VDEF <.MEM_34>
+  addr ={v} {CLOBBER(eol)};
+
+  <bb 6> :
+<L4>:
+  # VUSE <.MEM_35>
+  return _32;
+
+}
+
+

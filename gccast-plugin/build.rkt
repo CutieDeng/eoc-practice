@@ -100,6 +100,7 @@
                 (string-append "-fdump-tree-lower=" (path->string (build-path out (string-append name ".lower"))))
                 (string-append "-fdump-tree-cfg=" (path->string (build-path out (string-append name ".cfg"))))
                 (string-append "-fdump-tree-ssa=" (path->string (build-path out (string-append name ".ssa"))))
+                (string-append "-fdump-tree-ssa-vops=" (path->string (build-path out (string-append name ".ssavops"))))
                 "-c" name "-o" (if (eq? (system-type 'os) 'windows) "NUL" "/dev/null")))
       (define tu (call-with-input-file dat read))
       (unless (and (vector? (struct->vector tu)) (eq? (prefab-struct-key tu) 'TU))
@@ -110,7 +111,7 @@
       (when fixtures
         (make-directory* fixtures)
         (copy-file dat (build-path fixtures (string-append name "." ver ".dat")) #t)
-        (for ([ext '("original" "gimple" "lower" "cfg" "ssa")])
+        (for ([ext '("original" "gimple" "lower" "cfg" "ssa" "ssavops")])
           (define src (build-path out (string-append name "." ext)))
           (when (file-exists? src)
             (copy-file src (build-path fixtures (string-append name "." ver "." ext)) #t)))))))
