@@ -131,7 +131,7 @@ Last Updated: 2026-11-05
 
 验收：拆分前后 pipeline-test 对 `ClassTransform.dat` 的输出逐方法 `equal?`。
 
-进度（2026-11-06）：步骤 0 已做——算法整体移到 `src/component/rvsdg/structurize.rkt`，CFG 访问全部改走 `src/component/rvsdg/port.rkt`（决策 13 的端口模式），Java 侧 `component/java/transform/cfg-to-rvsdg.rkt` 只剩适配；验收基线固化为 `test/integration/java-rvsdg-golden.rktd`（5 个方法的 RVSDG datum），`src/pipeline/java/golden-test.rkt` 逐方法比对。步骤 1–5 待做。
+进度（2026-11-06）：步骤 1–2 已做——`src/component/rvsdg/structurize/{ctx,reach,regions,insn,sinks,gamma,theta,kappa}.rkt`，主文件 459 行只剩入口与 `translate-segment`，递归经 `ctx.rkt` 的 `current-translate-segment` 注入；golden 逐方法相同。步骤 3（合并 4 份前向可达）、4（拆测试）、5（注释）待做。步骤 0 已做——算法整体移到 `src/component/rvsdg/structurize.rkt`，CFG 访问全部改走 `src/component/rvsdg/port.rkt`（决策 13 的端口模式），Java 侧 `component/java/transform/cfg-to-rvsdg.rkt` 只剩适配；验收基线固化为 `test/integration/java-rvsdg-golden.rktd`（5 个方法的 RVSDG datum），`src/pipeline/java/golden-test.rkt` 逐方法比对。步骤 1–5 待做。
 
 ### 3.2 `jvm-to-cfg.rkt`（717 行）
 
