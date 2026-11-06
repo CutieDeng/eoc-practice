@@ -31,7 +31,8 @@ test-gccast:
 	$(RACO) test src/frontend/gccast/reader-test.rkt gccast-plugin/gen/treedef.rkt \
 	             src/component/gccast/transform/gimplify-test.rkt \
 	             src/component/gccast/transform/lower-test.rkt \
-	             src/component/gccast/transform/cfg-test.rkt
+	             src/component/gccast/transform/cfg-test.rkt \
+	             src/component/gimple/import-test.rkt
 
 # Build the GCC plugin for the default gcc (override: make gccast-plugin GCC=gcc-15)
 GCC ?= gcc-15
