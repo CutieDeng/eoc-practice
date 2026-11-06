@@ -356,28 +356,9 @@
 ;; leafs out at a non-advanceable terminator; when stop-bid is set it
 ;; is excluded from the result (the walk stops at but does not
 ;; traverse through stop-bid).
+;; forward reach from START up to (excluding) STOP-BID, switch edges included
 (define (kappa-forward-reach cfg start-bid stop-bid)
-  (let loop ([work (list start-bid)]
-             [s idmap-empty])
-    (cond
-      [(null? work) s]
-      [else
-       (define b (car work))
-       (define rest (cdr work))
-       (cond
-         [(and stop-bid (equal? b stop-bid)) (loop rest s)]
-         [(idmap-ref s b #f) (loop rest s)]
-         [else
-          (define s* (idmap-set s b #t))
-          (define succs
-            (match (CfgBlock-terminator (cv-block cfg b))
-              [(Term:jump n) (list n)]
-              [(Term:cond _ tb eb) (list tb eb)]
-              [(Term:switch _ cases default)
-               (cons default
-                     (for/list ([kv (in-pvector cases)]) (cdr kv)))]
-              [_ '()]))
-          (loop (append succs rest) s*)])])))
+  (forward-reach cfg start-bid #:stop? (lambda (b) (and stop-bid (equal? b stop-bid))) #:switch? #t))
 
 
 ;; For a convergent Kappa arm, find every block in the arm's reach

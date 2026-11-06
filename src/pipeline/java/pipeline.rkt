@@ -78,10 +78,12 @@
 ;;     become the Gamma's outputs, and translate-segment resumes from
 ;;     the join block in the outer region.  Sub-region order and the
 ;;     'java/switch-case-key encoding match the terminal variant.
-;;   - Methods whose control flow still exceeds lowering capacity
-;;     (try/catch, or a loop header with 3+ back-edges) error from
-;;     cfg->rvsdg; `java-compile-class` catches each exception per
-;;     method rather than aborting the whole class.
+;;   - try/catch windows lower to Kappa nodes (normalize-try-exits
+;;     prepares single-exit windows first).  Methods whose control flow
+;;     still exceeds lowering capacity (a loop header with 3+ back-edges,
+;;     short-circuit ladders, `break` inside a loop body; see roadmap
+;;     Phase 3) error from cfg->rvsdg; `java-compile-class` catches each
+;;     exception per method rather than aborting the whole class.
 ;;
 ;; ============================================================
 

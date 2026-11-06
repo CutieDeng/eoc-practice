@@ -16,8 +16,69 @@
          "../../../kernel/data/data.rkt"
          "ctx.rkt")
 
-(provide terminal-block? arm-reach-set reach-set-reaches-stop? arm-leaves-all-ret-throw? reach-sets-disjoint? reach-sets-all-pairwise-disjoint? reach-set-intersection arm-advance arm-is-exit? arm-is-multi-block-exit? find-branch-join arm-last-before-join arm-blocks-set theta-body-blocks body-arm-reaches-any-latch?)
+(provide forward-reach terminal-block? arm-reach-set reach-set-reaches-stop? arm-leaves-all-ret-throw? reach-sets-disjoint? reach-sets-all-pairwise-disjoint? reach-set-intersection arm-advance arm-is-exit? arm-is-multi-block-exit? find-branch-join arm-last-before-join arm-blocks-set theta-body-blocks body-arm-reaches-any-latch?)
 
+;; ------------------------------------------------------------
+;; forward-reach: the one forward traversal behind arm-reach-set,
+;; arm-blocks-set, theta-body-blocks and kappa-forward-reach
+;; ------------------------------------------------------------
+;;
+;; DFS from START over the terminator graph (Term:jump / Term:cond, and
+;; Term:switch when #:switch? is set).  Returns the visited set as an
+;; idmap bid -> #t.
+;;   #:stop?   bid -> bool   blocks that are neither added nor expanded
+;;   #:leaf?   bid -> bool   blocks that are added but not expanded
+;;   #:strict? error on a terminator other than jump/cond/ret/throw
+;;             (the arm walk's contract), instead of treating it as a leaf
+(define (forward-reach cfg start
+                       #:stop? [stop? (lambda (b) #f)]
+                       #:leaf? [leaf? (lambda (b) #f)]
+                       #:switch? [switch? #f]
+                       #:strict? [strict? #f])
+  (let loop ([work (list start)] [seen idmap-empty])
+    (cond
+      [(null? work) seen]
+      [else
+       (define b (car work))
+       (define rest (cdr work))
+       (cond
+         [(idmap-ref seen b #f) (loop rest seen)]
+         [(stop? b) (loop rest seen)]
+         [else
+          (define seen* (idmap-set seen b #t))
+          (cond
+            [(leaf? b) (loop rest seen*)]
+            [else
+             (define term (CfgBlock-terminator (cv-block cfg b)))
+             (define succs
+               (match term
+                 [(Term:jump n) (list n)]
+                 [(Term:cond _ tb eb) (list tb eb)]
+                 [(Term:switch _ cases default)
+                  #:when switch?
+                  (cons default (for/list ([kv (in-pvector cases)]) (cdr kv)))]
+                 [(or (Term:ret _) (Term:throw _)) '()]
+                 [_ (if strict?
+                        (error 'arm-blocks-set "unsupported arm-internal terminator ~s at ~a" term b)
+                        '())]))
+             (loop (append succs rest) seen*)])])])))
+
+;; full forward reach of an arm, confined to the current arm scope
+(define (arm-reach-set cfg start-bid)
+  (forward-reach cfg start-bid #:stop? (lambda (b) (not (arm-scope-contains? b)))))
+
+;; the blocks of an arm up to (excluding) its join, confined to the arm scope
+(define (arm-blocks-set cfg branch-bid join-bid)
+  (forward-reach cfg branch-bid
+                 #:stop? (lambda (b) (or (equal? b join-bid) (not (arm-scope-contains? b))))
+                 #:strict? #t))
+
+;; the loop body from START: latches are included but their back edge to
+;; the header is not crossed
+(define (theta-body-blocks cfg start latches header)
+  (forward-reach cfg start
+                 #:stop? (lambda (b) (equal? b header))
+                 #:leaf? (lambda (b) (idmap-ref latches b #f))))
 
 ;; ============================================================
 ;; Terminal Gamma (gamma-early-exit, both arms terminate)
@@ -55,26 +116,6 @@
 ;; the walk (typical inside a Theta body, where scope=body-blocks
 ;; and a Term:jump to the loop header crosses the back-edge).
 ;; Returns an idmap used as a set of BlockId -> #t.
-(define (arm-reach-set cfg start-bid)
-  (let loop ([work (list start-bid)]
-             [seen idmap-empty])
-    (cond
-      [(null? work) seen]
-      [else
-       (define b (car work))
-       (define rest (cdr work))
-       (cond
-         [(idmap-ref seen b #f) (loop rest seen)]
-         [(not (arm-scope-contains? b)) (loop rest seen)]
-         [else
-          (define seen* (idmap-set seen b #t))
-          (define succs
-            (match (CfgBlock-terminator (cv-block cfg b))
-              [(Term:jump n) (list n)]
-              [(Term:cond _ tb eb) (list tb eb)]
-              [_ '()]))
-          (loop (append succs rest) seen*)])])))
-
 
 ;; True iff some block in `reach-set` has an immediate successor
 ;; equal to `stop-bid`, or the reach-set itself contains `stop-bid`.
@@ -243,25 +284,6 @@
 ;; Successors that escape the active `current-arm-scope` (when set)
 ;; are skipped — they are by definition outside the arm we're
 ;; describing.
-(define (arm-blocks-set cfg branch-bid join-bid)
-  (define (walk bid visited)
-    (cond
-      [(equal? bid join-bid) visited]
-      [(not (arm-scope-contains? bid)) visited]
-      [(idmap-ref visited bid #f) visited]
-      [else
-       (define v2 (idmap-set visited bid #t))
-       (define term (CfgBlock-terminator (cv-block cfg bid)))
-       (match term
-         [(Term:jump n) (walk n v2)]
-         [(Term:cond _ tb eb) (walk eb (walk tb v2))]
-         [(Term:ret _) v2]
-         [(Term:throw _) v2]
-         [_ (error 'arm-blocks-set
-                   "unsupported arm-internal terminator ~s at ~a"
-                   term bid)])]))
-  (walk branch-bid idmap-empty))
-
 
 ;; Collect every BlockId reachable from `start` without ever
 ;; crossing the loop's back-edge.  Conceptually: run a BFS in the
@@ -279,31 +301,6 @@
 ;; loops in them, and they would recurse indefinitely if asked to
 ;; "advance past" the latch (whose only successor is the header,
 ;; which in turn has a cond arm that re-enters the body).
-(define (theta-body-blocks cfg start latches header)
-  (let loop ([work (list start)] [s idmap-empty])
-    (cond
-      [(null? work) s]
-      [else
-       (define b (car work))
-       (define rest (cdr work))
-       (cond
-         [(equal? b header) (loop rest s)]
-         [(idmap-ref s b #f) (loop rest s)]
-         [else
-          (define s* (idmap-set s b #t))
-          (cond
-            [(idmap-ref latches b #f)
-             ;; Latch included; its only outgoing edge goes to
-             ;; header, which is the back-edge we refuse to cross.
-             (loop rest s*)]
-            [else
-             (define succs
-               (match (CfgBlock-terminator (cv-block cfg b))
-                 [(Term:jump n) (list n)]
-                 [(Term:cond _ tb eb) (list tb eb)]
-                 [_ '()]))
-             (loop (append succs rest) s*)])])])))
-
 
 ;; Body-arm check: starting from the cond-arm bid, do we reach any
 ;; of the loop's latches while remaining inside the body (i.e.,

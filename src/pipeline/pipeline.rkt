@@ -10,7 +10,7 @@
 ;; Structure:
 ;;   - common/ : Pass definition and composition utilities
 ;;   - x86/    : EoC x86 backend (Lvar → Cvar → x86)
-;;   - java/   : Java bytecode compilation pipeline (stub)
+;;   - java/   : Java bytecode compilation pipeline (JVM -> CFG -> SSA -> RVSDG)
 ;;
 ;; EoC Pipeline (x86):
 ;;   Lvar (AST) → uniquify → remove-complex → explicate-control →
@@ -29,5 +29,5 @@
 ;; X86 pipeline (EoC)
 (provide (all-from-out "x86/pipeline.rkt"))
 
-;; Java pipeline (stub)
+;; Java pipeline
 (provide (all-from-out "java/java.rkt"))
