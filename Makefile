@@ -35,6 +35,7 @@ test-gccast:
 	             src/component/gimple/cfg-test.rkt \
 	             src/component/gimple/ssa-test.rkt \
 	             src/component/gimple/rvsdg-test.rkt \
+	             src/component/gimple/o1-test.rkt \
 	             src/driver/dominance/dom-test.rkt \
 	             src/pipeline/java/golden-test.rkt
 

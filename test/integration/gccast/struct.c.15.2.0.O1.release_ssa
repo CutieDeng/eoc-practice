@@ -1,0 +1,88 @@
+
+;; Function sum (sum, funcdef_no=0, decl_uid=4469, cgraph_uid=3, symbol_order=2)
+
+Released 8 names, 25.81%, removed 8 holes
+long unsigned int sum (const struct P * ps, int n)
+{
+  long unsigned int acc;
+  long unsigned int _1;
+  long unsigned int _2;
+  const struct P * _3;
+  int _4;
+  int _5;
+  int _6;
+  int _7;
+  long unsigned int _8;
+  char _9;
+  const char * msg.1_10;
+  char _11;
+  long unsigned int _12;
+  long unsigned int _13;
+  double _14;
+  double _15;
+  long unsigned int _16;
+  long unsigned int _30;
+
+  <bb 2> [local count: 114863530]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 1014686025]:
+  _1 = (long unsigned int) n_23;
+  _2 = _1 * 12;
+  _3 = ps_24(D) + _2;
+  _4 = _3->x;
+  _5 = _4 * 2;
+  _6 = _3->y;
+  _7 = _5 + _6;
+  _8 = (long unsigned int) _7;
+  acc_26 = _8 + acc_18;
+  _9 = _3->tag;
+  if (_9 == 122)
+    goto <bb 5>; [5.50%]
+  else
+    goto <bb 10>; [94.50%]
+
+  <bb 10> [local count: 958878295]:
+
+  <bb 4> [local count: 1073741824]:
+  # n_17 = PHI <n_22(D)(2), n_23(10)>
+  # acc_18 = PHI <0(2), acc_26(10)>
+  n_23 = n_17 + -1;
+  if (n_17 > 0)
+    goto <bb 3>; [94.50%]
+  else
+    goto <bb 5>; [5.50%]
+
+  <bb 5> [local count: 114863531]:
+  # acc_19 = PHI <acc_26(3), acc_18(4)>
+  switch (n_23) <default: <L6> [33.33%], case 0: <L4> [33.33%], case 1: <L5> [33.33%]>
+
+  <bb 6> [local count: 38287844]:
+<L4>:
+  acc_28 = acc_19 + 1;
+  goto <bb 9>; [100.00%]
+
+  <bb 7> [local count: 38287844]:
+<L5>:
+  acc_27 = acc_19 + 2;
+
+  <bb 8> [local count: 76575688]:
+  # acc_20 = PHI <acc_19(5), acc_27(7)>
+<L6>:
+  acc_29 = acc_20 + 3;
+
+  <bb 9> [local count: 114863532]:
+  # acc_21 = PHI <acc_28(6), acc_29(8)>
+  msg.1_10 = msg;
+  _11 = *msg.1_10;
+  _12 = (long unsigned int) _11;
+  _13 = _12 + acc_21;
+  _14 = (double) n_23;
+  _15 = _14 * 5.0e-1;
+  _16 = (long unsigned int) _15;
+  _30 = _13 + _16;
+  return _30;
+
+}
+
+

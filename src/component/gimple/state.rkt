@@ -29,7 +29,7 @@
          "../../frontend/gccast/reader.rkt")
 
 (provide let/st
-         make-gs gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-globals
+         make-gs optimize? gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-globals
          gcc-major-version
          fresh-uid fresh-tmp-var-id fresh-ssa-version
          decl-flag set-decl-flag decl-initial
@@ -53,30 +53,31 @@
 ;; Construction / field updates
 ;; ------------------------------------------------------------
 
-(define (make-gs version #:next-uid [next-uid 100000])
-  (GS version #f intmap-empty intmap-empty next-uid 0 0 (hasheq) #f '()))
+(define (make-gs version #:next-uid [next-uid 100000] #:optimize [optimize 0])
+  (GS version #f intmap-empty intmap-empty next-uid 0 0 (hasheq) #f '() optimize))
+(define (optimize? st) (> (GS-optimize st) 0))
 
 (define (gs-set-fndecl st d)
   (GS (GS-version st) d (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-      (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st)))
+      (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))
 (define (gs-set-loc st l)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-      (GS-ssa-version st) (GS-globals st) l (GS-ctx st)))
+      (GS-ssa-version st) (GS-globals st) l (GS-ctx st) (GS-optimize st)))
 (define (gs-set-ctx st c)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-      (GS-ssa-version st) (GS-globals st) (GS-loc st) c))
+      (GS-ssa-version st) (GS-globals st) (GS-loc st) c (GS-optimize st)))
 (define (gs-reset-ssa st)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-      0 (GS-globals st) (GS-loc st) (GS-ctx st)))
+      0 (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))
 (define (gs-set-types st types)
   (GS (GS-version st) (GS-fndecl st) types (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-      (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st)))
+      (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))
 (define (gs-set-globals st g)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-      (GS-ssa-version st) g (GS-loc st) (GS-ctx st)))
+      (GS-ssa-version st) g (GS-loc st) (GS-ctx st) (GS-optimize st)))
 (define (gs-set-decl-flags st f)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) f (GS-next-uid st) (GS-tmp-var-id st)
-      (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st)))
+      (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))
 
 (define (gcc-major-version st)
   (string->number (car (regexp-split #rx"[.]" (GS-version st)))))
@@ -88,19 +89,19 @@
 (define (fresh-uid st)
   (define n (GS-next-uid st))
   (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (add1 n) (GS-tmp-var-id st)
-                (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st))))
+                (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st))))
 
 ;; tmp_var_id_num: returns the current number, then increments
 (define (fresh-tmp-var-id st)
   (define n (GS-tmp-var-id st))
   (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (add1 n)
-                (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st))))
+                (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st))))
 
 ;; SSA versions start at 1 (0 is reserved)
 (define (fresh-ssa-version st)
   (define n (add1 (GS-ssa-version st)))
   (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-                n (GS-globals st) (GS-loc st) (GS-ctx st))))
+                n (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st))))
 
 ;; ------------------------------------------------------------
 ;; Declaration flags (mutable bits of a decl, keyed by uid)

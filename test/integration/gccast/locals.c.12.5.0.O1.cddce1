@@ -1,0 +1,61 @@
+
+;; Function locals (locals, funcdef_no=0, decl_uid=3610, cgraph_uid=1, symbol_order=0)
+
+int locals (int n)
+{
+  int inner$1;
+  int inner$0;
+  int p$y;
+  int p$x;
+  int inner[2];
+  int i;
+  int addr;
+  int s;
+  struct P p;
+  int arr[4];
+  int _1;
+  int _4;
+  int _6;
+  int _7;
+  int _12;
+  int addr.0_13;
+  int _32;
+
+  <bb 2> :
+  addr = 5;
+  arr[0] = n_19(D);
+  _1 = n_19(D) + 1;
+  arr[1] = _1;
+  _4 = _1 + n_19(D);
+  arr[2] = _4;
+  arr[3] = 0;
+  _6 = take (&addr);
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _7 = arr[i_15];
+  s_36 = _7 + s_14;
+  i_37 = i_15 + 1;
+
+  <bb 4> :
+  # s_14 = PHI <0(2), s_36(3)>
+  # i_15 = PHI <0(2), i_37(3)>
+  if (i_15 <= 3)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  s_30 = _4 + s_14;
+  inner ={v} {CLOBBER(eol)};
+  _12 = _6 + s_30;
+  addr.0_13 = addr;
+  _32 = _12 + addr.0_13;
+  arr ={v} {CLOBBER(eol)};
+  p ={v} {CLOBBER(eol)};
+  addr ={v} {CLOBBER(eol)};
+  return _32;
+
+}
+
+

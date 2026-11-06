@@ -1,0 +1,46 @@
+int use (int a, int b, int * p)
+{
+  int D.3622;
+  int r;
+
+  r = 0;
+  _1 = a > 0;
+  _2 = b <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0) goto <D.3617>; else goto <D.3618>;
+  <D.3617>:
+  r = ext (a, b);
+  goto <D.3619>;
+  <D.3618>:
+  _4 = a == 0;
+  _5 = p == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0) goto <D.3620>; else goto <D.3621>;
+  <D.3620>:
+  r = twice (b);
+  <D.3621>:
+  <D.3619>:
+  _7 = MAX_EXPR <b, a>;
+  r = r + _7;
+  r.0_8 = r;
+  r = r.0_8 + 1;
+  *p = r.0_8;
+  _9 = p + 4;
+  _10 = -r;
+  *_9 = _10;
+  _11 = *p;
+  _12 = twice (_11);
+  D.3622 = r + _12;
+  return D.3622;
+}
+
+
+int twice (int v)
+{
+  int D.3624;
+
+  D.3624 = v * 2;
+  return D.3624;
+}
+
+

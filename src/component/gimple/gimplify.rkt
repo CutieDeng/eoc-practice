@@ -47,14 +47,14 @@
 ;; Context (struct gimplify_ctx), immutable; the stack is GS-ctx
 ;; ------------------------------------------------------------
 (struct gctx (bind-depth temps conditions conditional-cleanups exit-label return-temp
-              case-labels in-switch-expr into-ssa allow-rhs-cond-expr in-cleanup-point-expr)
+              case-labels in-switch-expr into-ssa allow-rhs-cond-expr in-cleanup-point-expr temp-table)
   #:prefab)
 
 (define (ctx st) (car (GS-ctx st)))
 (define (ctx-update st f) (gs-set-ctx st (cons (f (car (GS-ctx st))) (cdr (GS-ctx st)))))
 
 (define (push-gimplify-context st into-ssa rhs-cond-ok)
-  (gs-set-ctx st (cons (gctx 0 (pvector-empty) 0 (pvector-empty) #f #f #f #f into-ssa rhs-cond-ok #f) (GS-ctx st))))
+  (gs-set-ctx st (cons (gctx 0 (pvector-empty) 0 (pvector-empty) #f #f #f #f into-ssa rhs-cond-ok #f (hash)) (GS-ctx st))))
 
 ;; pop_gimplify_context: temporaries go to BODY's GIMPLE_BIND (declare_vars,
 ;; debug_info = false: temps in creation order, then the existing vars)
@@ -268,10 +268,18 @@
 (define (create-tmp-from-val st val)
   (create-tmp-var st (type-main-variant st (tree-type val)) (get-name st val)))
 
-;; lookup_tmp_var: !optimize -> never reuse
+;; lookup_tmp_var: when optimizing, a formal temporary for a side-effect
+;; free value is reused for an equal value (GCC hashes the tree; values
+;; compare with equal? here); otherwise a fresh one
 (define (lookup-tmp-var st val is-formal not-gimple-reg)
-  (let/st st ([v (create-tmp-from-val st val)])
-    (values v (if not-gimple-reg (set-decl-flag st v 'not-gimple-reg #t) st))))
+  (cond
+    [(or (not (optimize? st)) (not is-formal) (tree-side-effects val))
+     (let/st st ([v (create-tmp-from-val st val)])
+       (values v (if not-gimple-reg (set-decl-flag st v 'not-gimple-reg #t) st)))]
+    [(hash-ref (gctx-temp-table (ctx st)) val #f) => (lambda (v) (values v st))]
+    [else
+     (let/st st ([v (create-tmp-from-val st val)])
+       (values v (ctx-update st (lambda (c) (struct-copy gctx c [temp-table (hash-set (gctx-temp-table c) val v)])))))]))
 
 ;; internal_get_tmp_var: (values tmp pre post st)
 (define (internal-get-tmp-var st val pre post is-formal allow-ssa not-gimple-reg)
@@ -990,8 +998,9 @@
                ;; -O0: hijack a goto arm only when the COND_EXPR and the GOTO share a
                ;; location (or have none)
                (define (hijack? g)
-                 (and g (let ([el (tree-loc e3)] [gl (rexpr-location g)])
-                          (or (not el) (not gl) (equal? el gl)))))
+                 (and g (or (optimize? st2)
+                            (let ([el (tree-loc e3)] [gl (rexpr-location g)])
+                              (or (not el) (not gl) (equal? el gl))))))
                (define gt (find-goto-label (tree-operand e3 1)))
                (define ge (find-goto-label (tree-operand e3 2)))
                (define have-then0 (hijack? gt))

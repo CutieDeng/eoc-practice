@@ -102,6 +102,20 @@
                 (string-append "-fdump-tree-ssa=" (path->string (build-path out (string-append name ".ssa"))))
                 (string-append "-fdump-tree-ssa-vops=" (path->string (build-path out (string-append name ".ssavops"))))
                 "-c" name "-o" (if (eq? (system-type 'os) 'windows) "NUL" "/dev/null")))
+      ;; -O1: the plugin again (the front end folds differently when
+      ;; optimizing) plus every pass dump; the optimizer passes are the
+      ;; alignment oracle for src/component/gimple/opt/*
+      (define o1-dir (build-path out "O1"))
+      (make-directory* o1-dir)
+      (define dat-o1 (build-path out (string-append name ".O1.dat")))
+      (parameterize ([current-directory (rel "tests")])
+        (run/ok (if cxx? gxx gcc)
+                (string-append "-fplugin=" (path->string lib))
+                (string-append "-fplugin-arg-gccast-out=" (path->string dat-o1))
+                "-O1" "-fdump-tree-all"
+                "-dumpdir" (string-append (path->string o1-dir) "/")
+                "-dumpbase" name
+                "-c" name "-o" (if (eq? (system-type 'os) 'windows) "NUL" "/dev/null")))
       (define tu (call-with-input-file dat read))
       (unless (and (vector? (struct->vector tu)) (eq? (prefab-struct-key tu) 'TU))
         (error 'gccast-build "~a: not a TU: ~e" dat tu))
@@ -114,7 +128,15 @@
         (for ([ext '("original" "gimple" "lower" "cfg" "ssa" "ssavops")])
           (define src (build-path out (string-append name "." ext)))
           (when (file-exists? src)
-            (copy-file src (build-path fixtures (string-append name "." ver "." ext)) #t)))))))
+            (copy-file src (build-path fixtures (string-append name "." ver "." ext)) #t)))
+        ;; -O1 dumps: <name>.<ver>.O1.<pass> for the early pipeline and the final form
+        (copy-file dat-o1 (build-path fixtures (string-append name "." ver ".O1.dat")) #t)
+        (define keep '("original" "gimple" "lower" "cfg" "ssa" "ccp1" "forwprop1" "ethread" "esra" "ealias" "phiprop1"
+                       "fre1" "mergephi1" "dse1" "cddce1" "phiopt1" "iftoswitch" "sccopy1" "release_ssa" "optimized"))
+        (for ([f (in-list (directory-list o1-dir))])
+          (define m (regexp-match (pregexp (string-append "^" (regexp-quote name) "[.][0-9]+t[.](.+)$")) (path->string f)))
+          (when (and m (member (cadr m) keep))
+            (copy-file (build-path o1-dir f) (build-path fixtures (string-append name "." ver ".O1." (cadr m))) #t)))))))
 
 (module+ main
   (define gccs '()) (define tests? #t) (define fixtures #f)

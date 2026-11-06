@@ -1,0 +1,234 @@
+
+;; Function sum (sum, funcdef_no=0, decl_uid=3612, cgraph_uid=1, symbol_order=2)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+ps = &NONLOCAL
+n = &NONLOCAL
+_1 = n_31
+_2 = _1
+_2 = &NONLOCAL
+_3 = ps
+_4 = *_3
+_5 = _4
+_5 = &NONLOCAL
+_6 = n_31
+_7 = _6
+_7 = &NONLOCAL
+_8 = ps
+_9 = *_8 + 32
+_10 = _5
+_10 = _9
+_11 = _10
+acc_34 = _11
+acc_34 = acc_25
+_12 = n_31
+_13 = _12
+_13 = &NONLOCAL
+_14 = ps
+_15 = *_14 + 64
+n_24 = n
+n_24 = n_31
+acc_25 = &NULL
+acc_25 = acc_34
+n_31 = n_24
+n_31 = &NONLOCAL
+acc_26 = acc_34
+acc_26 = acc_25
+acc_36 = acc_26
+acc_36 = &NONLOCAL
+acc_35 = acc_26
+acc_35 = &NONLOCAL
+acc_27 = acc_26
+acc_27 = acc_35
+acc_37 = acc_27
+acc_37 = &NONLOCAL
+acc_28 = acc_36
+acc_28 = acc_37
+msg = NONLOCAL
+msg.1_17 = msg
+_18 = *msg.1_17
+_19 = _18
+_20 = _19
+_20 = acc_28
+_21 = n_31
+_22 = _21
+_22 = &NONLOCAL
+_23 = _22
+_38 = _20
+_38 = _23
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL } same as msg
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+ps = { NONLOCAL }
+n = { NONLOCAL } same as ps
+_1 = { NONLOCAL } same as ps
+n_31 = { NONLOCAL } same as ps
+_2 = { NONLOCAL } same as ps
+_3 = { NONLOCAL } same as ps
+_4 = { ESCAPED NONLOCAL }
+_5 = { ESCAPED NONLOCAL }
+_6 = { NONLOCAL } same as ps
+_7 = { NONLOCAL } same as ps
+_8 = { NONLOCAL } same as ps
+_9 = { ESCAPED NONLOCAL }
+_10 = { ESCAPED NONLOCAL }
+_11 = { ESCAPED NONLOCAL } same as _10
+acc_34 = { NULL ESCAPED NONLOCAL }
+acc_25 = { NULL ESCAPED NONLOCAL } same as acc_34
+_12 = { NONLOCAL } same as ps
+_13 = { NONLOCAL } same as ps
+_14 = { NONLOCAL } same as ps
+_15 = { ESCAPED NONLOCAL }
+n_24 = { NONLOCAL } same as ps
+acc_26 = { NULL ESCAPED NONLOCAL } same as acc_34
+acc_36 = { NULL ESCAPED NONLOCAL } same as acc_34
+acc_35 = { NULL ESCAPED NONLOCAL } same as acc_34
+acc_27 = { NULL ESCAPED NONLOCAL } same as acc_34
+acc_37 = { NULL ESCAPED NONLOCAL } same as acc_34
+acc_28 = { NULL ESCAPED NONLOCAL } same as acc_34
+msg.1_17 = { ESCAPED NONLOCAL } same as msg
+msg = { ESCAPED NONLOCAL }
+_18 = { ESCAPED NONLOCAL }
+_19 = { ESCAPED NONLOCAL } same as _18
+_20 = { NULL ESCAPED NONLOCAL }
+_21 = { NONLOCAL } same as ps
+_22 = { NONLOCAL } same as ps
+_23 = { NONLOCAL } same as ps
+_38 = { NULL ESCAPED NONLOCAL } same as _20
+sum = { }
+
+
+Alias information for sum
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+_3, points-to non-local, points-to NULL, points-to vars: { }
+_8, points-to non-local, points-to NULL, points-to vars: { }
+_14, points-to non-local, points-to NULL, points-to vars: { }
+msg.1_17, points-to non-local, points-to escaped, points-to NULL, points-to vars: { }
+ps_32(D), points-to non-local, points-to NULL, points-to vars: { }
+
+long unsigned int sum (const struct P * ps, int n)
+{
+  long unsigned int acc;
+  long unsigned int _1;
+  long unsigned int _2;
+  const struct P * _3;
+  int _4;
+  int _5;
+  long unsigned int _6;
+  long unsigned int _7;
+  const struct P * _8;
+  int _9;
+  int _10;
+  long unsigned int _11;
+  long unsigned int _12;
+  long unsigned int _13;
+  const struct P * _14;
+  char _15;
+  const char * msg.1_17;
+  char _18;
+  long unsigned int _19;
+  long unsigned int _20;
+  double _21;
+  double _22;
+  long unsigned int _23;
+  long unsigned int _38;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = (long unsigned int) n_31;
+  _2 = _1 * 12;
+  _3 = ps_32(D) + _2;
+  _4 = _3->x;
+  _5 = _4 * 2;
+  _6 = (long unsigned int) n_31;
+  _7 = _6 * 12;
+  _8 = ps_32(D) + _7;
+  _9 = _8->y;
+  _10 = _5 + _9;
+  _11 = (long unsigned int) _10;
+  acc_34 = _11 + acc_25;
+  _12 = (long unsigned int) n_31;
+  _13 = _12 * 12;
+  _14 = ps_32(D) + _13;
+  _15 = _14->tag;
+  if (_15 == 122)
+    goto <bb 5>; [INV]
+  else
+    goto <bb 4>; [INV]
+
+  <bb 4> :
+  # n_24 = PHI <n_30(D)(2), n_31(3)>
+  # acc_25 = PHI <0(2), acc_34(3)>
+  n_31 = n_24 + -1;
+  if (n_24 > 0)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  # acc_26 = PHI <acc_34(3), acc_25(4)>
+  switch (n_31) <default: <L6> [INV], case 0: <L4> [INV], case 1: <L5> [INV]>
+
+  <bb 6> :
+<L4>:
+  acc_36 = acc_26 + 1;
+  goto <bb 9>; [INV]
+
+  <bb 7> :
+<L5>:
+  acc_35 = acc_26 + 2;
+
+  <bb 8> :
+  # acc_27 = PHI <acc_26(5), acc_35(7)>
+<L6>:
+  acc_37 = acc_27 + 3;
+
+  <bb 9> :
+  # acc_28 = PHI <acc_36(6), acc_37(8)>
+  msg.1_17 = msg;
+  _18 = *msg.1_17;
+  _19 = (long unsigned int) _18;
+  _20 = _19 + acc_28;
+  _21 = (double) n_31;
+  _22 = _21 * 5.0e-1;
+  _23 = (long unsigned int) _22;
+  _38 = _20 + _23;
+  return _38;
+
+}
+
+

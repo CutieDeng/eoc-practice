@@ -39,7 +39,7 @@
          "gimplify.rkt"
          "cfg.rkt")
 
-(provide build-ssa ssa-names-in-version-order virtual-operand? stmt-vuse stmt-vdef)
+(provide build-ssa ssa-names-in-version-order virtual-operand? stmt-vuse stmt-vdef remove-unused-locals)
 
 ;; adapter value
 (struct ga (st cfg vop))     ; vop: the .MEM declaration
@@ -254,6 +254,23 @@
     [(pvector-empty? (tree-ops t)) t]
     [else (tree-set-ops t (for/pvector ([o (in-pvector (tree-ops t))]) (anonymize-tree st o)))]))
 
+;; apply F to every operand tree of a statement (and its virtual operands)
+(define (map-stmt-trees g f)
+  (define g*
+    (cond
+      [(gassign? g) (gassign (gassign-loc g) (gassign-flags g) (f (gassign-lhs g)) (gassign-code g)
+                             (f (gassign-rhs1 g)) (f (gassign-rhs2 g)) (f (gassign-rhs3 g)))]
+      [(gcall? g) (gcall (gcall-loc g) (gcall-flags g) (f (gcall-lhs g)) (f (gcall-fn g))
+                         (for/pvector ([x (in-pvector (gcall-args g))]) (f x)) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g))]
+      [(gcond? g) (gcond (gcond-loc g) (gcond-flags g) (gcond-code g) (f (gcond-lhs g)) (f (gcond-rhs g))
+                         (gcond-true-label g) (gcond-false-label g))]
+      [(gswitch? g) (gswitch (gswitch-loc g) (gswitch-flags g) (f (gswitch-index g)) (gswitch-default-case g) (gswitch-cases g))]
+      [(greturn? g) (greturn (greturn-loc g) (greturn-flags g) (f (greturn-retval g)))]
+      [else g]))
+  (let* ([g* (if (stmt-vuse g*) (stmt-set-flag g* 'vuse (f (stmt-vuse g*))) g*)]
+         [g* (if (stmt-vdef g*) (stmt-set-flag g* 'vdef (f (stmt-vdef g*))) g*)])
+    g*))
+
 (define (anonymize-cfg st cfg)
   (define (an t) (anonymize-tree st t))
   (for/fold ([c cfg]) ([i (in-pvector (cfg-bbs cfg))])
@@ -261,7 +278,7 @@
     (define phis* (for/pvector ([ph (in-pvector (GBlock-phis b))])
                     (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (an (gphi-result ph))
                           (for/pvector ([arg (in-pvector (gphi-args ph))]) (cons (car arg) (an (cdr arg)))))))
-    (define stmts* (for/pvector ([g (in-pvector (GBlock-stmts b))]) (rewrite-stmt st g an #f (stmt-vuse g) (stmt-vdef g))))
+    (define stmts* (for/pvector ([g (in-pvector (GBlock-stmts b))]) (map-stmt-trees g an)))
     (set-block c (block-set-stmts (block-set-phis b phis*) stmts*))))
 
 (define (finish a) (ga (ga-st a) (anonymize-cfg (ga-st a) (ga-cfg a)) (ga-vop a)))
@@ -318,3 +335,34 @@
                        (collect-tree (cdr arg) acc))))
       (for/fold ([acc acc1]) ([g (in-pvector (GBlock-stmts b))]) (collect-stmt g acc))))
   (for/pvector ([p (in-list (intmap->literal-datum m))]) (cdr p)))
+
+;; TODO_remove_unused_locals (tree-ssa-live.cc remove_unused_locals), the
+;; part that affects the dumps: when optimizing, a local declaration
+;; survives only if some statement or PHI mentions it, directly or as
+;; the variable of an SSA name.  Nothing is removed at -O0.
+(define (remove-unused-locals st cfg locals)
+  (cond
+    [(not (optimize? st)) locals]
+    [else
+     (define (mark t acc)
+       (cond
+         [(not t) acc]
+         [(eq? (tree-code t) 'ssa_name) (let ([v (ssa-name-var t)]) (if v (intbits-set acc (decl-uid v)) acc))]
+         [(tree-attr t 'uid #f) (intbits-set acc (tree-attr t 'uid))]
+         [else (for/fold ([acc acc]) ([o (in-pvector (tree-ops t))]) (mark o acc))]))
+     (define (mark-stmt g acc0)
+       (define acc (mark (stmt-vdef g) (mark (stmt-vuse g) acc0)))
+       (cond
+         [(gassign? g) (for/fold ([acc acc]) ([t (list (gassign-lhs g) (gassign-rhs1 g) (gassign-rhs2 g) (gassign-rhs3 g))]) (mark t acc))]
+         [(gcall? g) (for/fold ([acc acc]) ([t (append (list (gcall-lhs g) (gcall-fn g)) (pvector->list (gcall-args g)))]) (mark t acc))]
+         [(gcond? g) (mark (gcond-rhs g) (mark (gcond-lhs g) acc))]
+         [(gswitch? g) (mark (gswitch-index g) acc)]
+         [(greturn? g) (mark (greturn-retval g) acc)]
+         [else acc]))
+     (define used
+       (for*/fold ([acc intbits-empty]) ([i (in-pvector (cfg-bbs cfg))])
+         (define b (cfg-block cfg i))
+         (define acc1 (for/fold ([acc acc]) ([ph (in-pvector (GBlock-phis b))])
+                        (for/fold ([acc (mark (gphi-result ph) acc)]) ([arg (in-pvector (gphi-args ph))]) (mark (cdr arg) acc))))
+         (for/fold ([acc acc1]) ([g (in-pvector (GBlock-stmts b))]) (mark-stmt g acc))))
+     (for/pvector ([d (in-pvector locals)] #:when (intbits-ref used (decl-uid d))) d)]))

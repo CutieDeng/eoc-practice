@@ -298,6 +298,24 @@ Java 侧待做：`jvm-to-cfg` 的 GETFIELD/PUTFIELD/INVOKE* 以同样方式接�
 - 按 trunk 实现、与 gcc-15 不同的点（三个夹具未触发差异）：`assign_discriminators` 重写（GCC16）、forwarder 判定新增"单前驱且前驱单后继则留给合并"（40c037adb36）、`group_case_labels` 撤销对 `__builtin_unreachable` 目标的删除（f108e23d2bf）。
 - 未移植：abnormal/EH 边、computed goto、setjmp、`convert_single_case_switch` 的区间分支（`generate_range_test`）、`gimple_simplify` 的非常量折叠、循环树输出（`;; N loops found` 等行测试中忽略）。
 
+## Phase 7: GIMPLE 层对齐 GCC -O1 优化 pass（决策 14，2026-11-06 起）
+
+目标：把 GCC 的 -O1 tree 优化 pass 按 dump 顺序逐个移植到 `src/component/gimple/opt/`，每个 pass 以 `-O1 -fdump-tree-all` 的对应 dump 为基准逐函数对齐。方法论延续 6.3：基准由 `gccast-plugin/build.rkt` 生成（`<name>.<ver>.O1.<pass>`，另有 `-O1` 下的插件输出 `<name>.<ver>.O1.dat`，因为 C 前端在优化时折叠得不同：短路 `&&`/`||` 变 `TRUTH_AND/OR_EXPR`，const 静态变量读被初值替换）。
+
+### 7.0 -O1 输入对齐（完成，2026-11-06）
+
+`GS-optimize` 字段 + GCC 自己按 `optimize` 分叉的 6 处：`lookup_tmp_var` 复用形式临时量、`gimplify_cond_expr` 的 goto 劫持不查位置、lower 不把 return label 置为非 artificial、cleanup_tree_cfg 的 forwarder/merge 不查 goto_locus、`remove_unused_locals`（pass_build_ssa 的 TODO，只在优化时删未引用局部变量）。`o1-test.rkt`：3 夹具 × 2 版本的 `-O1` gimple/lower/cfg/ssa 逐函数对齐 24/24（函数按名比对：-O1 下 dump 的函数顺序是调用图序）。未做：`execute_update_addresses_taken`（现有夹具无取址局部变量）、`pass_fixup_cfg`（在现有夹具上无效果）。
+
+### 7.1 pass 序列（gcc-15 -O1 实测 dump 顺序，全部对象）
+
+early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 → forwprop1 → ethread → esra → ealias → phiprop1 → fre1 → mergephi1 → dse1 → cddce1 → phiopt1 → iftoswitch → sccopy1 → profile_estimate → local-pure-const1 → modref1 → release_ssa；之后 IPA，再 `all_optimizations`：ccp2 … optimized。
+
+逐 pass 移植顺序 = dump 顺序。已知的结构性障碍：forwprop/fre/ccp 的语句折叠依赖 `match.pd` 生成的 `gimple-match.cc`（十万行量级），无法逐条移植；策略是按夹具实际触发的模式增量实现折叠规则，并把 dump 不一致的地方逐条记录为"缺失规则"而不是绕过。
+
+| pass | 状态 |
+|---|---|
+| ccp1 | 待做（下一个） |
+
 ## 6. 执行顺序与依赖
 
 ```
@@ -330,4 +348,5 @@ Phase 0 之前不能跑任何测试，是唯一的硬前置。Phase 1 #3（支�
 10. 内存状态边：AST 无虚拟操作数；在 lowering 之后线程化内存状态，再由 cfg-to-rvsdg 建状态边。Java 链路目前也没有内存状态边（已验证 `cfg-to-rvsdg.rkt` 无 state 处理，仅有 `current-exn-out`），该工作对两个前端共用。
 11. **GCC 插件源码由 Racket 生成器按版本生成**（细节见 6.1），本机以 gcc-15 为主、gcc@12 作第二版本做兼容验证。
 12. **GENERIC → GIMPLE 降级按 GCC trunk 算法逐函数改写**（6.3），用 gcc-15 的 `-fdump-tree-*` 作对齐基准；在 `alpha` 分支开发。
+14. **优化做在 GIMPLE 层，逐 pass 对齐 GCC -O1 的 dump**（2026-11-06，用户在 RVSDG 层优化 / GIMPLE 层对齐 / 先只做兼容层三案中选定）。Java 链路暂不推进；RVSDG 侧只保证能承接。见 Phase 7。
 13. **GIMPLE 层改为持久化数据 + 纯函数式状态线程，并泛化 SSA / CFG→RVSDG 算法**（2026-11-06，设计见 `doc/gimple-functional-ir.md`）。可变的 `src/component/gccast/` 是移植期权宜，按阶段 S1–S6 替换为 `src/kernel/ir/gimple/` + `src/component/gimple/`，每阶段以现有 dump 对齐测试验收。用户在"持久化值 + 命令式算法"与"纯函数式状态线程"两案中选了后者。

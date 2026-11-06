@@ -119,8 +119,8 @@
     (define u (node-field n 'uid #f))
     (if (and u (> u m)) u m)))
 
-(define (import-tu tu)
-  (define st0 (make-gs (TU-gcc-version tu) #:next-uid (add1 (max-uid tu))))
+(define (import-tu tu #:optimize [optimize 0])
+  (define st0 (make-gs (TU-gcc-version tu) #:next-uid (add1 (max-uid tu)) #:optimize optimize))
   (define st1
     (for/fold ([st st0]) ([fn (in-list (TU-fns tu))])
       (define-values (_d _b st*) (convert-fn st fn))

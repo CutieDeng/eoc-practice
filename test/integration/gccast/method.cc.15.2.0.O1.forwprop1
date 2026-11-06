@@ -1,0 +1,35 @@
+
+;; Function S::get (_ZNK1S3getEv, funcdef_no=0, decl_uid=4494, cgraph_uid=1, symbol_order=0)
+
+int S::get (const struct S * const this)
+{
+  int _1;
+  int _4;
+
+  <bb 2> :
+  _1 = this_3(D)->x;
+  _4 = _1 * 2;
+  return _4;
+
+}
+
+
+
+;; Function h (_Z1hRK1S, funcdef_no=1, decl_uid=4498, cgraph_uid=2, symbol_order=1)
+
+int h (const struct S & s)
+{
+  int D.4508;
+  int _4;
+  int _5;
+  int _6;
+
+  <bb 2> :
+  _4 = s_3(D)->x;
+  _6 = _4 * 2;
+  _5 = _6 + 1;
+  return _5;
+
+}
+
+

@@ -32,8 +32,6 @@
 
 (provide lower-function)
 
-(define optimize? #f)
-
 ;; struct lower_data
 (struct ld (local-decls return-statements cannot-fallthru block))
 ;;   return-statements: pvector of (cons label greturn), pushed right
@@ -89,7 +87,7 @@
         [else
          (let/st st ([label (create-artificial-label st (loc-spot end-locus))])
            (values label (ld-set-returns d (pvector-cons-right rs (cons label g))) st))]))
-    (define st2 (if (and (not optimize?) (stmt-has-location? g)) (set-decl-flag st1 label 'artificial #f) st1))
+    (define st2 (if (and (not (optimize? st1)) (stmt-has-location? g)) (set-decl-flag st1 label 'artificial #f) st1))
     (values (pvector-cons-right out (gimple-build-goto label (stmt-loc g))) d1 st2))
 
   ;; lower_stmt: (values out d st)

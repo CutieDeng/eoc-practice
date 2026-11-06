@@ -1,0 +1,44 @@
+
+;; Function locals (null)
+;; enabled by -tree-original
+
+
+{
+  int arr[4];
+  struct P p;
+  int s = 0;
+  int addr = 5;
+
+    int arr[4];
+    struct P p;
+    int s = 0;
+    int addr = 5;
+  arr[0] = n;
+  arr[1] = n + 1;
+  arr[2] = arr[0] + arr[1];
+  arr[3] = 0;
+  p.x = arr[2];
+  p.y = take (&addr);
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.3621>;
+    <D.3620>:;
+    s = arr[i] + s;
+    i++ ;
+    <D.3621>:;
+    if (i <= 3) goto <D.3620>; else goto <D.3618>;
+    <D.3618>:;
+  }
+  {
+    int inner[2];
+
+        int inner[2];
+    inner[0] = s;
+    inner[1] = p.x;
+    s = inner[0] + inner[1];
+  }
+  return (p.y + s) + addr;
+}
+

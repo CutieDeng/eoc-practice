@@ -1,0 +1,35 @@
+
+;; Function twice (null)
+;; enabled by -tree-original
+
+
+{
+  return v * 2;
+}
+
+
+;; Function use (null)
+;; enabled by -tree-original
+
+
+{
+  int r = 0;
+
+    int r = 0;
+  if (a > 0 && b <= 9)
+    {
+      r = ext (a, b);
+    }
+  else
+    {
+      if (a == 0 || p == 0B)
+        {
+          r = twice (b);
+        }
+    }
+  r = MAX_EXPR <b, a> + r;
+  *p = r++ ;
+  *(p + 4) = -r;
+  return twice (*p) + r;
+}
+

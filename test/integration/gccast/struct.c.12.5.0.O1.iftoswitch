@@ -1,0 +1,85 @@
+
+;; Function sum (sum, funcdef_no=0, decl_uid=3612, cgraph_uid=1, symbol_order=2)
+
+long unsigned int sum (const struct P * ps, int n)
+{
+  long unsigned int acc;
+  long unsigned int _1;
+  long unsigned int _2;
+  const struct P * _3;
+  int _4;
+  int _5;
+  int _9;
+  int _10;
+  long unsigned int _11;
+  char _15;
+  const char * msg.1_17;
+  char _18;
+  long unsigned int _19;
+  long unsigned int _20;
+  double _21;
+  double _22;
+  long unsigned int _23;
+  long unsigned int _38;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = (long unsigned int) n_31;
+  _2 = _1 * 12;
+  _3 = ps_32(D) + _2;
+  _4 = _3->x;
+  _5 = _4 * 2;
+  _9 = _3->y;
+  _10 = _5 + _9;
+  _11 = (long unsigned int) _10;
+  acc_34 = _11 + acc_25;
+  _15 = _3->tag;
+  if (_15 == 122)
+    goto <bb 5>; [INV]
+  else
+    goto <bb 4>; [INV]
+
+  <bb 4> :
+  # n_24 = PHI <n_30(D)(2), n_31(3)>
+  # acc_25 = PHI <0(2), acc_34(3)>
+  n_31 = n_24 + -1;
+  if (n_24 > 0)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  # acc_26 = PHI <acc_34(3), acc_25(4)>
+  switch (n_31) <default: <L6> [INV], case 0: <L4> [INV], case 1: <L5> [INV]>
+
+  <bb 6> :
+<L4>:
+  acc_36 = acc_26 + 1;
+  goto <bb 9>; [INV]
+
+  <bb 7> :
+<L5>:
+  acc_35 = acc_26 + 2;
+
+  <bb 8> :
+  # acc_27 = PHI <acc_26(5), acc_35(7)>
+<L6>:
+  acc_37 = acc_27 + 3;
+
+  <bb 9> :
+  # acc_28 = PHI <acc_36(6), acc_37(8)>
+  msg.1_17 = msg;
+  _18 = *msg.1_17;
+  _19 = (long unsigned int) _18;
+  _20 = _19 + acc_28;
+  _21 = (double) n_31;
+  _22 = _21 * 5.0e-1;
+  _23 = (long unsigned int) _22;
+  _38 = _20 + _23;
+  return _38;
+
+}
+
+

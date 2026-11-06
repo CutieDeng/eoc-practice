@@ -240,8 +240,10 @@
 ;;   globals     : hasheq 'void 'boolean 'size 'sizetype 'ptr -> type uid
 ;;   loc         : gimplify's input_location (gloc or #f)
 ;;   ctx         : gimplify context stack (list of gctx values)
+;;   optimize    : GCC's `optimize` level (0 or 1): the lowering chain
+;;                 gates a few decisions on it exactly where GCC does
 
-(struct GS (version fndecl types decl-flags next-uid tmp-var-id ssa-version globals loc ctx) #:prefab)
+(struct GS (version fndecl types decl-flags next-uid tmp-var-id ssa-version globals loc ctx optimize) #:prefab)
 
 ;; ------------------------------------------------------------
 ;; CFG

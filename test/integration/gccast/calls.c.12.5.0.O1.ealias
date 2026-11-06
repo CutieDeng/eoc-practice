@@ -1,0 +1,252 @@
+
+;; Function twice (twice, funcdef_no=0, decl_uid=3608, cgraph_uid=1, symbol_order=0)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+v = &NONLOCAL
+_2 = v
+_2 = &NONLOCAL
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+v = { NONLOCAL }
+_2 = { NONLOCAL } same as v
+twice = { }
+
+
+Alias information for twice
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+
+int twice (int v)
+{
+  int _2;
+
+  <bb 2> :
+  _2 = v_1(D) * 2;
+  return _2;
+
+}
+
+
+
+;; Function use (use, funcdef_no=1, decl_uid=3613, cgraph_uid=2, symbol_order=1)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+a = &NONLOCAL
+b = &NONLOCAL
+p = &NONLOCAL
+_3 = _1
+_3 = _2
+callescape(15) = NONLOCAL
+CALLUSED(16) = callescape(15)
+callarg(18) = a
+callarg(18) = callarg(18) + UNKNOWN
+callarg(18) = *callarg(18) + UNKNOWN
+CALLUSED(16) = callarg(18)
+*callarg(18) = callescape(15)
+CALLCLOBBERED(17) = callarg(18)
+callescape(15) = callarg(18)
+ESCAPED = a
+callarg(19) = b
+callarg(19) = callarg(19) + UNKNOWN
+callarg(19) = *callarg(19) + UNKNOWN
+CALLUSED(16) = callarg(19)
+*callarg(19) = callescape(15)
+CALLCLOBBERED(17) = callarg(19)
+callescape(15) = callarg(19)
+ESCAPED = b
+r_23 = NONLOCAL
+r_23 = callarg(18)
+r_23 = callarg(19)
+_6 = _4
+_6 = _5
+callescape(25) = &NONLOCAL
+CALLUSED(26) = callescape(25)
+callarg(28) = b
+callarg(28) = callarg(28) + UNKNOWN
+r_21 = &NONLOCAL
+r_21 = callarg(28)
+r_13 = r_23
+r_13 = &NULL
+r_13 = r_21
+_7 = a
+_7 = b
+r_24 = _7
+r_24 = r_13
+r_25 = r_24
+r_25 = &NONLOCAL
+*p = r_24
+_10 = r_24
+*p = _10
+_11 = *p
+callescape(36) = &NONLOCAL
+CALLUSED(37) = callescape(36)
+callarg(39) = _11
+callarg(39) = callarg(39) + UNKNOWN
+_12 = &NONLOCAL
+_12 = callarg(39)
+_29 = _12
+_29 = r_25
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { NULL ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+a = { NONLOCAL }
+b = { NONLOCAL } same as a
+p = { NONLOCAL } same as a
+_1 = { }
+_2 = { }
+_3 = { }
+ext = { }
+callescape(15) = { ESCAPED NONLOCAL }
+CALLUSED(16) = { ESCAPED NONLOCAL } same as callescape(15)
+CALLCLOBBERED(17) = { ESCAPED NONLOCAL }
+callarg(18) = { ESCAPED NONLOCAL }
+callarg(19) = { ESCAPED NONLOCAL }
+r_23 = { ESCAPED NONLOCAL } same as callescape(15)
+_4 = { }
+_5 = { }
+_6 = { }
+twice = { }
+callescape(25) = { NONLOCAL } same as a
+CALLUSED(26) = { NONLOCAL } same as a
+CALLCLOBBERED(27) = { }
+callarg(28) = { NONLOCAL }
+r_21 = { NONLOCAL } same as callarg(28)
+r_13 = { NULL ESCAPED NONLOCAL }
+_7 = { NONLOCAL } same as a
+r_24 = { NULL ESCAPED NONLOCAL } same as r_13
+r_25 = { NULL ESCAPED NONLOCAL } same as r_13
+_10 = { NULL ESCAPED NONLOCAL } same as r_13
+_11 = { ESCAPED NONLOCAL }
+callescape(36) = { NONLOCAL } same as a
+CALLUSED(37) = { NONLOCAL } same as a
+CALLCLOBBERED(38) = { }
+callarg(39) = { NULL ESCAPED NONLOCAL }
+_12 = { NULL ESCAPED NONLOCAL } same as callarg(39)
+_29 = { NULL ESCAPED NONLOCAL } same as callarg(39)
+use = { }
+
+
+Alias information for use
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to NULL, points-to vars: { }
+
+Flow-insensitive points-to information
+
+p_18(D), points-to non-local, points-to NULL, points-to vars: { }
+
+int use (int a, int b, int * p)
+{
+  int r;
+  _Bool _1;
+  _Bool _2;
+  _Bool _3;
+  _Bool _4;
+  _Bool _5;
+  _Bool _6;
+  int _7;
+  int _10;
+  int _11;
+  int _12;
+  int _29;
+
+  <bb 2> :
+  _1 = a_16(D) > 0;
+  _2 = b_17(D) <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 4>; [INV]
+
+  <bb 3> :
+  r_23 = ext (a_16(D), b_17(D));
+  goto <bb 6>; [INV]
+
+  <bb 4> :
+  _4 = a_16(D) == 0;
+  _5 = p_18(D) == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0)
+    goto <bb 5>; [INV]
+  else
+    goto <bb 6>; [INV]
+
+  <bb 5> :
+  r_21 = twice (b_17(D));
+
+  <bb 6> :
+  # r_13 = PHI <r_23(3), 0(4), r_21(5)>
+  _7 = MAX_EXPR <a_16(D), b_17(D)>;
+  r_24 = _7 + r_13;
+  r_25 = r_24 + 1;
+  *p_18(D) = r_24;
+  _10 = ~r_24;
+  MEM[(int *)p_18(D) + 4B] = _10;
+  _11 = *p_18(D);
+  _12 = twice (_11);
+  _29 = _12 + r_25;
+  return _29;
+
+}
+
+

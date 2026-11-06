@@ -640,15 +640,18 @@
        (not (= a ENTRY))
        (not (= b EXIT))
        (let ([last (bb-last-stmt c a)]) (not (and last (stmt-ends-bb? last))))
-       ;; labels at the beginning of B: at -O0 any user label blocks the merge
+       ;; labels at the beginning of B: user labels block the merge at -O0,
+       ;; forced labels always
        (for/and ([g (in-pvector (stmts c b))] #:break (not (glabel? g)))
-         (decl-flag st (glabel-label g) 'artificial))
+         (or (decl-flag st (glabel-label g) 'artificial)
+             (and (optimize? st) (not (label-forced? st (glabel-label g))))))
        ;; -O0: don't merge if we'd lose goto_locus
-       (let ([gl (GEdge-goto-locus (single-succ-edge c a))])
-         (or (not gl)
-             (let ([prev (bb-last-stmt c a)] [next (bb-first-non-label-stmt c b)])
-               (or (and prev (equal? (stmt-loc prev) gl))
-                   (and next (equal? (stmt-loc next) gl))))))))
+       (or (optimize? st)
+           (let ([gl (GEdge-goto-locus (single-succ-edge c a))])
+             (or (not gl)
+                 (let ([prev (bb-last-stmt c a)] [next (bb-first-non-label-stmt c b)])
+                   (or (and prev (equal? (stmt-loc prev) gl))
+                       (and next (equal? (stmt-loc next) gl)))))))))
 
 ;; gimple_merge_blocks + cfghooks merge_blocks
 (define (merge-blocks st c a b)
@@ -751,7 +754,8 @@
           (or (= src ENTRY)
               (edge-flag? e EDGE-EH)
               ;; -O0: a differing goto_locus on any incoming edge keeps the block
-              (and (or (loc-has-location? (GEdge-goto-locus e)) (loc-has-location? locus))
+              (and (not (optimize? st))
+                   (or (loc-has-location? (GEdge-goto-locus e)) (loc-has-location? locus))
                    (not (equal? (GEdge-goto-locus e) locus)))))
         (values #f c st)]
        ;; trunk: leave single-pred/single-succ chains to block merging
@@ -760,7 +764,8 @@
        [(not (for/and ([g (in-pvector (stmts c i))])
                (and (glabel? g)
                     (not (label-nonlocal? st (glabel-label g)))
-                    (not (and (or (stmt-has-location? g) (loc-has-location? locus))
+                    (not (and (not (optimize? st))
+                              (or (stmt-has-location? g) (loc-has-location? locus))
                               (not (equal? (stmt-loc g) locus)))))))
         (values #f c st)]
        [else

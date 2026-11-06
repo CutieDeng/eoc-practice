@@ -1,0 +1,46 @@
+
+;; Function f (f, funcdef_no=0, decl_uid=3605, cgraph_uid=1, symbol_order=0)
+
+int f (int a)
+{
+  int D.3619;
+
+  if (a > 0) goto <D.3617>; else goto <D.3618>;
+  <D.3617>:
+  D.3619 = a + 1;
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3620>;
+  <D.3618>:
+  D.3619 = -a;
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3620>;
+  <D.3620>:
+  return D.3619;
+}
+
+
+
+;; Function g (g, funcdef_no=1, decl_uid=3608, cgraph_uid=2, symbol_order=1)
+
+int g ()
+{
+  int i;
+  int s;
+  int D.3621;
+
+  s = 0;
+  i = 0;
+  goto <D.3615>;
+  <D.3614>:
+  s = s + i;
+  i = i + 1;
+  <D.3615>:
+  if (i <= 9) goto <D.3614>; else goto <D.3612>;
+  <D.3612>:
+  D.3621 = s;
+  goto <D.3622>;
+  <D.3622>:
+  return D.3621;
+}
+
+

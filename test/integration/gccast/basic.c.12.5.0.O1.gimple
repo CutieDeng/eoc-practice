@@ -1,0 +1,39 @@
+int f (int a)
+{
+  int D.3619;
+
+  if (a > 0) goto <D.3617>; else goto <D.3618>;
+  <D.3617>:
+  D.3619 = a + 1;
+  // predicted unlikely by early return (on trees) predictor.
+  return D.3619;
+  <D.3618>:
+  D.3619 = -a;
+  // predicted unlikely by early return (on trees) predictor.
+  return D.3619;
+}
+
+
+int g ()
+{
+  int D.3621;
+  int s;
+
+  s = 0;
+  {
+    int i;
+
+    i = 0;
+    goto <D.3615>;
+    <D.3614>:
+    s = s + i;
+    i = i + 1;
+    <D.3615>:
+    if (i <= 9) goto <D.3614>; else goto <D.3612>;
+    <D.3612>:
+  }
+  D.3621 = s;
+  return D.3621;
+}
+
+
