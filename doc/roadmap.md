@@ -131,6 +131,8 @@ Last Updated: 2026-11-05
 
 验收：拆分前后 pipeline-test 对 `ClassTransform.dat` 的输出逐方法 `equal?`。
 
+进度（2026-11-06）：步骤 0 已做——算法整体移到 `src/component/rvsdg/structurize.rkt`，CFG 访问全部改走 `src/component/rvsdg/port.rkt`（决策 13 的端口模式），Java 侧 `component/java/transform/cfg-to-rvsdg.rkt` 只剩适配；验收基线固化为 `test/integration/java-rvsdg-golden.rktd`（5 个方法的 RVSDG datum），`src/pipeline/java/golden-test.rkt` 逐方法比对。步骤 1–5 待做。
+
 ### 3.2 `jvm-to-cfg.rkt`（717 行）
 
 `translate-insn`（369-564，29 分支 match）改为 opcode → handler 的分派表；按描述符解析（48-85）/栈模型（315-338）/指令（364-621）/terminator（622-717）拆 4 个文件。
