@@ -17,7 +17,8 @@
          "../state.rkt"
          "../cfg.rkt"
          "ccp.rkt"
-         "forwprop.rkt")
+         "forwprop.rkt"
+         "vn.rkt")
 
 (provide o1-passes identity-pass ealias)
 
@@ -43,4 +44,5 @@
          (cons 'ethread identity-pass)
          (cons 'esra identity-pass)
          (cons 'ealias ealias))
-   (if (>= major 13) (list (cons 'phiprop1 identity-pass)) '())))
+   (if (>= major 13) (list (cons 'phiprop1 identity-pass)) '())
+   (list (cons 'fre1 fre))))

@@ -42,7 +42,7 @@
          "fold.rkt"
          "mfn.rkt")
 
-(provide fold-stmt simplify-assign-rhs simplify-cond canonicalize-mem-ref-addr
+(provide fold-stmt simplify-assign-rhs simplify-cond canonicalize-mem-ref-addr gimple-fold-stmt-to-constant
          commutative-code? swap-tree-comparison invert-tree-comparison
          get-addr-base-and-unit-offset mem-ref-offset build-fold-addr-expr
          negate-expr-p may-propagate-copy)
@@ -405,3 +405,53 @@
       [else g2]))
   (when changed (mfn-replace! m id g3))
   changed)
+
+;; ------------------------------------------------------------
+;; gimple_fold_stmt_to_constant_1 with one valueization function: a
+;; constant, an SSA name, or #f
+;; ------------------------------------------------------------
+
+(define (gimple-fold-stmt-to-constant st m g valueize)
+  (define (v t) (if (ssa-name? t) (valueize t) t))
+  (cond
+    [(gassign? g)
+     (define lhs (gassign-lhs g))
+     (define code (gassign-code g))
+     (define r (and (not (eq? (gimple-rhs-class st code) 'single))
+                    (simplify-assign-rhs st m valueize (tree-type lhs) code (gassign-rhs1 g) (gassign-rhs2 g) (gassign-rhs3 g))))
+     (cond
+       [(and r (eq? (gimple-rhs-class st (car r)) 'single)
+             (let ([x (cadr r)]) (or (ssa-name? x) (is-gimple-min-invariant st x))))
+        (cadr r)]
+       [else
+        (case (gimple-rhs-class st code)
+          [(single)
+           (define rhs (gassign-rhs1 g))
+           (cond
+             [(ssa-name? rhs) (v rhs)]
+             [(eq? (tree-code rhs) 'constructor) #f]
+             [(eq? (tree-code-class st (tree-code rhs)) 'tcc_reference) #f]
+             [(decl-p st rhs) (get-symbol-constant-value st rhs)]
+             [(is-gimple-min-invariant st rhs) rhs]
+             [else #f])]
+          [(binary)
+           (cond
+             [(memq code '(eq_expr ne_expr))
+              (define op0 (gassign-rhs1 g))
+              (and (useless-type-conversion-p st (tree-type lhs) (tree-type op0))
+                   (let* ([op1 (v (gassign-rhs2 g))] [op0* (v op0)])
+                     (define-values (a b) (if (icst? op0*) (values op1 op0*) (values op0* op1)))
+                     (and (icst? b)
+                          (or (and (eq? code 'ne_expr) (integer-zerop b)) (and (eq? code 'eq_expr) (integer-onep b)))
+                          a)))]
+             [else #f])]
+          [(ternary)
+           (define op0 (v (gassign-rhs1 g)))
+           (and (eq? code 'cond_expr) (icst? op0)
+                (v (if (integer-zerop op0) (gassign-rhs3 g) (gassign-rhs2 g))))]
+          [else #f])])]
+    [(gcond? g)
+     (define r (simplify-cond st m valueize (gcond-code g) (gcond-lhs g) (gcond-rhs g)))
+     (and r (icst? (cadr r)) (icst? (caddr r))
+          (fold-const-compare st (car r) (boolean-type st) (cadr r) (caddr r)))]
+    [else #f]))

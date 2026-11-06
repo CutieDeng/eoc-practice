@@ -320,7 +320,15 @@ early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 →
 | esra | 未移植，夹具无触发（恒等 stage）。需要寄存器化聚合的夹具 |
 | ealias | 未移植 points-to 分析；gcc ≥ 13 的 dump 只有求解器进度行（`opt/passes.rkt` 原样输出）；gcc-12 还 dump 约束与 points-to 集，测试排除 ealias@12.5.0 |
 | phiprop1 | 未移植，夹具无触发（恒等 stage；gcc-12 此处无该 pass） |
-| fre1 | 待做（下一个）：夹具触发表达式冗余消除（struct.c）与 store→load 转发（calls.c） |
+| fre1 | 完成（2026-11-06）：`opt/vn.rkt`（RPO VN 非迭代驱动 + 内联消除）、`opt/alias.rkt`（别名预言机子集：get_ref_base_and_extent、refs_may_alias_p、stmt_may_clobber_ref_p、walk_non_aliased_vuses）；4 夹具 × 2 版本逐函数对齐 |
+| mergephi1 | 待做（下一个） |
+
+fre1 移植记录：
+
+- -O1 下 `pass_fre` 不迭代（`iterate_p = may_iterate && optimize > 1`），因此是 `do_rpo_vn_1 (iterate=false, eliminate=true)`：`rev_post_order_and_mark_dfs_back_seme` 的 SCC 连续 RPO（含顶层 SCC 区间 → `max_rpo`）、RPO 序工作表、`process_bb` 内联 `eliminate_stmt`、`rpo_elim` 的可用性链表（值 → (块 . leader)）与 `dominated_by_p_w_unex` 的 exec-idom 链。
+- -O1 没有 `-fstrict-aliasing`：所有 alias set 为 0，预言机的 TBAA 分支不走；没有 points-to（ealias 未移植）时指针解引用对取址变量保守地 may-alias，与 GCC 无 PTR_INFO 时一致。夹具中 `_11 = *p_18(D)` 的 store→load 转发靠同基址 `p_18` 的偏移区间判别（`MEM[p + 4]` 与 `*p` 不重叠），不需要 PTA。
+- 引用键 = `copy_reference_ops_from_ref` 的操作数记录列表（SSA 操作数取值、地址经 `p = &x` / `p = q p+ C` 定义前推、`&a.b` 折叠），相等按 `vn_reference_eq (lexical=false)` 的偏移合并比较；表按 vuse 版本分桶线性比较。
+- 未移植：迭代驱动与回退、表达式插入（needs_insertion）、`visit_nary_op` 的转换/截断/BIT_AND 载入/BIT_FIELD_REF/取反/移位特例、`lookup_3` 的部分定义与常量内存折叠、modref 摘要、跨块 PHI 等价（带控制条件的 `vn_phi_eq`）、value id。gcc-12 差异（`update_exec_idom`、PHI 前驱重排 `seen_nonconstant`）未分叉，夹具未触发。
 
 forwprop1 移植记录：
 

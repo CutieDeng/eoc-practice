@@ -25,7 +25,7 @@
          stmt-has-volatile-ops? stmt-has-side-effects? call-fndecl call-fndecl-builtin?
          gassign-single-p)
 
-(define (ssa-name? t) (and t (eq? (tree-code t) 'ssa_name)))
+(define (ssa-name? t) (and (Tree? t) (eq? (tree-code t) 'ssa_name)))
 (define (ssa-name=? a b) (and (ssa-name? a) (ssa-name? b) (= (ssa-name-version a) (ssa-name-version b))))
 (define (ssa-default-def? t) (and (tree-attr t 'default-def #f) #t))
 (define (ssa-virtual? t) (virtual-operand? (ssa-name-var t)))
