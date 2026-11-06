@@ -1,0 +1,151 @@
+
+;; Function twice (twice, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+
+
+
+modref analyzing 'twice/1' (ipa=0) (const)
+Analyzing flags of ssa name: v_1(D)
+  Analyzing stmt: _2 = v_1(D) * 2;
+    Analyzing flags of ssa name: _2
+      Analyzing stmt: return _2;
+      current flags of _2 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name _2 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+  current flags of v_1(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name v_1(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+Always executed bbbs (assuming return or EH): 2
+ - modref done with result: tracked.
+int twice (int v)
+{
+  int _2;
+
+  <bb 2> [local count: 1073741824]:
+  _2 = v_1(D) * 2;
+  return _2;
+
+}
+
+
+
+;; Function use (use, funcdef_no=1, decl_uid=4470, cgraph_uid=2, symbol_order=1)
+
+
+
+modref analyzing 'use/2' (ipa=0)
+Analyzing flags of ssa name: a_16(D)
+  Analyzing stmt: _7 = MAX_EXPR <a_16(D), b_17(D)>;
+    Analyzing flags of ssa name: _7
+      Analyzing stmt: r_24 = _7 + r_13;
+        Analyzing flags of ssa name: r_24
+          Analyzing stmt: _12 = twice (r_24);
+            Analyzing flags of ssa name: _12
+              Analyzing stmt: _29 = _12 + r_25;
+                Analyzing flags of ssa name: _29
+                  Analyzing stmt: return _29;
+                  current flags of _29 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                flags of ssa name _29 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+              current flags of _12 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+            flags of ssa name _12 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          current flags of r_24 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape no_indirect_read
+          Analyzing stmt: _10 = ~r_24;
+            Analyzing flags of ssa name: _10
+              Analyzing stmt: MEM[(int *)p_18(D) + 4B] = _10;
+              ssa name saved to memory
+              current flags of _10
+            flags of ssa name _10
+          current flags of r_24
+        flags of ssa name r_24
+      current flags of _7
+    flags of ssa name _7
+  current flags of a_16(D)
+flags of ssa name a_16(D)
+Analyzing flags of ssa name: b_17(D)
+  Analyzing stmt: _7 = MAX_EXPR <a_16(D), b_17(D)>;
+  current flags of b_17(D)
+flags of ssa name b_17(D)
+Analyzing flags of ssa name: p_18(D)
+  Analyzing stmt: MEM[(int *)p_18(D) + 4B] = _10;
+  current flags of p_18(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: *p_18(D) = r_24;
+  current flags of p_18(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: _5 = p_18(D) == 0B;
+  current flags of p_18(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name p_18(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+Always executed bbbs (assuming return or EH): 2, 6
+ - Analyzing call:r_23 = ext (a_16(D), b_17(D));
+ - Function availability <= AVAIL_INTERPOSABLE.
+ - Analyzing call:r_21 = twice (b_17(D));
+ - ECF_CONST, ignoring all stores and all loads except for args.
+ - Analyzing store: *p_18(D)
+   - Recording base_set=0 ref_set=0  Parm 2 param offset:0 offset:0 size:32 max_size:32
+   - Recording kill
+ - Analyzing store: MEM[(int *)p_18(D) + 4B]
+   - Recording base_set=0 ref_set=0  Parm 2 param offset:4 offset:0 size:32 max_size:32
+   - Recording kill
+ - Analyzing call:_12 = twice (r_24);
+ - ECF_CONST, ignoring all stores and all loads except for args.
+ - modref done with result: tracked.
+  loads:
+    Every base
+  stores:
+    Every base
+  kills:
+     Parm 2 param offset:0 offset:0 size:64 max_size:64
+  Side effects
+  Nondeterministic
+  Global memory read
+  Global memory written
+  parm 2 flags: no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+int use (int a, int b, int * p)
+{
+  int r;
+  _Bool _1;
+  _Bool _2;
+  _Bool _3;
+  _Bool _4;
+  _Bool _5;
+  _Bool _6;
+  int _7;
+  int _10;
+  int _12;
+  int _29;
+
+  <bb 2> [local count: 1073741824]:
+  _1 = a_16(D) > 0;
+  _2 = b_17(D) <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  r_23 = ext (a_16(D), b_17(D));
+  goto <bb 6>; [100.00%]
+
+  <bb 4> [local count: 719407024]:
+  _4 = a_16(D) == 0;
+  _5 = p_18(D) == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0)
+    goto <bb 5>; [50.00%]
+  else
+    goto <bb 6>; [50.00%]
+
+  <bb 5> [local count: 359703512]:
+  r_21 = twice (b_17(D));
+
+  <bb 6> [local count: 1073741824]:
+  # r_13 = PHI <r_23(3), 0(4), r_21(5)>
+  _7 = MAX_EXPR <a_16(D), b_17(D)>;
+  r_24 = _7 + r_13;
+  r_25 = r_24 + 1;
+  *p_18(D) = r_24;
+  _10 = ~r_24;
+  MEM[(int *)p_18(D) + 4B] = _10;
+  _12 = twice (r_24);
+  _29 = _12 + r_25;
+  return _29;
+
+}
+
+

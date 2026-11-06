@@ -21,7 +21,7 @@
          "ssa.rkt")
 
 (provide print-function print-lowered-function print-cfg-function print-ssa-function print-type print-expr
-         print-declarator print-stmt print-cond-rhs print-cfg-mode print-vops? decl-print-name label-name)
+         print-declarator print-stmt print-cond-rhs print-cfg-mode current-print-block print-vops? decl-print-name label-name)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -99,8 +99,24 @@
     [(decl-flag st l 'label-uid #f) => (lambda (u) (format "<L~a>" u))]
     [else (format "<D.~a>" (decl-uid l))]))
 
-;; dump_gimple_switch appends the edge probability ("[INV]") once a CFG exists
+;; dump_gimple_switch appends the edge probability ("[INV]") once a CFG exists;
+;; print-blocks binds the cfg and the block so the probability can be found
 (define print-cfg-mode (make-parameter #f))
+(define current-print-block (make-parameter #f))     ; (cons cfg bb) or #f
+
+;; dump_probability: "[%.2f%%]" of to_reg_br_prob_base / 100, "[INV]" when uninitialized
+(define (probability-string c src dest)
+  (define p (prof-prob c src dest))
+  (cond
+    [(not p) "[INV]"]
+    [else
+     (define v (prof-to-reg-br-prob-base p))
+     (define v1 (if (and (< v 1) (> p 0)) 1 v))
+     (format "[~a.~a~a%]" (quotient v1 100) (quotient (remainder v1 100) 10) (remainder v1 10))]))
+(define (prof-to-reg-br-prob-base p) (quotient (+ (* p 10000) 67108864) 134217728))
+(define (block-header-string c bb)
+  (define n (prof-count c bb))
+  (if n (format "  <bb ~a> [local count: ~a]:\n" bb n) (format "  <bb ~a> :\n" bb)))
 ;; -vops: "# .MEM_N = VDEF <.MEM_M>" / "# VUSE <.MEM_M>" before a statement
 (define print-vops? (make-parameter #f))
 
@@ -299,7 +315,14 @@
 
 (define (print-case st c)
   (define lo (case-low c)) (define hi (case-high c))
-  (define lab (string-append (label-name st (case-label c)) (if (print-cfg-mode) " [INV]" "")))
+  (define lab (string-append (label-name st (case-label c))
+                             (cond
+                               [(not (print-cfg-mode)) ""]
+                               [(current-print-block)
+                                => (lambda (cb)
+                                     (define dest (label-to-block (car cb) (case-label c)))
+                                     (string-append " " (if dest (probability-string (car cb) (cdr cb) dest) "[INV]")))]
+                               [else " [INV]"])))
   (cond
     [(not lo) (format "default: ~a" lab)]
     [hi (format "case ~a ... ~a: ~a" (print-expr st lo) (print-expr st hi) lab)]
@@ -393,7 +416,7 @@
   (parameterize ([print-cfg-mode #t])
     (for ([i (in-pvector bbs)])
       (define b (cfg-block cfg i))
-      (fprintf out "  <bb ~a> :\n" i)
+      (fprintf out "~a" (block-header-string cfg i))
       ;; dump_phi_nodes: virtual PHIs only with -vops
       (for ([ph (in-pvector (GBlock-phis b))]
             #:when (or (print-vops?) (not (virtual-operand? (gphi-var ph)))))
@@ -407,17 +430,19 @@
           (cond
             [vd (fprintf out "  # ~a = VDEF <~a>\n" (print-expr st vd) (print-expr st vu))]
             [vu (fprintf out "  # VUSE <~a>\n" (print-expr st vu))]))
-        (print-stmt st g (if (glabel? g) 0 2) out))
+        (parameterize ([current-print-block (cons cfg i)])
+          (print-stmt st g (if (glabel? g) 0 2) out)))
       ;; dump_implicit_edges
       (define last (bb-last-stmt cfg i))
       (cond
         [(and (gcond? last) (= 2 (pvector-length (cfg-succs cfg i))))
          (define-values (t f) (extract-true-false-edges cfg i))
-         (fprintf out "    goto <bb ~a>; [INV]\n  else\n    goto <bb ~a>; [INV]\n" (GEdge-dest t) (GEdge-dest f))]
+         (fprintf out "    goto <bb ~a>; ~a\n  else\n    goto <bb ~a>; ~a\n"
+                  (GEdge-dest t) (probability-string cfg i (GEdge-dest t)) (GEdge-dest f) (probability-string cfg i (GEdge-dest f)))]
         [else
          (define e (find-fallthru-edge cfg i))
          (when (and e (not (eqv? (GEdge-dest e) (GBlock-next b))))
-           (fprintf out "  goto <bb ~a>; [INV]\n" (GEdge-dest e)))])
+           (fprintf out "  goto <bb ~a>; ~a\n" (GEdge-dest e) (probability-string cfg i (GEdge-dest e))))])
       (fprintf out "\n"))))
 
 ;; .ssa dump (dump_function_to_file with PROP_ssa): local decls, then the

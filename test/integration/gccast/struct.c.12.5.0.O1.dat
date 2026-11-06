@@ -2,7 +2,7 @@
 #s(TU "12.5.0" "struct.c" (
   #s(Fn "sum" #s(TreeId 0) #s(TreeId 47)
     #(
-      #s(Node function_decl #s(TreeId 1) ("struct.c" 4 15) ((uid . 3612) (name . "sum") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 44) #s(TreeId 45))) (result . #s(TreeId 46)) (end-locus . ("struct.c" 9 1))))
+      #s(Node function_decl #s(TreeId 1) ("struct.c" 4 15) ((uid . 3612) (name . "sum") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 2) (cgraph-uid . 1) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 44) #s(TreeId 45))) (result . #s(TreeId 46)) (end-locus . ("struct.c" 9 1))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 1464) (name . #f) (size . #s(TreeId 18)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 1464) (prototype . #t) (size-unit . #s(TreeId 19)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 13) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 64) (quals . 0) (addressable . #f) (mode . "DI") (canonical-uid . 13) (size-unit . #s(TreeId 11)) (precision . 64) (unsigned . #t) (min . #s(TreeId 16)) (max . #s(TreeId 17))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 5) (name . "long unsigned int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -115,7 +115,7 @@
       #s(Node plus_expr #s(TreeId 2) ("struct.c" 8 14) ((ops #s(TreeId 111) #s(TreeId 48))))
       #s(Node nop_expr #s(TreeId 2) ("struct.c" 8 16) ((ops #s(TreeId 112)) (readonly . #t)))
       #s(Node indirect_ref #s(TreeId 82) ("struct.c" 8 34) ((ops #s(TreeId 113)) (readonly . #t)))
-      #s(Node var_decl #s(TreeId 114) ("struct.c" 2 20) ((uid . 3608) (name . "msg") (public . #f) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #t) (ignored . #f) (register . #f) (not-gimple-reg . #f) (size . #s(TreeId 4)) (size-unit . #s(TreeId 11)) (initial . #s(TreeId 115))))
+      #s(Node var_decl #s(TreeId 114) ("struct.c" 2 20) ((uid . 3608) (name . "msg") (public . #f) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #t) (ignored . #f) (register . #f) (not-gimple-reg . #f) (symbol-order . 0) (size . #s(TreeId 4)) (size-unit . #s(TreeId 11)) (initial . #s(TreeId 115))))
       #s(Node pointer_type #s(TreeId 82) #f ((uid . 99) (name . #f) (size . #s(TreeId 4)) (align . 64) (quals . 0) (addressable . #f) (mode . "DI") (canonical-uid . 99) (size-unit . #s(TreeId 11))))
       #s(Node nop_expr #s(TreeId 114) ("struct.c" 2 26) ((ops #s(TreeId 116)) (readonly . #t) (constant . #t)))
       #s(Node addr_expr #s(TreeId 117) ("struct.c" 2 26) ((ops #s(TreeId 121)) (readonly . #t) (constant . #t)))

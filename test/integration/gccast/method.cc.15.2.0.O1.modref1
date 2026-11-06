@@ -1,0 +1,90 @@
+
+;; Function S::get (_ZNK1S3getEv, funcdef_no=0, decl_uid=4494, cgraph_uid=1, symbol_order=0)
+
+
+
+modref analyzing 'int S::get() const/1' (ipa=0) (pure)
+Analyzing flags of ssa name: this_3(D)
+  Analyzing stmt: _1 = this_3(D)->x;
+    Analyzing flags of ssa name: _1
+      Analyzing stmt: _4 = _1 * 2;
+        Analyzing flags of ssa name: _4
+          Analyzing stmt: return _4;
+          current flags of _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+      current flags of _1 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name _1 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+  current flags of this_3(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+flags of ssa name this_3(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+Always executed bbbs (assuming return or EH): 2
+ - Analyzing load: this_3(D)->x
+   - Recording base_set=0 ref_set=0  Parm 0 param offset:0 offset:0 size:32 max_size:32
+ - modref done with result: tracked.
+  loads:
+      Base 0: alias set 0
+        Ref 0: alias set 0
+          access: Parm 0 param offset:0 offset:0 size:32 max_size:32
+  stores:
+  Try dse
+  parm 0 flags: not_returned_directly no_indirect_read
+int S::get (const struct S * const this)
+{
+  int _1;
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  _1 = this_3(D)->x;
+  _4 = _1 * 2;
+  return _4;
+
+}
+
+
+
+;; Function h (_Z1hRK1S, funcdef_no=1, decl_uid=4498, cgraph_uid=2, symbol_order=1)
+
+
+
+modref analyzing 'int h(const S&)/2' (ipa=0) (pure)
+Analyzing flags of ssa name: s_3(D)
+  Analyzing stmt: _4 = s_3(D)->x;
+    Analyzing flags of ssa name: _4
+      Analyzing stmt: _6 = _4 * 2;
+        Analyzing flags of ssa name: _6
+          Analyzing stmt: _5 = _6 + 1;
+            Analyzing flags of ssa name: _5
+              Analyzing stmt: return _5;
+              current flags of _5 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+            flags of ssa name _5 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          current flags of _6 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name _6 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+      current flags of _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+  current flags of s_3(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+flags of ssa name s_3(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+Always executed bbbs (assuming return or EH): 2
+ - Analyzing load: s_3(D)->x
+   - Recording base_set=0 ref_set=0  Parm 0 param offset:0 offset:0 size:32 max_size:32
+ - modref done with result: tracked.
+  loads:
+      Base 0: alias set 0
+        Ref 0: alias set 0
+          access: Parm 0 param offset:0 offset:0 size:32 max_size:32
+  stores:
+  Try dse
+  parm 0 flags: not_returned_directly no_indirect_read
+int h (const struct S & s)
+{
+  int _4;
+  int _5;
+  int _6;
+
+  <bb 2> [local count: 1073741824]:
+  _4 = s_3(D)->x;
+  _6 = _4 * 2;
+  _5 = _6 + 1;
+  return _5;
+
+}
+
+

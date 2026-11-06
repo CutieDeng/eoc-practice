@@ -2,7 +2,7 @@
 #s(TU "15.2.0" "basic.c" (
   #s(Fn "f" #s(TreeId 0) #s(TreeId 26)
     #(
-      #s(Node function_decl #s(TreeId 1) ("basic.c" 1 5) ((uid . 4462) (name . "f") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("basic.c" 1 57))))
+      #s(Node function_decl #s(TreeId 1) ("basic.c" 1 5) ((uid . 4462) (name . "f") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 0) (cgraph-uid . 1) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("basic.c" 1 57))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 188) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 188) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -42,7 +42,7 @@
       #s(Node block #f #f ( (vars . ()) (subblocks . ()) (start-loc . #f) (end-loc . #f)))))
   #s(Fn "g" #s(TreeId 0) #s(TreeId 24)
     #(
-      #s(Node function_decl #s(TreeId 1) ("basic.c" 2 5) ((uid . 4465) (name . "g") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . ()) (result . #s(TreeId 23)) (end-locus . ("basic.c" 2 73))))
+      #s(Node function_decl #s(TreeId 1) ("basic.c" 2 5) ((uid . 4465) (name . "g") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 1) (cgraph-uid . 2) (size . #f) (size-unit . #f) (arguments . ()) (result . #s(TreeId 23)) (end-locus . ("basic.c" 2 73))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 137) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 137) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))

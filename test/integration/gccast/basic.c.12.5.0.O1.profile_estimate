@@ -1,0 +1,108 @@
+
+;; Function f (f, funcdef_no=0, decl_uid=3605, cgraph_uid=1, symbol_order=0)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5
+;; 2 succs { 3 4 }
+;; 3 succs { 5 }
+;; 4 succs { 5 }
+;; 5 succs { 1 }
+Predictions for bb 2
+  early return (on trees) heuristics of edge 2->4 (edge pair duplicate): 34.00%
+  early return (on trees) heuristics of edge 2->3 (edge pair duplicate): 34.00%
+  DS theory heuristics: 59.00%
+  combined heuristics: 59.00%
+  opcode values positive (on trees) heuristics of edge 2->3: 59.00%
+Predictions for bb 3
+1 edges in bb 3 predicted to even probabilities
+Predictions for bb 4
+1 edges in bb 4 predicted to even probabilities
+Predictions for bb 5
+1 edges in bb 5 predicted to even probabilities
+int f (int a)
+{
+  int _1;
+  int _3;
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_2(D) > 0)
+    goto <bb 3>; [59.00%]
+  else
+    goto <bb 4>; [41.00%]
+
+  <bb 3> [local count: 633507681]:
+  _4 = a_2(D) + 1;
+  // predicted unlikely by early return (on trees) predictor.
+  goto <bb 5>; [100.00%]
+
+  <bb 4> [local count: 440234144]:
+  _3 = -a_2(D);
+  // predicted unlikely by early return (on trees) predictor.
+
+  <bb 5> [local count: 1073741824]:
+  # _1 = PHI <_4(3), _3(4)>
+  return _1;
+
+}
+
+
+
+;; Function g (g, funcdef_no=1, decl_uid=3608, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5
+;;
+;; Loop 1
+;;  header 4, latch 3
+;;  depth 1, outer 0
+;;  nodes: 4 3
+;; 2 succs { 4 }
+;; 3 succs { 4 }
+;; 4 succs { 3 5 }
+;; 5 succs { 1 }
+Predictions for bb 2
+1 edges in bb 2 predicted to even probabilities
+Predictions for bb 3
+1 edges in bb 3 predicted to even probabilities
+Predictions for bb 4
+  first match heuristics: 90.91%
+  combined heuristics: 90.91%
+  loop iterations heuristics of edge 4->5: 9.09%
+Predictions for bb 5
+1 edges in bb 5 predicted to even probabilities
+cyclic probability of bb 4 is 0.909100; turning freq 1.000000 to 11.001101
+int g ()
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 97603128]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 976138697]:
+  s_7 = s_1 + i_2;
+  i_8 = i_2 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # s_1 = PHI <0(2), s_7(3)>
+  # i_2 = PHI <0(2), i_8(3)>
+  if (i_2 <= 9)
+    goto <bb 3>; [90.91%]
+  else
+    goto <bb 5>; [9.09%]
+
+  <bb 5> [local count: 97603128]:
+  return s_1;
+
+}
+
+

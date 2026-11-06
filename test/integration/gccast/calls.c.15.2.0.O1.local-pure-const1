@@ -1,0 +1,104 @@
+
+;; Function twice (twice, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+
+
+
+ local analysis of twice/1
+   scanning: _2 = v_1(D) * 2;
+  scanning: return _2;
+Function is locally const.
+Function found to be const: twice/1
+Declaration updated to be const: twice/1
+int twice (int v)
+{
+  int _2;
+
+  <bb 2> [local count: 1073741824]:
+  _2 = v_1(D) * 2;
+  return _2;
+
+}
+
+
+
+;; Function use (use, funcdef_no=1, decl_uid=4470, cgraph_uid=2, symbol_order=1)
+
+
+
+ local analysis of use/2
+   scanning: _1 = a_16(D) > 0;
+  scanning: _2 = b_17(D) <= 9;
+  scanning: _3 = _1 & _2;
+  scanning: if (_3 != 0)
+  scanning: r_23 = ext (a_16(D), b_17(D));
+  scanning: _4 = a_16(D) == 0;
+  scanning: _5 = p_18(D) == 0B;
+  scanning: _6 = _4 | _5;
+  scanning: if (_6 != 0)
+  scanning: r_21 = twice (b_17(D));
+  scanning: _7 = MAX_EXPR <a_16(D), b_17(D)>;
+  scanning: r_24 = _7 + r_13;
+  scanning: r_25 = r_24 + 1;
+  scanning: *p_18(D) = r_24;
+    Indirect ref write is not const/pure
+  scanning: _10 = ~r_24;
+  scanning: MEM[(int *)p_18(D) + 4B] = _10;
+    Indirect ref write is not const/pure
+  scanning: _12 = twice (r_24);
+  scanning: _29 = _12 + r_25;
+  scanning: return _29;
+Function is locally looping.
+int use (int a, int b, int * p)
+{
+  int r;
+  _Bool _1;
+  _Bool _2;
+  _Bool _3;
+  _Bool _4;
+  _Bool _5;
+  _Bool _6;
+  int _7;
+  int _10;
+  int _12;
+  int _29;
+
+  <bb 2> [local count: 1073741824]:
+  _1 = a_16(D) > 0;
+  _2 = b_17(D) <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  r_23 = ext (a_16(D), b_17(D));
+  goto <bb 6>; [100.00%]
+
+  <bb 4> [local count: 719407024]:
+  _4 = a_16(D) == 0;
+  _5 = p_18(D) == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0)
+    goto <bb 5>; [50.00%]
+  else
+    goto <bb 6>; [50.00%]
+
+  <bb 5> [local count: 359703512]:
+  r_21 = twice (b_17(D));
+
+  <bb 6> [local count: 1073741824]:
+  # r_13 = PHI <r_23(3), 0(4), r_21(5)>
+  _7 = MAX_EXPR <a_16(D), b_17(D)>;
+  r_24 = _7 + r_13;
+  r_25 = r_24 + 1;
+  *p_18(D) = r_24;
+  _10 = ~r_24;
+  MEM[(int *)p_18(D) + 4B] = _10;
+  _12 = twice (r_24);
+  _29 = _12 + r_25;
+  return _29;
+
+}
+
+

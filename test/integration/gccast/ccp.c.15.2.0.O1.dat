@@ -2,7 +2,7 @@
 #s(TU "15.2.0" "ccp.c" (
   #s(Fn "k1" #s(TreeId 0) #s(TreeId 26)
     #(
-      #s(Node function_decl #s(TreeId 1) ("ccp.c" 3 5) ((uid . 4464) (name . "k1") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("ccp.c" 10 1))))
+      #s(Node function_decl #s(TreeId 1) ("ccp.c" 3 5) ((uid . 4464) (name . "k1") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 0) (cgraph-uid . 1) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("ccp.c" 10 1))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 188) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 188) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -49,7 +49,7 @@
       #s(Node block #f #f ( (vars . (#s(TreeId 27) #s(TreeId 32))) (subblocks . ()) (start-loc . #f) (end-loc . #f)))))
   #s(Fn "k2" #s(TreeId 0) #s(TreeId 26)
     #(
-      #s(Node function_decl #s(TreeId 1) ("ccp.c" 12 5) ((uid . 4469) (name . "k2") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("ccp.c" 18 1))))
+      #s(Node function_decl #s(TreeId 1) ("ccp.c" 12 5) ((uid . 4469) (name . "k2") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 1) (cgraph-uid . 2) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("ccp.c" 18 1))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 188) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 188) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -97,7 +97,7 @@
       #s(Node block #f #f ( (vars . (#s(TreeId 27))) (subblocks . (#s(TreeId 42))) (start-loc . #f) (end-loc . #f)))))
   #s(Fn "k3" #s(TreeId 0) #s(TreeId 26)
     #(
-      #s(Node function_decl #s(TreeId 1) ("ccp.c" 20 5) ((uid . 4478) (name . "k3") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("ccp.c" 25 1))))
+      #s(Node function_decl #s(TreeId 1) ("ccp.c" 20 5) ((uid . 4478) (name . "k3") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 2) (cgraph-uid . 3) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("ccp.c" 25 1))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 188) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 188) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -134,7 +134,7 @@
       #s(Node block #f #f ( (vars . (#s(TreeId 27) #s(TreeId 31))) (subblocks . ()) (start-loc . #f) (end-loc . #f)))))
   #s(Fn "k4" #s(TreeId 0) #s(TreeId 30)
     #(
-      #s(Node function_decl #s(TreeId 1) ("ccp.c" 27 5) ((uid . 4483) (name . "k4") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 28))) (result . #s(TreeId 29)) (end-locus . ("ccp.c" 33 1))))
+      #s(Node function_decl #s(TreeId 1) ("ccp.c" 27 5) ((uid . 4483) (name . "k4") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 3) (cgraph-uid . 4) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 28))) (result . #s(TreeId 29)) (end-locus . ("ccp.c" 33 1))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 189) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 189) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -181,7 +181,7 @@
       #s(Node pointer_type #s(TreeId 45) #f ((uid . 1657) (name . #f) (size . #s(TreeId 11)) (align . 64) (quals . 0) (addressable . #f) (mode . "DI") (canonical-uid . 1657) (size-unit . #s(TreeId 12))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 188) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 188) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 46))))
       #s(Node tree_list #f #f ( (purpose . #f) (value . #s(TreeId 2)) (chain . #s(TreeId 25))))
-      #s(Node function_decl #s(TreeId 45) ("ccp.c" 1 5) ((uid . 4462) (name . "ext") (public . #t) (static . #f) (external . #t) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #t) (used . #t) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 48))) (result . #f)))
+      #s(Node function_decl #s(TreeId 45) ("ccp.c" 1 5) ((uid . 4462) (name . "ext") (public . #t) (static . #f) (external . #t) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #t) (used . #t) (ignored . #f) (register . #f) (symbol-order . 5) (cgraph-uid . 6) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 48))) (result . #f)))
       #s(Node parm_decl #s(TreeId 2) ("ccp.c" 1 9) ((uid . 4461) (name . #f) (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (not-gimple-reg . #f) (size . #s(TreeId 4)) (size-unit . #s(TreeId 17)) (arg-type . #s(TreeId 2))))
       #s(Node integer_cst #s(TreeId 2) #f ((value . 1)))
       #s(Node return_expr #s(TreeId 26) ("ccp.c" 32 10) ((ops #s(TreeId 51)) (side-effects . #t)))
@@ -192,7 +192,7 @@
       #s(Node block #f #f ( (vars . (#s(TreeId 31))) (subblocks . ()) (start-loc . #f) (end-loc . #f)))))
   #s(Fn "k5" #s(TreeId 0) #s(TreeId 28)
     #(
-      #s(Node function_decl #s(TreeId 1) ("ccp.c" 35 5) ((uid . 4488) (name . "k5") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 25) #s(TreeId 26))) (result . #s(TreeId 27)) (end-locus . ("ccp.c" 43 1))))
+      #s(Node function_decl #s(TreeId 1) ("ccp.c" 35 5) ((uid . 4488) (name . "k5") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (symbol-order . 4) (cgraph-uid . 5) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 25) #s(TreeId 26))) (result . #s(TreeId 27)) (end-locus . ("ccp.c" 43 1))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 316) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 316) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))

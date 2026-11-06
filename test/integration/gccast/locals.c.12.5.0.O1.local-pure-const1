@@ -1,0 +1,86 @@
+
+;; Function locals (locals, funcdef_no=0, decl_uid=3610, cgraph_uid=1, symbol_order=0)
+
+
+
+ local analysis of locals/0
+   scanning: addr = 5;
+  scanning: arr[0] = n_19(D);
+  scanning: _1 = n_19(D) + 1;
+  scanning: arr[1] = _1;
+  scanning: _4 = _1 + n_19(D);
+  scanning: arr[2] = _4;
+  scanning: arr[3] = 0;
+  scanning: _6 = take (&addr);
+  scanning: _7 = arr[i_15];
+  scanning: s_36 = _7 + s_14;
+  scanning: i_37 = i_15 + 1;
+  scanning: if (i_15 <= 3)
+  scanning: s_30 = _4 + s_14;
+  scanning: inner ={v} {CLOBBER(eol)};
+  scanning: _12 = _6 + s_30;
+  scanning: addr.0_13 = addr;
+  scanning: _32 = _12 + addr.0_13;
+  scanning: arr ={v} {CLOBBER(eol)};
+  scanning: p ={v} {CLOBBER(eol)};
+  scanning: addr ={v} {CLOBBER(eol)};
+  scanning: return _32;
+Function is locally looping.
+int locals (int n)
+{
+  int inner$1;
+  int inner$0;
+  int p$y;
+  int p$x;
+  int inner[2];
+  int i;
+  int addr;
+  int s;
+  struct P p;
+  int arr[4];
+  int _1;
+  int _4;
+  int _6;
+  int _7;
+  int _12;
+  int addr.0_13;
+  int _32;
+
+  <bb 2> [local count: 214748368]:
+  addr = 5;
+  arr[0] = n_19(D);
+  _1 = n_19(D) + 1;
+  arr[1] = _1;
+  _4 = _1 + n_19(D);
+  arr[2] = _4;
+  arr[3] = 0;
+  _6 = take (&addr);
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 858993457]:
+  _7 = arr[i_15];
+  s_36 = _7 + s_14;
+  i_37 = i_15 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # s_14 = PHI <0(2), s_36(3)>
+  # i_15 = PHI <0(2), i_37(3)>
+  if (i_15 <= 3)
+    goto <bb 3>; [80.00%]
+  else
+    goto <bb 5>; [20.00%]
+
+  <bb 5> [local count: 214748368]:
+  s_30 = _4 + s_14;
+  inner ={v} {CLOBBER(eol)};
+  _12 = _6 + s_30;
+  addr.0_13 = addr;
+  _32 = _12 + addr.0_13;
+  arr ={v} {CLOBBER(eol)};
+  p ={v} {CLOBBER(eol)};
+  addr ={v} {CLOBBER(eol)};
+  return _32;
+
+}
+
+

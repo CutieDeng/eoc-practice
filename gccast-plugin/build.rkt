@@ -138,7 +138,8 @@
         ;; -O1 dumps: <name>.<ver>.O1.<pass> for the early pipeline and the final form
         (copy-file dat-o1 (build-path fixtures (string-append name "." ver ".O1.dat")) #t)
         (define keep '("original" "gimple" "lower" "cfg" "ssa" "ccp1" "forwprop1" "ethread" "esra" "ealias" "phiprop1"
-                       "fre1" "mergephi1" "dse1" "cddce1" "phiopt1" "iftoswitch" "sccopy1" "release_ssa" "optimized"))
+                       "fre1" "mergephi1" "dse1" "cddce1" "phiopt1" "iftoswitch" "sccopy1" "profile_estimate"
+                       "local-pure-const1" "modref1" "release_ssa" "optimized"))
         (for ([f (in-list (directory-list o1-dir))])
           (define m (regexp-match (pregexp (string-append "^" (regexp-quote name) "[.][0-9]+t[.](.+)$")) (path->string f)))
           (when (and m (member (cadr m) keep))

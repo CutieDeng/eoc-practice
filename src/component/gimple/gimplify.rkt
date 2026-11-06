@@ -32,7 +32,7 @@
          "tree.rkt"
          "gimple.rkt")
 
-(provide gimplify-function
+(provide gimplify-function decl-ecf-flags
          (struct-out gctx)
          is-gimple-reg is-gimple-val is-gimple-lvalue is-gimple-reg-type
          is-gimple-constant is-gimple-min-invariant get-symbol-constant-value tree-swap-operands-p
@@ -695,7 +695,20 @@
 ;; ------------------------------------------------------------
 ;; gimplify_call_expr (no builtin folding): (values e* ret pre st)
 ;; ------------------------------------------------------------
-(define (call-expr-flags c) (tree-attr c 'flags 0))
+;; flags_from_decl_or_type for the bits the local passes discover
+;; (pure/const, looping, noreturn), kept as GS declaration overrides
+(define (decl-ecf-flags st d)
+  (bitwise-ior (if (decl-flag st d 'readonly #f) ECF-CONST 0)
+               (if (decl-flag st d 'pure #f) ECF-PURE 0)
+               (if (decl-flag st d 'looping-const-or-pure #f) ECF-LOOPING 0)
+               (if (decl-flag st d 'noreturn #f) ECF-NORETURN 0)))
+
+;; call_expr_flags: the front end's bits, plus what later analysis
+;; recorded on the callee
+(define (call-expr-flags c [st #f])
+  (define fn (call-expr-fn c))
+  (define d (and st fn (eq? (tree-code fn) 'addr_expr) (eq? (tree-code (tree-operand fn 0)) 'function_decl) (tree-operand fn 0)))
+  (bitwise-ior (tree-attr c 'flags 0) (if d (decl-ecf-flags st d) 0)))
 
 ;; gimplify the arguments, last first (PUSH_ARGS_REVERSED): (values e* ret pre st)
 (define (gimplify-call-args st e pre)
@@ -724,12 +737,13 @@
             (cond
               [(= ret2 GS-ERROR) (values #f GS-ERROR pre st)]
               [else
-               (define flags (call-expr-flags e2))
+               (define flags (call-expr-flags e2 st))
+               (define e2* (if (= flags (tree-attr e2 'flags 0)) e2 (tree-set-attr e2 'flags flags)))
                (define e3
                  (if (and (not (zero? (bitwise-and flags (bitwise-ior ECF-CONST ECF-PURE))))
                           (zero? (bitwise-and flags ECF-LOOPING)))
-                     (tree-set-attr e2 'side-effects #f)
-                     e2))
+                     (tree-set-attr e2* 'side-effects #f)
+                     e2*))
                (cond
                  [(not want-value)
                   (values #f ret (pvector-cons-right pre (gimple-build-call-from-tree e3 fnptrtype)) st)]

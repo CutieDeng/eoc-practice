@@ -63,7 +63,7 @@
          (struct-out gtry) (struct-out gphi)
          stmt-loc stmt-flags stmt-set-loc stmt-flag stmt-set-flag stmt-has-location?
          ;; state and cfg records
-         (struct-out GS) (struct-out GCfg) (struct-out GBlock) (struct-out GEdge))
+         (struct-out GS) (struct-out GCfg) (struct-out GBlock) (struct-out GEdge) (struct-out GProf))
 
 ;; ------------------------------------------------------------
 ;; Tree
@@ -256,10 +256,15 @@
 ;;   messages       : pvector of dump lines ("Removing basic block 4")
 ;;   altered        : cfgcleanup_altered_bbs (intbits)
 ;;   touched        : touched_switch_bbs (intbits)
+;;   profile        : #f before pass_profile, else a GProf:
+;;                      counts : intmap block -> count (profile_count, GUESSED_LOCAL)
+;;                      probs  : immutable hash (cons src dest) -> profile_probability m_val
+;;                    (an edge or block without an entry is uninitialized)
 ;; GBlock preds is a pvector of predecessor indices (GCC pred order);
 ;; an edge is identified by (src, dest) and stored once, in `edges`.
 ;; GBlock phis is the pvector of gphi (empty until pass_build_ssa).
 
-(struct GCfg (blocks edges label->bb next-label-uid messages altered touched) #:prefab)
+(struct GCfg (blocks edges label->bb next-label-uid messages altered touched profile) #:prefab)
+(struct GProf (counts probs) #:prefab)
 (struct GBlock (index phis stmts prev next preds) #:prefab)
 (struct GEdge (dest flags goto-locus) #:prefab)

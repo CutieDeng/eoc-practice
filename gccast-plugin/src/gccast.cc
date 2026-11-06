@@ -31,12 +31,16 @@
 //             chains are materialized only where a construct owns them
 //             (BIND_EXPR vars, TYPE_FIELDS, DECL_ARGUMENTS, BLOCK vars).
 
+#include <map>
+#include <string>
+#include <cstdlib>
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "tree.h"
 #include "tree-iterator.h"
 #include "real.h"
 #include "calls.h"
+#include "cgraph.h"
 
 #include <cstdio>
 #include <cstring>
@@ -196,6 +200,9 @@ struct Serializer {
     field_bool(o, "register", DECL_REGISTER(t));
     if (VAR_P(t) || code == PARM_DECL || code == RESULT_DECL)
       field_bool(o, "not-gimple-reg", DECL_NOT_GIMPLE_REG_P(t));
+    // symtab numbers (symbol order, cgraph uid) are only final at the end of
+    // the unit; a placeholder keyed by DECL_UID is patched in on_finish_unit.
+    if (code == FUNCTION_DECL || VAR_P(t)) { o += " @SYMTAB"; put_int(o, DECL_UID(t)); o += '@'; }
     // context: uid + code of DECL_CONTEXT (function / translation unit / record ...)
     if (DECL_CONTEXT(t)) {
       tree c = DECL_CONTEXT(t);
@@ -380,9 +387,50 @@ void on_pre_genericize(void *gcc_data, void *) {
   g_fn_count++;
 }
 
+// Replace every " @SYMTAB<decl-uid>@" placeholder by the symbol's order and,
+// for functions, its cgraph uid (the numbers GCC's dumps print as name/N:
+// symbol_order up to GCC 14, the cgraph uid from GCC 15).
+std::map<unsigned, std::string> g_symtab;
+
+// Record every symbol's numbers.  Called when the IPA passes start (all
+// nodes exist, none removed yet by early inlining) and again at the end
+// of the unit for nodes created later.
+void record_symtab() {
+  symtab_node *n;
+  FOR_EACH_SYMBOL(n) {
+    if (!n->decl) continue;
+    unsigned uid = DECL_UID(n->decl);
+    if (g_symtab.count(uid)) continue;
+    std::string s = " (symbol-order . "; put_int(s, n->order); s += ')';
+    if (cgraph_node *c = dyn_cast<cgraph_node *>(n)) { s += " (cgraph-uid . "; put_int(s, c->get_uid()); s += ')'; }
+    g_symtab[uid] = s;
+  }
+}
+
+void on_all_ipa_passes_start(void *, void *) { record_symtab(); }
+
+std::string patch_symtab(const std::string &in) {
+  record_symtab();
+  const std::map<unsigned, std::string> &fields = g_symtab;
+  std::string out;
+  size_t pos = 0;
+  for (;;) {
+    size_t at = in.find(" @SYMTAB", pos);
+    if (at == std::string::npos) { out.append(in, pos, std::string::npos); break; }
+    out.append(in, pos, at - pos);
+    size_t end = in.find('@', at + 8);
+    unsigned uid = (unsigned)strtoul(in.c_str() + at + 8, nullptr, 10);
+    auto it = fields.find(uid);
+    if (it != fields.end()) out += it->second;
+    pos = end + 1;
+  }
+  return out;
+}
+
 void on_finish_unit(void *, void *) {
   FILE *f = fopen(g_out_path.c_str(), "w");
   if (!f) { fprintf(stderr, "gccast: cannot open %s\n", g_out_path.c_str()); return; }
+  g_fns = patch_symtab(g_fns);
   std::string o;
   o += ";; gccast " GCCAST_GCC_VERSION " -- GENERIC dump; read with Racket `read`\n";
   o += "#s(TU \"" GCCAST_GCC_VERSION "\" ";
@@ -411,6 +459,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     g_out_path = std::string(main_input_filename ? main_input_filename : "a") + ".gccast.dat";
   register_callback(info->base_name, PLUGIN_INFO, nullptr, &g_info);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, on_pre_genericize, nullptr);
+  register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, on_all_ipa_passes_start, nullptr);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, on_finish_unit, nullptr);
   return 0;
 }

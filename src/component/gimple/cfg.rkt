@@ -36,6 +36,7 @@
          "gimple.rkt")
 
 (provide build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-clear-messages cfg-add-message
+         cfg-set-profile prof-count prof-prob split-edge label-to-block make-edge remove-edge create-bb
          EDGE-FALLTHRU EDGE-TRUE-VALUE EDGE-FALSE-VALUE
          cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges
          set-block block-set-phis block-set-stmts ENTRY EXIT)
@@ -58,21 +59,34 @@
 ;; GCfg field updates
 ;; ------------------------------------------------------------
 
-(define (cfg-set-blocks c v) (GCfg v (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c)))
-(define (cfg-set-edges c v) (GCfg (GCfg-blocks c) v (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c)))
-(define (cfg-set-label->bb c v) (GCfg (GCfg-blocks c) (GCfg-edges c) v (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c)))
-(define (cfg-set-next-label-uid c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) v (GCfg-messages c) (GCfg-altered c) (GCfg-touched c)))
-(define (cfg-set-altered c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) v (GCfg-touched c)))
-(define (cfg-set-touched c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) v))
+(define (cfg-set-blocks c v) (GCfg v (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
+(define (cfg-set-edges c v) (GCfg (GCfg-blocks c) v (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
+(define (cfg-set-label->bb c v) (GCfg (GCfg-blocks c) (GCfg-edges c) v (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
+(define (cfg-set-next-label-uid c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) v (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
+(define (cfg-set-altered c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) v (GCfg-touched c) (GCfg-profile c)))
+(define (cfg-set-touched c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) v (GCfg-profile c)))
 (define (dump c fmt . args)
   (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c)
-        (pvector-cons-right (GCfg-messages c) (apply format fmt args)) (GCfg-altered c) (GCfg-touched c)))
+        (pvector-cons-right (GCfg-messages c) (apply format fmt args)) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
 
 (define (altered c i) (cfg-set-altered c (intbits-set (GCfg-altered c) i)))
 (define (cfg-add-message c m) (dump c "~a" m))
+(define (cfg-set-profile c pf) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) pf))
+(define (prof-count c bb) (let ([pf (GCfg-profile c)]) (and pf (intmap-ref (GProf-counts pf) bb #f))))
+(define (prof-prob c src dest) (let ([pf (GCfg-profile c)]) (and pf (hash-ref (GProf-probs pf) (cons src dest) #f))))
+;; edge probabilities follow their edge
+(define (prof-remove-edge c src dest)
+  (define pf (GCfg-profile c))
+  (if pf (cfg-set-profile c (GProf (GProf-counts pf) (hash-remove (GProf-probs pf) (cons src dest)))) c))
+(define (prof-move-edge c src old new)
+  (define pf (GCfg-profile c))
+  (cond
+    [(and pf (hash-ref (GProf-probs pf) (cons src old) #f))
+     => (lambda (p) (cfg-set-profile c (GProf (GProf-counts pf) (hash-set (hash-remove (GProf-probs pf) (cons src old)) (cons src new) p))))]
+    [else c]))
 ;; a pass starts with an empty dump_file: the messages belong to one pass
 (define (cfg-clear-messages c)
-  (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (pvector-empty) (GCfg-altered c) (GCfg-touched c)))
+  (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (pvector-empty) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
 
 ;; ------------------------------------------------------------
 ;; Blocks and the chain
@@ -205,7 +219,8 @@
 ;; remove_edge (disconnect_src + disconnect_dest, both unordered_remove);
 ;; the PHI arguments of DEST for the edge go with it (remove_phi_args,
 ;; same unordered removal so arguments stay aligned with the preds)
-(define (remove-edge c src dest)
+(define (remove-edge c0 src dest)
+  (define c (prof-remove-edge c0 src dest))
   (define k (pvector-index-of (cfg-preds c dest) src))
   (define b (cfg-block c dest))
   (let* ([c (set-succs c src (pvector-unordered-remove (cfg-succs c src) (edge-index c src dest)))]
@@ -217,10 +232,16 @@
 
 ;; redirect_edge_succ: the edge keeps its slot in SRC's succs
 ;; (disconnect_dest + connect_dest)
-(define (redirect-edge-succ c src old new)
+(define (redirect-edge-succ c0 src old new)
+  (define c (prof-move-edge c0 src old new))
   (define k (edge-index c src old))
   (define e (pvector-ref (cfg-succs c src) k))
-  (let* ([c (set-preds c old (pvector-unordered-remove (cfg-preds c old) (pvector-index-of (cfg-preds c old) src)))]
+  (define pk (pvector-index-of (cfg-preds c old) src))
+  (define ob (cfg-block c old))
+  (let* ([c (set-block c (block-set-preds (block-set-phis ob (for/pvector ([ph (in-pvector (GBlock-phis ob))])
+                                                                (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                                                                      (pvector-unordered-remove (gphi-args ph) pk))))
+                                           (pvector-unordered-remove (GBlock-preds ob) pk)))]
          [c (set-succs c src (pvector-set (cfg-succs c src) k (GEdge new (GEdge-flags e) (GEdge-goto-locus e))))]
          [c (set-preds c new (pvector-cons-right (cfg-preds c new) src))])
     c))
@@ -791,6 +812,36 @@
             [else (values c1 st)]))
         (values (redirect-edge-succ-nodup c2 src old dest) st2)])]))
 
+;; split_edge (cfghooks + gimple_split_edge): a new empty block on the edge
+;; SRC -> DEST, placed after split_edge_bb_loc; DEST's PHI arguments keep
+;; their slot (the new edge takes the old one).  (values new-bb cfg)
+(define (split-edge c src dest)
+  (define dest-prev (bb-prev c dest))
+  (define after
+    (if (and dest-prev (let ([e (find-edge c dest-prev dest)]) (and e (not (edge-flag? e EDGE-COMPLEX)))))
+        src
+        (or dest-prev src)))
+  (define-values (nb c1) (create-bb c (pvector-empty) after))
+  (define-values (_new c2) (make-edge c1 nb dest EDGE-FALLTHRU))
+  (define pk (pvector-index-of (cfg-preds c2 dest) src))
+  ;; redirect: the pred slot of SRC becomes NB (unordered_remove moves the last, i.e. NB, into it)
+  (define e (find-edge c2 src dest))
+  (define db (cfg-block c2 dest))
+  (define c3
+    (let* ([c (prof-move-edge c2 src dest nb)]
+           [c (set-block c (block-set-preds (block-set-phis db (for/pvector ([ph (in-pvector (GBlock-phis db))])
+                                                                 (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                                                                       (for/pvector ([a (in-pvector (gphi-args ph))])
+                                                                         (if (= (car a) src) (cons nb (cdr a)) a)))))
+                                             (pvector-unordered-remove (GBlock-preds db) pk)))]
+           [c (set-succs c src (pvector-set (cfg-succs c src) (edge-index c src dest) (GEdge nb (GEdge-flags e) (GEdge-goto-locus e))))]
+           [c (set-preds c nb (pvector-cons-right (cfg-preds c nb) src))])
+      c))
+  ;; the new block's single successor edge is always taken
+  (define pf (GCfg-profile c3))
+  (define c4 (if pf (cfg-set-profile c3 (GProf (GProf-counts pf) (hash-set (GProf-probs pf) (cons nb dest) 134217728))) c3))
+  (values nb c4))
+
 ;; ---- forwarder blocks -------------------------------------------------------
 
 ;; maybe_remove_forwarder_block (no PHIs, no loops, no abnormal edges):
@@ -898,7 +949,16 @@
     (for/fold ([m intmap-empty]) ([p (in-list (intmap->literal-datum (GCfg-label->bb c)))])
       (define k (intmap-ref remap (cdr p) #f))
       (if k (intmap-set m (car p) k) m)))
-  (GCfg blocks edges l->bb (GCfg-next-label-uid c) (GCfg-messages c) intbits-empty intbits-empty))
+  (define prof
+    (let ([pf (GCfg-profile c)])
+      (and pf
+           (GProf (for/fold ([m intmap-empty]) ([p (in-list (intmap->literal-datum (GProf-counts pf)))])
+                    (define k (intmap-ref remap (car p) #f))
+                    (if k (intmap-set m k (cdr p)) m))
+                  (for/fold ([h (hash)]) ([(k v) (in-hash (GProf-probs pf))])
+                    (define a (intmap-ref remap (car k) #f)) (define b (intmap-ref remap (cdr k) #f))
+                    (if (and a b) (hash-set h (cons a b) v) h))))))
+  (GCfg blocks edges l->bb (GCfg-next-label-uid c) (GCfg-messages c) intbits-empty intbits-empty prof))
 
 ;; cleanup_tree_cfg_noloop: (values cfg st)
 (define (cleanup-tree-cfg st c cond->string)
@@ -938,7 +998,7 @@
   (define st0 (gs-set-fndecl st fndecl))
   (define blocks (intmap-set (intmap-set intmap-empty ENTRY (GBlock ENTRY (pvector-empty) (pvector-empty) #f EXIT (pvector-empty)))
                              EXIT (GBlock EXIT (pvector-empty) (pvector-empty) ENTRY #f (pvector-empty))))
-  (define c0 (GCfg blocks intmap-empty intmap-empty 0 (pvector-empty) intbits-empty intbits-empty))
+  (define c0 (GCfg blocks intmap-empty intmap-empty 0 (pvector-empty) intbits-empty intbits-empty #f))
   (define-values (c1 st1) (make-blocks st0 c0 body))
   (define c2 (if (= (bb-next c1 ENTRY) EXIT) (let-values ([(_i c) (create-bb c1 (pvector-empty) ENTRY)]) c) c1))
   (let* ([c (cleanup-dead-labels st1 c2)]

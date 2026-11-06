@@ -325,7 +325,16 @@ early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 →
 | dse1 | 完成（2026-11-06）：`opt/dse.rkt`（逆 RPO、`dse_classify_store` 的 vdef 使用链游走、死 SSA 定义/死 PHI 删除）；alias.rkt 补 `stmt_kills_ref_p`、`ref_may_alias_global_p`、`walk_aliased_vdefs`。未做字节级部分死存储裁剪、memset/memcpy builtin、冗余零存储 |
 | cddce1 | 完成（2026-11-06）：`opt/dce.rkt`。-O1 下 `pass_cd_dce` 的 aggressive = `optimize >= 2` 为假，即普通 DCE（条件/switch 恒必要，无控制依赖）；gcc ≥ 15 才带 `TODO_remove_unused_locals`（pass 表第三列，测试据此重算局部变量表）。未做 aggressive 模式、malloc/free 配对、atomics |
 | phiopt1 / iftoswitch / sccopy1 | 未移植，夹具无触发（恒等 stage；sccopy 自 gcc-14 起存在） |
-| profile_estimate | 待做（下一个）：dump 带 `[local count: N]` 与边概率，`// predicted` 注释消失 |
+| profile_estimate | 完成（2026-11-06）：`opt/profile.rkt`（tree_estimate_probability：GIMPLE_PREDICT / noreturn / 递归调用的后支配路径预测、返回值 PHI 预测、循环预测（迭代次数闭式与 loop_niter_by_eval 暴力求值、loop exit、iv 比较、loop guard、extra exit）、call 与 opcode 启发式、combine_predictions_for_bb 的去重 / first match / DS theory、estimate_bb_frequencies 的 sreal 马尔可夫传播与计数缩放）、`opt/sreal.rkt`（GCC sreal 与 profile_probability 逐位复刻）、`opt/loops.rkt`（flow_loops_find、LOOPS_NORMAL 的 preheader / 单后继 latch 规范化）、`opt/niter.rkt`（affine simple_iv、闭式迭代次数、finite_loop_p 子集）；GCfg 增加 `profile` 字段（GProf：块计数 + 边概率），cfg.rkt 维护概率随边变动，print.rkt 输出 `[local count: N]` / `[P%]`；4 夹具 × 2 版本逐函数对齐。版本分叉：gcc ≤ 13 计数 `to_int(x + 1/2)`，≥ 14 `to_nearest_int`；DS theory 组合 gcc ≤ 14 double，≥ 15 int64。未做：伪出口边、hot/cold 属性、`__builtin_expect`、不可约循环、IPA 计数 |
+| local-pure-const1 | 完成（2026-11-06）：`opt/pure-const.rkt`（analyze_function 的逐语句扫描 dump、check_decl / check_op / check_call、finite_function_p、声明更新）。被调函数的 const/pure/looping/noreturn 作为 GS 声明覆盖位保存，`gimplify-call-expr` 合入 call 的 ECF 位（函数按 GCC 的 callee-first 顺序逐个走完整 pass 序列，所以后处理的调用者能看到）；dump 名 `name/N` 的 N 由 gccast 插件在 IPA 开始时记录（gcc ≥ 15 为 cgraph uid，之前为 symbol order）。未做：异常 / nothrow、malloc 发现、builtin 表、points-to（指针只在源自局部变量地址时视为局部） |
+| modref1 | 待做（下一个）：dump 为每函数 50–200 行的 flags 分析日志 |
+
+profile_estimate 移植记录：
+
+- 预测的记录顺序决定 dump 顺序与去重结果（`prune_predictions_for_bb` 按出现顺序找 single edge / edge pair duplicate），所以 `tree_bb_level_predictions` → `predict_loops`（内层先）→ 逐块 `tree_estimate_probability_bb` 的顺序与 GCC 一致，PHI 级别的 `expr_expected_value` 只做常量 PHI 子集。
+- 频率传播用 `opt/sreal.rkt` 逐位复刻 GCC sreal（31 位有效数、归一化舍入、`shift_right` 舍入），计数才能逐个相等：如 bb 频率 1/(1−0.9091) 的 11.0011005… 与 `freq_max = 2^30 / max` 后的 97603128 / 976138696。
+- `split-edge` 建 preheader / latch 块时新边概率恒为 always，块放置遵循 `split_edge_bb_loc`（struct.c 的 latch 块 bb 10 排在 bb 3 之后）。
+- 夹具 `calls.c` 的 `use` 函数：bb 5 的 `twice` 调用不触发 call 启发式，因为 `twice` 在之前已被 local-pure-const1 判定为 const（函数按 callee-first 顺序完整跑完 early 序列）；这是把 local-pure-const1 一并移植的原因。
 
 fre1 移植记录：
 

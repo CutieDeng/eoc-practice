@@ -21,7 +21,9 @@
          "forwprop.rkt"
          "vn.rkt"
          "dse.rkt"
-         "dce.rkt")
+         "dce.rkt"
+         "profile.rkt"
+         "pure-const.rkt")
 
 (provide o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
 (define pass-name car)
@@ -59,4 +61,5 @@
          (p 'cddce1 dce (>= major 15))
          (p 'phiopt1 identity-pass)
          (p 'iftoswitch identity-pass))
-   (if (>= major 14) (list (p 'sccopy1 identity-pass)) '())))
+   (if (>= major 14) (list (p 'sccopy1 identity-pass)) '())
+   (list (p 'profile_estimate profile-estimate) (p 'local-pure-const1 local-pure-const))))
