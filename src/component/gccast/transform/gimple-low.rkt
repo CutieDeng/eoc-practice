@@ -35,6 +35,8 @@
     (define local-decls (box (pvector-empty)))
     (define return-statements (box (pvector-empty)))   ; of (cons label greturn), push right
     (define cannot-fallthru (box #f))
+    (define current-block (box #f))                      ; lower_data.block (outermost BLOCK = NULL)
+    (define end-locus (make-loc (attr fndecl 'end-locus #f)))
 
     (define (record-vars! vars)
       (for ([v (in-pvector vars)])
@@ -47,9 +49,14 @@
       (for ([g (in-seq s)]) (lower-stmt! g out))
       out)
 
-    (define (lower-gimple-bind! b out)
+    ;; lower_gimple_bind: a nested BIND with a BLOCK scopes the block of its statements
+    (define (lower-gimple-bind! b out [outermost? #f])
+      (define old (unbox current-block))
+      (define nb (and (not outermost?) (gbind-block b)))
+      (when nb (set-box! current-block nb))
       (record-vars! (gbind-vars b))
-      (seq-add-seq! out (lower-sequence (gbind-body b))))
+      (seq-add-seq! out (lower-sequence (gbind-body b)))
+      (when nb (set-box! current-block old)))
 
     ;; lower_gimple_return
     (define (lower-gimple-return! g out)
@@ -60,17 +67,20 @@
           (pvector-ref rs i)))
       (define entry
         (cond
-          [found (set-greturn-loc! (cdr found) #f) found]
+          [found (gimple-set-location! (cdr found) #f) found]
           [else
-           (define label (create-artificial-label))
+           (define label (create-artificial-label (loc-spot end-locus)))
            (define e (cons label g))
            (set-box! return-statements (pvector-cons-right rs e))
            e]))
-      (when (and (not (optimize?)) (greturn-loc g))
+      (when (and (not (optimize?)) (gimple-has-location? g))
         (set-attr! (car entry) 'artificial #f))
-      (seq-add! out (gimple-build-goto (car entry))))
+      (define t (gimple-build-goto (car entry)))
+      (gimple-set-location! t (gimple-location g))
+      (seq-add! out t))
 
     (define (lower-stmt! g out)
+      (gimple-set-block! g (unbox current-block))
       (cond
         [(gbind? g) (lower-gimple-bind! g out)]
         [(or (gcond? g) (ggoto? g) (gswitch? g))
@@ -93,14 +103,14 @@
 
     ;; lower_function_body
     (define body (make-seq))
-    (lower-gimple-bind! outer-bind body)
+    (lower-gimple-bind! outer-bind body #t)
     (define may (gimple-seq-may-fallthru body))
     (define rs (unbox return-statements))
     (when (and may (or (pvector-empty? rs) (greturn-retval (cdr (pvector-last rs)))))
-      (seq-add! body (gimple-build-return #f))
+      (seq-add! body (gimple-build-return #f end-locus))
       (set! may #f))
     (for ([e (in-pvector (pvector-reverse (unbox return-statements)))])
       (seq-add! body (gimple-build-label (car e)))
       (seq-add! body (cdr e))
-      (when may (set-greturn-loc! (cdr e) #f) (set! may #f)))
+      (when may (gimple-set-location! (cdr e) #f) (set! may #f)))
     (lowered body (unbox local-decls))))

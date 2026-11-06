@@ -17,7 +17,9 @@
 
 (require racket/list "../../../kernel/data/data.rkt" "tree.rkt")
 
-(provide (struct-out gassign) (struct-out gcall) (struct-out gcond) (struct-out glabel)
+(provide (struct-out gstmt) gimple-location gimple-set-location! gimple-has-location? gimple-set-do-not-emit-location!
+         gimple-do-not-emit-location? gimple-set-block! annotate-one-with-location! greturn-loc set-greturn-loc!
+         (struct-out gassign) (struct-out gcall) (struct-out gcond) (struct-out glabel)
          (struct-out ggoto) (struct-out greturn) (struct-out gswitch) (struct-out gbind)
          (struct-out gpredict) (struct-out gnop) (struct-out gtry) gimple-build-try
          gimple-build-assign gimple-build-call-from-tree gimple-build-cond gimple-build-label
@@ -26,17 +28,32 @@
          gimple-seq-may-fallthru gimple-stmt-may-fallthru
          (struct-out seq) make-seq seq-add! seq-add-seq! seq->list in-seq seq-empty? seq-last seq-first seq-length seq-replace-last!)
 
-(struct gassign ([lhs #:mutable] code [rhs1 #:mutable] [rhs2 #:mutable] [rhs3 #:mutable]) #:transparent)
-(struct gcall ([lhs #:mutable] fn args fntype internal? flags) #:transparent)   ; flags: call_expr_flags (ECF_*)
-(struct gcond (code lhs rhs [true-label #:mutable] [false-label #:mutable]) #:transparent)
-(struct glabel (label) #:transparent)
-(struct ggoto (dest) #:transparent)
-(struct greturn (retval [loc #:auto #:mutable]) #:transparent)
-(struct gswitch (index default-case cases) #:transparent)   ; cases: list of CASE_LABEL_EXPR trees
-(struct gbind ([vars #:mutable] [body #:mutable] block) #:transparent)
-(struct gpredict (predictor outcome) #:transparent)
-(struct gnop () #:transparent)
-(struct gtry ([eval #:mutable] [cleanup #:mutable] kind) #:transparent)   ; kind: 'finally | 'catch
+;; Every statement has a mutable location (gloc or #f) and the
+;; "do not emit location" flag used for the goto GIMPLE_COND emits.
+(struct gstmt ([loc #:auto #:mutable] [no-loc #:auto #:mutable]) #:transparent)
+(struct gassign gstmt ([lhs #:mutable] code [rhs1 #:mutable] [rhs2 #:mutable] [rhs3 #:mutable]) #:transparent)
+(struct gcall gstmt ([lhs #:mutable] fn args fntype internal? flags) #:transparent)   ; flags: call_expr_flags (ECF_*)
+(struct gcond gstmt (code lhs rhs [true-label #:mutable] [false-label #:mutable]) #:transparent)
+(struct glabel gstmt (label) #:transparent)
+(struct ggoto gstmt (dest) #:transparent)
+(struct greturn gstmt (retval) #:transparent)
+(struct gswitch gstmt (index default-case cases) #:transparent)   ; cases: pvector of CASE_LABEL_EXPR trees
+(struct gbind gstmt ([vars #:mutable] [body #:mutable] block) #:transparent)
+(struct gpredict gstmt (predictor outcome) #:transparent)
+(struct gnop gstmt () #:transparent)
+(struct gtry gstmt ([eval #:mutable] [cleanup #:mutable] kind) #:transparent)   ; kind: 'finally | 'catch
+
+(define (gimple-location g) (gstmt-loc g))
+(define (gimple-set-location! g l) (set-gstmt-loc! g l))
+(define (gimple-has-location? g) (loc-has-location? (gstmt-loc g)))
+(define (gimple-set-do-not-emit-location! g) (set-gstmt-no-loc! g #t))
+(define (gimple-do-not-emit-location? g) (gstmt-no-loc g))
+;; gimple_set_block
+(define (gimple-set-block! g block) (set-gstmt-loc! g (set-block-loc (gstmt-loc g) block)))
+;; annotate_one_with_location
+(define (annotate-one-with-location! g l)
+  (when (and (not (gimple-has-location? g)) (not (gstmt-no-loc g)) (not (glabel? g)))
+    (set-gstmt-loc! g l)))
 (define (gimple-build-try eval cleanup kind) (gtry eval cleanup kind))
 
 ;; ---- sequences --------------------------------------------------------
@@ -74,7 +91,9 @@
 
 ;; gimple_build_call_from_tree: fn is the (already gimplified) function operand
 (define (gimple-build-call-from-tree call fntype)
-  (gcall #f (call-expr-fn call) (call-expr-args call) fntype (call-expr-internal? call) (attr call 'flags 0)))
+  (define g (gcall #f (call-expr-fn call) (call-expr-args call) fntype (call-expr-internal? call) (attr call 'flags 0)))
+  (gimple-set-location! g (make-loc (tree-loc call)))
+  g)
 
 ;; gimple_cond_get_ops_from_tree (gcc/gimple.cc)
 (define (gimple-cond-get-ops-from-tree c)
@@ -92,7 +111,9 @@
 (define (gimple-build-cond code lhs rhs tl fl) (gcond code lhs rhs tl fl))
 (define (gimple-build-label l) (glabel l))
 (define (gimple-build-goto l) (ggoto l))
-(define (gimple-build-return v [loc #f]) (define g (greturn v)) (set-greturn-loc! g loc) g)
+(define (gimple-build-return v [loc #f]) (define g (greturn v)) (gimple-set-location! g (if (gloc? loc) loc (make-loc loc))) g)
+(define greturn-loc gimple-location)
+(define set-greturn-loc! gimple-set-location!)
 (define ECF-NORETURN 8)
 (define (gimple-call-noreturn-p g) (not (zero? (bitwise-and (gcall-flags g) ECF-NORETURN))))
 (define (gimple-build-switch index default-case cases) (gswitch index default-case cases))

@@ -120,16 +120,19 @@ struct Serializer {
   void field_str(std::string &o, const char *key, const char *s) { field(o, key); put_string(o, s ? s : ""); o += ')'; }
   void field_chain(std::string &o, const char *key, tree t) { field(o, key); refs_chain(o, t); o += ')'; }
 
-  void location(std::string &o, tree t) {
-    location_t loc = UNKNOWN_LOCATION;
-    if (DECL_P(t)) loc = DECL_SOURCE_LOCATION(t);
-    else if (EXPR_P(t) && EXPR_HAS_LOCATION(t)) loc = EXPR_LOCATION(t);
+  void put_location(std::string &o, location_t loc) {
     if (loc == UNKNOWN_LOCATION) { o += "#f"; return; }
     expanded_location xl = expand_location(loc);
     o += '(';
     put_string(o, xl.file ? xl.file : "");
     o += ' '; put_int(o, xl.line); o += ' '; put_int(o, xl.column);
     o += ')';
+  }
+  void location(std::string &o, tree t) {
+    location_t loc = UNKNOWN_LOCATION;
+    if (DECL_P(t)) loc = DECL_SOURCE_LOCATION(t);
+    else if (EXPR_P(t) && EXPR_HAS_LOCATION(t)) loc = EXPR_LOCATION(t);
+    put_location(o, loc);
   }
 
   void serialize(tree t, std::string &o) {
@@ -211,6 +214,10 @@ struct Serializer {
       case FUNCTION_DECL:
         field_chain(o, "arguments", DECL_ARGUMENTS(t));
         field_ref(o, "result", DECL_RESULT(t));
+        if (DECL_STRUCT_FUNCTION(t)) {
+          // cfun->function_end_locus: used for return labels and the implicit return
+          field(o, "end-locus"); put_location(o, DECL_STRUCT_FUNCTION(t)->function_end_locus); o += ')';
+        }
         break;
       case FIELD_DECL:
         field_ref(o, "offset", DECL_FIELD_OFFSET(t));
@@ -322,6 +329,8 @@ struct Serializer {
       case BLOCK:
         field_chain(o, "vars", BLOCK_VARS(t));
         field_chain(o, "subblocks", BLOCK_SUBBLOCKS(t));
+        field(o, "start-loc"); put_location(o, BLOCK_SOURCE_LOCATION(t)); o += ')';
+        field(o, "end-loc"); put_location(o, BLOCK_SOURCE_END_LOCATION(t)); o += ')';
         break;
       case STATEMENT_LIST: {
         field(o, "stmts"); o += '(';

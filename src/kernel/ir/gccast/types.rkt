@@ -21,14 +21,14 @@
 ;;   declarations         : uid name public static external artificial
 ;;                          readonly volatile addressable used ignored register
 ;;                          [not-gimple-reg] [context] size size-unit
-;;                          [initial | arguments result | offset bit-offset
+;;                          [initial | arguments result end-locus | offset bit-offset
 ;;                          bit-field | arg-type | forced]
 ;;   types                : uid name size align quals addressable mode
 ;;                          [canonical-uid] [string-flag] [prototype] size-unit
 ;;                          [main-variant precision
 ;;                          unsigned min max domain fields arg-types values]
 ;;   constants            : value | hex | bytes | real imag
-;;   exceptional          : id | purpose value chain | elts | vars subblocks | stmts
+;;   exceptional          : id | purpose value chain | elts | vars subblocks start-loc end-loc | stmts
 ;; ============================================================
 
 (provide (struct-out TU)

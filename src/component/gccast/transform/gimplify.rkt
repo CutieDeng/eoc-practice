@@ -53,6 +53,10 @@
 
 (define the-ctx (make-parameter #f))
 (define (ctx) (the-ctx))
+;; input_location (a global in GCC): a box holding a gloc or #f
+(define input-location (make-parameter (box #f)))
+(define (current-input-location) (unbox (input-location)))
+(define (set-input-location! l) (set-box! (input-location) l))
 
 (define (push-gimplify-context! into-ssa rhs-cond-ok)
   (the-ctx (gctx (the-ctx) (pvector-empty) (pvector-empty) 0 (make-seq) #f #f #f #f into-ssa rhs-cond-ok #f #f #f #f)))
@@ -277,6 +281,7 @@
        (make-ssa-name (type-main-variant (tree-type val*)) #:name (and name (create-tmp-var-name name)))]
       [else (lookup-tmp-var val* is-formal not-gimple-reg)]))
   (define mod (build2 'init_expr (tree-type t) t val*))
+  (set-tree-loc! mod (or (tree-loc val*) (loc-spot (current-input-location))))
   (gimplify-and-add mod pre)
   t)
 
@@ -499,6 +504,7 @@
           (seq-add! body-seq (gimple-build-label lbl))
           dc]))
      (define switch-stmt (gimple-build-switch (tree-operand sw 0) default* cases))
+     (gimple-set-location! switch-stmt (make-loc (tree-loc sw)))
      (cond
        [add-bind
         (define bb (make-seq))
@@ -511,7 +517,9 @@
      GS-ALL-DONE]))
 
 (define (gimplify-label-expr r pre)
-  (seq-add! pre (gimple-build-label (label-expr-label (ref-get r))))
+  (define g (gimple-build-label (label-expr-label (ref-get r))))
+  (gimple-set-location! g (make-loc (tree-loc (ref-get r))))
+  (seq-add! pre g)
   GS-ALL-DONE)
 
 (define (gimplify-case-label-expr r pre)
@@ -521,7 +529,9 @@
       [(not c) (error 'gimplify-case-label-expr "case label outside switch")]
       [(gctx-case-labels c) (set-gctx-case-labels! c (pvector-cons-right (gctx-case-labels c) e))]
       [else (loop (gctx-prev c))]))
-  (seq-add! pre (gimple-build-label (case-label e)))
+  (define g (gimple-build-label (case-label e)))
+  (gimple-set-location! g (make-loc (tree-loc e)))
+  (seq-add! pre g)
   GS-ALL-DONE)
 
 ;; build_and_jump: label-ref is a ref to a label slot (or #f)
@@ -721,6 +731,7 @@
 (define (gimplify-call-expr r pre fallback)
   (define want-value (not (= fallback fb-none)))
   (define e (ref-get r))
+  (unless (tree-loc e) (set-tree-loc! e (loc-spot (current-input-location))))
   (cond
     [(call-expr-internal? e)
      (cond
@@ -1009,6 +1020,7 @@
                      [else (create-artificial-label)])))
            (define-values (pred-code arm1 arm2) (gimple-cond-get-ops-from-tree (tree-operand expr 0)))
            (define cond-stmt (gimple-build-cond pred-code arm1 arm2 label-true label-false))
+           (gimple-set-location! cond-stmt (make-loc (tree-loc expr)))
            (seq-add! seq cond-stmt)
            (maybe-fold-stmt! seq)
            (define label-cont #f)
@@ -1021,7 +1033,9 @@
                 (set! have-then (gimplify-stmt (op-ref expr 1) seq))
                 (when (and (not have-else) (tree-operand expr 2) (gimple-seq-may-fallthru seq))
                   (set! label-cont (create-artificial-label))
-                  (seq-add! seq (gimple-build-goto label-cont)))]))
+                  (define g (gimple-build-goto label-cont))
+                  (gimple-set-do-not-emit-location! g)
+                  (seq-add! seq g))]))
            (unless have-else
              (seq-add! seq (gimple-build-label label-false))
              (set! have-else (gimplify-stmt (op-ref expr 2) seq)))
@@ -1207,6 +1221,7 @@
            g)]
       [else g]))
   (unless (eq? g g*)
+    (gimple-set-location! g* (gimple-location g))
     (seq-replace-last! pre g*)))
 
 (define (gimplify-modify-expr r pre post want-value)
@@ -1262,7 +1277,10 @@
                          (define c (gimple-build-call-from-tree from fnptrtype))
                          (set-gcall-lhs! c to)
                          c])]
-                     [else (gimple-build-assign to from)]))
+                     [else
+                      (define a (gimple-build-assign to from))
+                      (gimple-set-location! a (make-loc (tree-loc e)))
+                      a]))
                  (seq-add! pre assign)
                  (maybe-fold-stmt! pre)
                  (cond
@@ -1414,6 +1432,14 @@
      (define internal-post (make-seq))
      (define pre* (or pre internal-pre))
      (define post* (or post internal-post))
+     (define pre-last (seq-length pre*))
+     (define post-last (seq-length post*))
+     (define saved-location (current-input-location))
+     (when (tree-loc save-expr0) (set-input-location! (make-loc (tree-loc save-expr0))))
+     ;; annotate_all_with_location_after
+     (define (annotate-after! s from)
+       (for ([g (in-pvector (pvector-drop (seq-items s) (min from (seq-length s))))])
+         (annotate-one-with-location! g (current-input-location))))
      (define ret
        (let loop ()
          (strip-useless-type-conversion! r)
@@ -1604,7 +1630,8 @@
                    [(tcc_declaration tcc_constant) GS-ALL-DONE]
                    [else (error 'gimplify-expr "unhandled tree code ~a (~a)" code (tree-code-class code))])]))
             (if (= ret GS-OK) (if (ref-get r) (loop) GS-OK) ret)])))
-     (cond
+     (define result
+      (cond
        [(= ret GS-ERROR) (when is-statement (ref-set! r #f)) ret]
        [else
         (define e (ref-get r))
@@ -1632,6 +1659,8 @@
            (when (or (not (seq-empty? internal-pre)) (not (seq-empty? internal-post)))
              (seq-add-seq! internal-pre internal-post)
              (seq-add-seq! pre* internal-pre))
+           (annotate-after! pre* pre-last)
+           (annotate-after! post* post-last)
            ret]
           [(and (seq-empty? internal-post) (test (ref-get r))) ret]
           [else
@@ -1645,8 +1674,12 @@
              [(and (fb? fallback fb-rvalue) (is-gimple-reg-rhs-or-call e))
               (ref-set! r (get-formal-tmp-var e pre*))]
              [else (error 'gimplify-expr "gimplification failed for ~a" (tree-code e))])
-           (unless (seq-empty? internal-post) (seq-add-seq! pre* internal-post))
-           ret])])]))
+           (unless (seq-empty? internal-post)
+             (for ([g (in-seq internal-post)]) (annotate-one-with-location! g (current-input-location)))
+             (seq-add-seq! pre* internal-post))
+           ret])]))
+     (set-input-location! saved-location)
+     result]))
 
 (define (expr-2 e pre post)
   (define r0 (gimplify-expr (op-ref e 0) pre post is-gimple-val fb-rvalue))
@@ -1660,6 +1693,7 @@
 (define (gimplify-function fndecl body)
   (parameterize ([current-function-decl fndecl]
                  [ssa-version-counter (box 0)]
+                 [input-location (box (make-loc (tree-loc fndecl)))]
                  [the-ctx #f])
     (push-gimplify-context! #t #f)
     (define seq (make-seq))

@@ -34,6 +34,7 @@
 
 (provide (struct-out T)
          (struct-out ref)
+         (struct-out gloc) make-loc loc-spot loc-has-location? loc-unknown? set-block-loc location-with-discriminator
          current-tree-table current-function-decl current-gcc-version gcc-major-version
          ;; refs (tree* in GCC)
          box-ref op-ref attr-ref ref-get ref-set!
@@ -82,6 +83,33 @@
          fold-convert fold-build1 fold-build2 fold-build3 convert-to-ptrofftype
          void-type boolean-type size-type sizetype ptr-type
          set-global-types! tree->datum)
+
+;; ------------------------------------------------------------
+;; location_t
+;; ------------------------------------------------------------
+;;
+;; GENERIC nodes carry only the source spot (file line col) list in
+;; T-loc.  GIMPLE statements carry a `gloc`: spot + BLOCK + discriminator,
+;; the three components GCC folds into one location_t.  #f is
+;; UNKNOWN_LOCATION.  Two statements "have the same location" only
+;; when all three components agree (equal?), which is exactly what
+;; cleanup_tree_cfg's -O0 merge rules compare.
+
+(struct gloc (spot block discr) #:transparent)
+(define (make-loc spot) (and spot (gloc spot #f 0)))
+(define (loc-spot l) (and l (gloc-spot l)))
+;; LOCATION_LOCUS (l) != UNKNOWN_LOCATION
+(define (loc-has-location? l) (and l (gloc-spot l) #t))
+(define (loc-unknown? l) (not l))
+;; set_block: a block-only location is "nonzero" even without a spot
+(define (set-block-loc l block)
+  (cond
+    [(and (not l) (not block)) #f]
+    [(not l) (gloc #f block 0)]
+    [else (gloc (gloc-spot l) block (gloc-discr l))]))
+;; location_with_discriminator: UNKNOWN when there is no spot
+(define (location-with-discriminator l d)
+  (and l (gloc-spot l) (gloc (gloc-spot l) (gloc-block l) d)))
 
 ;; ------------------------------------------------------------
 ;; The node
@@ -251,9 +279,9 @@
 (define (build-label-expr label) (build1 'label_expr (void-type) label))
 (define (build-goto label) (build1 'goto_expr (void-type) label))
 
-;; create_artificial_label: LABEL_DECL, artificial, ignored, context = current fn
-(define (create-artificial-label)
-  (make-tree 'label_decl #:type (void-type)
+;; create_artificial_label (loc): LABEL_DECL, artificial, ignored, context = current fn
+(define (create-artificial-label [loc #f])
+  (make-tree 'label_decl #:type (void-type) #:loc loc
              #:attrs (list (cons 'uid (next-uid!)) (cons 'name #f) (cons 'artificial #t) (cons 'ignored #t)
                            (cons 'context (cons 'function_decl (and (current-function-decl) (decl-uid (current-function-decl))))))))
 

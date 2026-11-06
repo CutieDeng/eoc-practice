@@ -32,8 +32,8 @@
 (define (set-bc-stack! bc v) (set! bc-stacks (pvector-set bc-stacks bc v)))
 (define bc-hash-map (make-parameter (make-hasheq)))
 
-(define (begin-bc-block bc)
-  (define label (create-artificial-label))
+(define (begin-bc-block bc [loc #f])
+  (define label (create-artificial-label loc))
   (set-bc-stack! bc (pvector-cons-right (bc-stack bc) label))
   (set-attr! label (if (= bc bc-break) 'label-break 'label-continue) #t)
   label)
@@ -100,8 +100,8 @@
   (define cond-box (box cnd)) (define incr-box (box incr)) (define body-box (box body))
   (walk-tree! (box-ref cond-box) func #f)
   (walk-tree! (box-ref incr-box) func #f)
-  (define blab (begin-bc-block bc-break))
-  (define clab (begin-bc-block bc-continue))
+  (define blab (begin-bc-block bc-break start-locus))
+  (define clab (begin-bc-block bc-continue start-locus))
   (when name (hash-set! (bc-hash-map) name (cons blab clab)))
   (walk-tree! (box-ref body-box) func #f)
   (set-box! walk-subtrees #f)
@@ -114,7 +114,7 @@
        (append-to-statement-list! (build-goto (get-bc-label bc-break)) (box-ref stmt-list)))]
     [else
      ;; Expand to gotos.
-     (define top (build-label-expr (create-artificial-label)))
+     (define top (build-label-expr (create-artificial-label start-locus)))
      (set! exit (build-goto (label-expr-label top)))
      (cond
        [(and cnd (not (integer-nonzerop cnd)))
@@ -123,7 +123,7 @@
           (define t
             (cond
               [incr
-               (set! entry (build-label-expr (create-artificial-label)))
+               (set! entry (build-label-expr (create-artificial-label start-locus)))
                (build-goto (label-expr-label entry))]
               [else (build-goto (get-bc-label bc-continue))]))
           (append-to-statement-list! t (box-ref stmt-list)))
@@ -169,7 +169,7 @@
   (define type (stmt-op stmt 'SWITCH_STMT_TYPE))
   (define name (stmt-op stmt 'SWITCH_STMT_NAME))
   (walk-tree! (box-ref cond-box) func #f)
-  (define blab (begin-bc-block bc-break))
+  (define blab (begin-bc-block bc-break (tree-loc stmt)))
   (when name (hash-set! (bc-hash-map) name (cons blab #f)))
   (walk-tree! (box-ref body-box) func #f)
   (when name (hash-remove! (bc-hash-map) name))

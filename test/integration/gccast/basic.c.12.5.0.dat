@@ -2,7 +2,7 @@
 #s(TU "12.5.0" "basic.c" (
   #s(Fn "f" #s(TreeId 0) #s(TreeId 26)
     #(
-      #s(Node function_decl #s(TreeId 1) ("basic.c" 1 5) ((uid . 3605) (name . "f") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25))))
+      #s(Node function_decl #s(TreeId 1) ("basic.c" 1 5) ((uid . 3605) (name . "f") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . (#s(TreeId 24))) (result . #s(TreeId 25)) (end-locus . ("basic.c" 1 57))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 160) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 160) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -39,10 +39,10 @@
       #s(Node return_expr #s(TreeId 22) ("basic.c" 1 53) ((ops #s(TreeId 35)) (side-effects . #t)))
       #s(Node modify_expr #s(TreeId 2) ("basic.c" 1 53) ((ops #s(TreeId 25) #s(TreeId 36)) (side-effects . #t)))
       #s(Node negate_expr #s(TreeId 2) ("basic.c" 1 53) ((ops #s(TreeId 24))))
-      #s(Node block #f #f ( (vars . ()) (subblocks . ())))))
+      #s(Node block #f #f ( (vars . ()) (subblocks . ()) (start-loc . #f) (end-loc . #f)))))
   #s(Fn "g" #s(TreeId 0) #s(TreeId 24)
     #(
-      #s(Node function_decl #s(TreeId 1) ("basic.c" 2 5) ((uid . 3608) (name . "g") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . ()) (result . #s(TreeId 23))))
+      #s(Node function_decl #s(TreeId 1) ("basic.c" 2 5) ((uid . 3608) (name . "g") (public . #t) (static . #t) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f) (arguments . ()) (result . #s(TreeId 23)) (end-locus . ("basic.c" 2 73))))
       #s(Node function_type #s(TreeId 2) #f ((uid . 126) (name . #f) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 126) (prototype . #t) (size-unit . #s(TreeId 17)) (arg-types . #s(TreeId 20))))
       #s(Node integer_type #f #f ((uid . 10) (name . #s(TreeId 3)) (size . #s(TreeId 4)) (align . 32) (quals . 0) (addressable . #f) (mode . "SI") (canonical-uid . 10) (size-unit . #s(TreeId 17)) (precision . 32) (unsigned . #f) (min . #s(TreeId 18)) (max . #s(TreeId 19))))
       #s(Node type_decl #s(TreeId 2) #f ((uid . 1) (name . "int") (public . #f) (static . #f) (external . #f) (artificial . #f) (readonly . #f) (volatile . #f) (addressable . #f) (used . #f) (ignored . #f) (register . #f) (size . #f) (size-unit . #f)))
@@ -82,8 +82,8 @@
       #s(Node integer_cst #s(TreeId 2) #f ((value . 1)))
       #s(Node modify_expr #s(TreeId 2) ("basic.c" 2 57) ((ops #s(TreeId 25) #s(TreeId 39)) (side-effects . #t)))
       #s(Node plus_expr #s(TreeId 2) ("basic.c" 2 57) ((ops #s(TreeId 25) #s(TreeId 30))))
-      #s(Node block #f #f ( (vars . (#s(TreeId 30))) (subblocks . ())))
+      #s(Node block #f #f ( (vars . (#s(TreeId 30))) (subblocks . ()) (start-loc . #f) (end-loc . #f)))
       #s(Node return_expr #s(TreeId 21) ("basic.c" 2 70) ((ops #s(TreeId 42)) (side-effects . #t)))
       #s(Node modify_expr #s(TreeId 2) ("basic.c" 2 70) ((ops #s(TreeId 23) #s(TreeId 25)) (side-effects . #t)))
-      #s(Node block #f #f ( (vars . (#s(TreeId 25))) (subblocks . (#s(TreeId 40)))))))
+      #s(Node block #f #f ( (vars . (#s(TreeId 25))) (subblocks . (#s(TreeId 40))) (start-loc . #f) (end-loc . #f)))))
 ))

@@ -297,33 +297,33 @@
 (define (print-stmt g indent out)
   (define pad (make-string indent #\space))
   (match g
-    [(gbind vars body _)
+    [(gbind _ _ vars body _)
      (fprintf out "~a{\n" pad)
      (for ([v (in-pvector vars)]) (fprintf out "~a  ~a;\n" pad (print-declarator (tree-type v) (decl-print-name v))))
      (unless (pvector-empty? vars) (fprintf out "\n"))
      (for ([s (in-seq body)]) (print-stmt s (+ indent 2) out))
      (fprintf out "~a}\n" pad)]
-    [(gassign lhs _ _ _ _) (fprintf out "~a~a = ~a;\n" pad (print-expr lhs) (print-rhs g))]
-    [(gcall lhs fn args _ _ _)
+    [(gassign _ _ lhs _ _ _ _) (fprintf out "~a~a = ~a;\n" pad (print-expr lhs) (print-rhs g))]
+    [(gcall _ _ lhs fn args _ _ _)
      (fprintf out "~a~a~a (~a);\n" pad (if lhs (string-append (print-expr lhs) " = ") "")
               (print-expr (if (eq? (tree-code fn) 'addr_expr) (tree-operand fn 0) fn))
               (string-join (for/list ([a (in-pvector args)]) (print-expr a)) ", "))]
-    [(gcond code l r t f)
+    [(gcond _ _ code l r t f)
      (fprintf out "~aif (~a ~a ~a) goto ~a; else goto ~a;\n" pad (print-expr l) (hash-ref binary-op code "?") (print-expr r) (label-name t) (label-name f))]
-    [(glabel l) (fprintf out "~a~a:\n" pad (label-name l))]
-    [(ggoto l) (fprintf out "~agoto ~a;\n" pad (label-name l))]
-    [(greturn v _) (fprintf out "~areturn~a;\n" pad (if v (string-append " " (print-expr v)) ""))]
-    [(gswitch i d cs)
+    [(glabel _ _ l) (fprintf out "~a~a:\n" pad (label-name l))]
+    [(ggoto _ _ l) (fprintf out "~agoto ~a;\n" pad (label-name l))]
+    [(greturn _ _ v) (fprintf out "~areturn~a;\n" pad (if v (string-append " " (print-expr v)) ""))]
+    [(gswitch _ _ i d cs)
      (fprintf out "~aswitch (~a) <~a>\n" pad (print-expr i) (string-join (cons (print-case d) (for/list ([c (in-pvector cs)]) (print-case c))) ", "))]
-    [(gpredict p o)
+    [(gpredict _ _ p o)
      (fprintf out "~a// predicted ~a by ~a predictor.\n" pad (if (eq? o 'TAKEN) "likely" "unlikely") (hash-ref predictor-names p (symbol->string p)))]
-    [(gtry ev cl kind)
+    [(gtry _ _ ev cl kind)
      (fprintf out "~atry\n~a  {\n" pad pad)
      (for ([s (in-seq ev)]) (print-stmt s (+ indent 4) out))
      (fprintf out "~a  }\n~a~a\n~a  {\n" pad pad (if (eq? kind 'finally) "finally" "catch") pad)
      (for ([s (in-seq cl)]) (print-stmt s (+ indent 4) out))
      (fprintf out "~a  }\n" pad)]
-    [(gnop) (void)]
+    [(gnop _ _) (void)]
     [_ (fprintf out "~a<~a>\n" pad g)]))
 
 ;; dump_function_to_file header: "rettype name (type param, ...)" then the body bind
