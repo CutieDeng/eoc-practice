@@ -78,7 +78,7 @@ Last Updated: 2026-11-05
 |---|---|---|---|
 | 1 | `driver/loop/analysis.rkt:222-228, 273-279` | `for/fold` 返回 2 值赋给单个 `define`，`build-loop-forest`/`get-innermost-loop` 一调用就 arity 错误 | 接两个值；补嵌套循环测试 |
 | 2 | `component/cfg/analysis/loops.rkt:72, 79-80` | 对 pvector 用 `null?`/`length` | 改 `pvector-empty?`/`pvector-length`；空分支返回类型与主路径一致 |
-| 3 | `driver/dominance/dominator.rkt:56,113` 要求 RPO，但 `component/cfg/analysis/dominance.rkt:52` 与 `ssa-construct.rkt:160-168` 传的是 vertex-id 分配序 | 已验证构造 CFG（0→2, 2→1\|3, 1→3）上 idom(3) 算成 0，正确为 2 | 调用方改用 `cfg-reverse-postorder`；component 版加 `#:preds` 参数，让 ssa-construct 不再绕过它。**对现有 Java fixture 的 SSA 输出是否有影响：未知**，修后对比 pipeline-test 输出 |
+| 3 | `driver/dominance/dominator.rkt:56,113` 要求 RPO，但 `component/cfg/analysis/dominance.rkt:52` 与 `ssa-construct.rkt:160-168` 传的是 vertex-id 分配序 | 已验证构造 CFG（0→2, 2→1\|3, 1→3）上 idom(3) 算成 0，正确为 2 | **SSA 侧已修（2026-11-06）**：`driver/ssa/construct.rkt` 自己按后继序做 DFS 求 RPO 再调支配算法；Java ssa/rvsdg/pipeline 测试输出不变。`component/cfg/analysis/dominance.rkt:52` 的调用方仍待改 |
 | 4 | `driver/dominance/dominator.rkt:126` | `cfg-compute-post-idom` exit 为 #f 时返回 void | 显式报错或返回空映射 |
 | 5 | `component/common/analysis-framework.rkt:131-134` | 缓存命中后结果被丢弃，每次重算 | 返回 `cached` |
 | 6 | `driver/dataflow/liveness.rkt:176-200` | Step 5 的 SCC 结果从未被读取，且遍历方向与 `scc.rkt:85` 声明的逆拓扑序相反 | 删除 Step 5，或修正方向后接入并加测试 |
@@ -268,7 +268,7 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 | 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c / locals.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（8 项） |
 | 3b-1 | `gimple-low.rkt`（pass_lower_cf）：拍平 bind、按 retval 合并 return（-O0 下带位置的 return label 置为非 artificial）、删不可达 return、补尾部 `return;`、透传 `gtry` | 完成（2026-11-06）：`lower-test.rkt` 对 4 夹具 × 2 版本的 `.lower` 规范化 diff 为空（8 项） |
 | 3b-2 | `gimple-to-cfg.rkt`：make_blocks/cleanup_dead_labels×2/group_case_labels/make_edges/assign_discriminators，再复现 -O0 的 `cleanup_tree_cfg`（常量条件折叠、不可达块、forwarder、合并、2 标签 switch → cond）对齐 `.cfg` | 完成（2026-11-06）：`cfg-test.rkt` 对 basic.c / calls.c / struct.c × 2 版本的 `.cfg` 规范化 diff 为空（6 项，含 `;; N succs` 边序与 `Removing`/`Merging` 消息）；locals.c 需先有 pass_lower_eh；规格见 `doc/gimple-lower-cfg-spec.md` |
-| 3c | （已被决策 13 取代）不再转 kernel `Cfg`；改为持久化 GIMPLE 表示 + 泛化 SSA / cfg-to-rvsdg，阶段 S1–S6 见 `doc/gimple-functional-ir.md` 第 7 节 | S1–S4 完成（2026-11-06）：`src/kernel/ir/gimple/` + `src/component/gimple/`，`.gimple`/`.lower`/`.cfg` 对齐 8/8/6，可变版 `src/component/gccast/` 已删除；S5（泛型 SSA）待做 |
+| 3c | （已被决策 13 取代）不再转 kernel `Cfg`；改为持久化 GIMPLE 表示 + 泛化 SSA / cfg-to-rvsdg，阶段 S1–S6 见 `doc/gimple-functional-ir.md` 第 7 节 | S1–S5 完成（2026-11-06）：`src/kernel/ir/gimple/` + `src/component/gimple/`，`.gimple`/`.lower`/`.cfg`/`.ssa` 对齐 8/8/6/6；泛型 SSA 在 `driver/ssa/construct.rkt`，Java 与 GIMPLE 各一个端口；S6（cfg-to-rvsdg 泛化）待做 |
 | 4 | 指针、结构体、数组、调用 + 内存状态边 | 待做 |
 
 实现备注（3a，gimplify 对齐过程中确认的 GCC 行为）：

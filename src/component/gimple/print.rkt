@@ -17,10 +17,11 @@
          "state.rkt"
          "tree.rkt"
          "gimple.rkt"
-         "cfg.rkt")
+         "cfg.rkt"
+         "ssa.rkt")
 
-(provide print-function print-lowered-function print-cfg-function print-type print-expr print-declarator print-stmt
-         print-cond-rhs print-cfg-mode decl-print-name label-name)
+(provide print-function print-lowered-function print-cfg-function print-ssa-function print-type print-expr
+         print-declarator print-stmt print-cond-rhs print-cfg-mode decl-print-name label-name)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -101,13 +102,17 @@
 ;; dump_gimple_switch appends the edge probability ("[INV]") once a CFG exists
 (define print-cfg-mode (make-parameter #f))
 
+;; SSA_NAME: identifier_version, var-name_version or _version; default
+;; definitions carry "(D)"
 (define (ssa-print-name s)
   (define id (ssa-name-identifier s))
   (define v (ssa-name-var s))
-  (cond
-    [id (format "~a_~a" id (ssa-name-version s))]
-    [(and v (decl-name v)) (format "~a_~a" (decl-name v) (ssa-name-version s))]
-    [else (format "_~a" (ssa-name-version s))]))
+  (string-append
+   (cond
+     [id (format "~a_~a" id (ssa-name-version s))]
+     [(and v (decl-name v)) (format "~a_~a" (decl-name v) (ssa-name-version s))]
+     [else (format "_~a" (ssa-name-version s))])
+   (if (tree-attr s 'default-def #f) "(D)" "")))
 
 ;; ------------------------------------------------------------
 ;; Constants
@@ -376,10 +381,22 @@
   (for ([v (in-pvector (pvector-reverse local-decls))])
     (fprintf out "  ~a;\n" (print-declarator st (tree-type v) (decl-print-name st v))))
   (unless (pvector-empty? local-decls) (fprintf out "\n"))
+  (print-blocks st cfg out)
+  (fprintf out "}\n\n\n"))
+
+;; dump_bb for every block: header, PHIs (dump_phi_nodes), statements,
+;; implicit edges, blank line
+(define (print-blocks st cfg out)
+  (define bbs (cfg-bbs cfg))
   (parameterize ([print-cfg-mode #t])
     (for ([i (in-pvector bbs)])
       (define b (cfg-block cfg i))
       (fprintf out "  <bb ~a> :\n" i)
+      (for ([ph (in-pvector (GBlock-phis b))])
+        (fprintf out "  # ~a = PHI <~a>\n" (print-expr st (gphi-result ph))
+                 (string-join (for/list ([arg (in-pvector (gphi-args ph))])
+                                (format "~a(~a)" (if (cdr arg) (print-expr st (cdr arg)) "<null>") (car arg)))
+                              ", ")))
       (for ([g (in-pvector (GBlock-stmts b))]) (print-stmt st g (if (glabel? g) 0 2) out))
       ;; dump_implicit_edges
       (define last (bb-last-stmt cfg i))
@@ -391,5 +408,21 @@
          (define e (find-fallthru-edge cfg i))
          (when (and e (not (eqv? (GEdge-dest e) (GBlock-next b))))
            (fprintf out "  goto <bb ~a>; [INV]\n" (GEdge-dest e)))])
-      (fprintf out "\n")))
+      (fprintf out "\n"))))
+
+;; .ssa dump (dump_function_to_file with PROP_ssa): local decls, then the
+;; SSA names without a named variable as "type name;", in version order
+(define (print-ssa-function st fndecl local-decls cfg out)
+  (print-header st fndecl out)
+  (fprintf out "{\n")
+  (for ([v (in-pvector (pvector-reverse local-decls))])
+    (fprintf out "  ~a;\n" (print-declarator st (tree-type v) (decl-print-name st v))))
+  (define anon
+    (for/list ([n (in-pvector (ssa-names-in-version-order cfg))]
+               #:when (let ([v (ssa-name-var n)]) (or (not v) (not (decl-name v)))))
+      n))
+  (for ([n (in-list anon)])
+    (fprintf out "  ~a ~a;\n" (print-type st (tree-type n)) (print-expr st n)))
+  (unless (and (pvector-empty? local-decls) (null? anon)) (fprintf out "\n"))
+  (print-blocks st cfg out)
   (fprintf out "}\n\n\n"))

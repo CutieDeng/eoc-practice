@@ -132,16 +132,25 @@ src/component/gimple/print.rkt       .gimple/.lower/.cfg 三种 dump
 
 `src/component/gccast/` 的可变版本在对应阶段的测试切换到新模块后删除；`src/kernel/ir/gccast/types.rkt`（插件 dump 格式）保留。
 
-## 6. 泛化接口（S6、S7）
+## 6. 泛化接口（S5 已实现，S6 待做）
 
-SSA（替换 `component/java/transform/ssa-construct.rkt` 的算法部分）：
+组件模式：算法只认一个**端口**（`ssa-port`，闭包记录）和一个不透明的**代理值** `a`。端口负责"IR 如何被算法使用"的全部适配；代理值由端口在整个运行中线程化（持久化 IR 返回新的 `a`，可变 IR 可原样返回）。算法本身不引用任何 IR 结构。
 
-```
-(ssa-construct #:entry id #:blocks rpo-pvector #:preds (id → pvector id)
-               #:insns (id → pvector insn) #:defs (insn → pvector var) #:uses (insn → pvector var)
-               #:rewrite (insn renaming → insn) #:place-phi (block var → ...)
-               #:augment-preds [可选：Java handler 增广])
-```
+SSA（`src/driver/ssa/construct.rkt`，`(ssa-construct port a) → (finish a)`）：
+
+| 端口字段 | 签名 | 含义 |
+|---|---|---|
+| `entry` / `blocks` / `succs` / `preds` / `block-key` | `a → bid`，`a → pvector`，`a bid → pvector`，`bid → int` | 图 |
+| `variables` / `var-key` | `a → pvector var`，`var → int` | 候选变量，顺序即 φ 插入顺序 |
+| `block-summary` | `a bid → (values kills upward-uses)` | mark_def_sites |
+| `entry-vars` | `a → pvector var` | 入口处先定义的变量（Java 幻影参数） |
+| `new-name` | `a var kind → (values name a)` | `'def 'phi 'default 'entry` |
+| `insert-phi` / `phis` / `set-phi-result` / `set-phi-arg` | | φ 的创建与填参 |
+| `rename-stmts` | `a bid acc use def → (values a acc)`，`use/def : a acc var → (values name a acc)` | 端口按语句顺序回调，先 use 后 def；`acc` 对端口不透明 |
+| `finish` | `a → result` | |
+| `prune?` / `child-order` / `phi-names` | 策略 | GCC：剪枝、RPO、插入时命名；Java：不剪枝、分配序、重命名时命名 |
+
+两个端口：`component/gimple/ssa.rkt`（GCfg，含 `x_N(D)` 默认定义与 pass_build_ssa 的匿名化）、`component/java/transform/ssa-construct.rkt`（kernel `Cfg`，异常增广图，输出与旧实现相同）。支配信息统一来自 `driver/dominance`，按 RPO 计算（修掉了 roadmap Phase 1 #3）。
 
 CFG → RVSDG（与 roadmap Phase 3.1 的拆分一起做）：接口 = 访问器（entry、succs、phis、insns、defs/uses、op、归一化终结符 `'(cond c t e)`/`'(jump t)`/`'(switch v cases d)`/`'(ret vs)`/`'(throw e)`/`'(unreachable)`）+ 构造器（新块、改终结符、插指令、设 φ）。kernel `Cfg` 与 `GCfg` 各实现一份。
 
@@ -153,7 +162,7 @@ CFG → RVSDG（与 roadmap Phase 3.1 的拆分一起做）：接口 = 访问器
 | S2 | genericize.rkt、gimplify.rkt、print.rkt（.gimple） | 完成（2026-11-06）：`component/gimple/gimplify-test.rkt` 8/8（纯函数版与可变版并存，S4 后删可变版） |
 | S3 | lower.rkt、print（.lower） | 完成（2026-11-06）：`component/gimple/lower-test.rkt` 8/8 |
 | S4 | cfg.rkt、print（.cfg） | 完成（2026-11-06）：`component/gimple/cfg-test.rkt` 6/6 + GCfg datum 往返；`src/component/gccast/` 已删除 |
-| S5 | 泛型 SSA；Java 链路切换，pipeline-test 输出不变；修 roadmap Phase 1 #3 | 现有 Java 测试 + GIMPLE `.ssa` 对齐（新基准：`-fdump-tree-ssa`，-O0） |
+| S5 | 泛型 SSA；Java 链路切换，pipeline-test 输出不变；修 roadmap Phase 1 #3 | 完成（2026-11-06）：`driver/ssa/construct.rkt` + 端口 `component/gimple/ssa.rkt`、`component/java/transform/ssa-construct.rkt`；`ssa-test.rkt` 3 夹具 × 2 版本 `.ssa` 对齐 6/6；Java ssa/rvsdg/pipeline 测试不变（48 项） |
 | S6 | cfg-to-rvsdg 泛化（与 Phase 3.1 合并） | Java RVSDG 输出 `equal?`；GIMPLE 夹具生成 RVSDG |
 
 ## 8. 风险

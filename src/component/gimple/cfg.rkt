@@ -37,7 +37,8 @@
 
 (provide build-cfg
          EDGE-FALLTHRU EDGE-TRUE-VALUE EDGE-FALSE-VALUE
-         cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges)
+         cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges
+         set-block block-set-phis block-set-stmts ENTRY EXIT)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -75,10 +76,11 @@
 
 (define (cfg-block c i) (intmap-ref (GCfg-blocks c) i #f))
 (define (set-block c b) (cfg-set-blocks c (intmap-set (GCfg-blocks c) (GBlock-index b) b)))
-(define (block-set-stmts b s) (GBlock (GBlock-index b) s (GBlock-prev b) (GBlock-next b) (GBlock-preds b)))
-(define (block-set-prev b p) (GBlock (GBlock-index b) (GBlock-stmts b) p (GBlock-next b) (GBlock-preds b)))
-(define (block-set-next b n) (GBlock (GBlock-index b) (GBlock-stmts b) (GBlock-prev b) n (GBlock-preds b)))
-(define (block-set-preds b p) (GBlock (GBlock-index b) (GBlock-stmts b) (GBlock-prev b) (GBlock-next b) p))
+(define (block-set-stmts b s) (GBlock (GBlock-index b) (GBlock-phis b) s (GBlock-prev b) (GBlock-next b) (GBlock-preds b)))
+(define (block-set-prev b p) (GBlock (GBlock-index b) (GBlock-phis b) (GBlock-stmts b) p (GBlock-next b) (GBlock-preds b)))
+(define (block-set-next b n) (GBlock (GBlock-index b) (GBlock-phis b) (GBlock-stmts b) (GBlock-prev b) n (GBlock-preds b)))
+(define (block-set-phis b p) (GBlock (GBlock-index b) p (GBlock-stmts b) (GBlock-prev b) (GBlock-next b) (GBlock-preds b)))
+(define (block-set-preds b p) (GBlock (GBlock-index b) (GBlock-phis b) (GBlock-stmts b) (GBlock-prev b) (GBlock-next b) p))
 (define (set-stmts c i s) (set-block c (block-set-stmts (cfg-block c i) s)))
 (define (stmts c i) (GBlock-stmts (cfg-block c i)))
 (define (bb-next c i) (GBlock-next (cfg-block c i)))
@@ -109,7 +111,7 @@
 ;; create_bb: a new index, linked after AFTER: (values index cfg)
 (define (create-bb c stmts after)
   (define i (last-basic-block c))
-  (define c1 (cfg-set-blocks c (intmap-set (GCfg-blocks c) i (GBlock i stmts #f #f (pvector-empty)))))
+  (define c1 (cfg-set-blocks c (intmap-set (GCfg-blocks c) i (GBlock i (pvector-empty) stmts #f #f (pvector-empty)))))
   (values i (link-block c1 i after)))
 
 ;; expunge_block
@@ -806,7 +808,7 @@
     (for/fold ([m intmap-empty]) ([p (in-list (intmap->literal-datum (GCfg-blocks c)))])
       (define b (cdr p))
       (intmap-set m (r (GBlock-index b))
-                  (GBlock (r (GBlock-index b)) (GBlock-stmts b) (r (GBlock-prev b)) (r (GBlock-next b))
+                  (GBlock (r (GBlock-index b)) (GBlock-phis b) (GBlock-stmts b) (r (GBlock-prev b)) (r (GBlock-next b))
                           (for/pvector ([s (in-pvector (GBlock-preds b))]) (r s))))))
   (define edges
     (for/fold ([m intmap-empty]) ([p (in-list (intmap->literal-datum (GCfg-edges c)))])
@@ -854,8 +856,8 @@
 
 (define (build-cfg st fndecl body #:cond->string [cond->string (lambda (st g) "<cond>")])
   (define st0 (gs-set-fndecl st fndecl))
-  (define blocks (intmap-set (intmap-set intmap-empty ENTRY (GBlock ENTRY (pvector-empty) #f EXIT (pvector-empty)))
-                             EXIT (GBlock EXIT (pvector-empty) ENTRY #f (pvector-empty))))
+  (define blocks (intmap-set (intmap-set intmap-empty ENTRY (GBlock ENTRY (pvector-empty) (pvector-empty) #f EXIT (pvector-empty)))
+                             EXIT (GBlock EXIT (pvector-empty) (pvector-empty) ENTRY #f (pvector-empty))))
   (define c0 (GCfg blocks intmap-empty intmap-empty 0 (pvector-empty) intbits-empty intbits-empty))
   (define-values (c1 st1) (make-blocks st0 c0 body))
   (define c2 (if (= (bb-next c1 ENTRY) EXIT) (let-values ([(_i c) (create-bb c1 (pvector-empty) ENTRY)]) c) c1))

@@ -60,7 +60,7 @@
          ;; statements
          (struct-out gassign) (struct-out gcall) (struct-out gcond) (struct-out glabel) (struct-out ggoto)
          (struct-out greturn) (struct-out gswitch) (struct-out gbind) (struct-out gpredict) (struct-out gnop)
-         (struct-out gtry)
+         (struct-out gtry) (struct-out gphi)
          stmt-loc stmt-flags stmt-set-loc stmt-flag stmt-set-flag stmt-has-location?
          ;; state and cfg records
          (struct-out GS) (struct-out GCfg) (struct-out GBlock) (struct-out GEdge))
@@ -205,6 +205,11 @@
 (struct gpredict (loc flags predictor outcome) #:prefab)
 (struct gnop     (loc flags) #:prefab)
 (struct gtry     (loc flags eval cleanup kind) #:prefab)                 ; kind: 'finally | 'catch
+;; PHI nodes live in GBlock-phis, not in the statement sequence:
+;;   var    : the declaration the PHI merges (SSA_NAME_VAR of the result)
+;;   result : SSA name (or #f before the renamer names it)
+;;   args   : pvector of (cons pred-index ssa-name-or-#f), in pred order
+(struct gphi     (loc flags var result args) #:prefab)
 
 ;; Generic access to the two leading fields of any statement prefab.
 (define (stmt-loc g) (vector-ref (struct->vector g) 1))
@@ -251,7 +256,8 @@
 ;;   touched        : touched_switch_bbs (intbits)
 ;; GBlock preds is a pvector of predecessor indices (GCC pred order);
 ;; an edge is identified by (src, dest) and stored once, in `edges`.
+;; GBlock phis is the pvector of gphi (empty until pass_build_ssa).
 
 (struct GCfg (blocks edges label->bb next-label-uid messages altered touched) #:prefab)
-(struct GBlock (index stmts prev next preds) #:prefab)
+(struct GBlock (index phis stmts prev next preds) #:prefab)
 (struct GEdge (dest flags goto-locus) #:prefab)

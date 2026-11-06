@@ -31,13 +31,16 @@
 (define (normalize-gimple-text s)
   (define d-map (make-hash)) (define ssa-map (make-hash)) (define k-map (make-hash))
   (define (num m k) (hash-ref! m k (lambda () (add1 (hash-count m)))))
+  ;; D.N, name.K_N (named temporaries), name_N (SSA names of variables),
+  ;; _N (anonymous SSA names); the version counter is one sequence
   (define renamed
-    (regexp-replace* #px"D\\.[0-9]+|([A-Za-z_][A-Za-z0-9_]*)\\.([0-9]+)_([0-9]+)|(?<![A-Za-z0-9_.])_[0-9]+\\b"
+    (regexp-replace* #px"D\\.[0-9]+|([A-Za-z_][A-Za-z0-9_]*)\\.([0-9]+)_([0-9]+)|([A-Za-z_][A-Za-z0-9_]*)_([0-9]+)\\b|(?<![A-Za-z0-9_.])_[0-9]+\\b"
                      s
-                     (lambda (all name k n)
+                     (lambda (all name k n vname vn)
                        (cond
                          [(string-prefix? all "D.") (format "D.~a" (num d-map all))]
                          [name (format "~a.~a_~a" name (num k-map k) (num ssa-map n))]
+                         [vname (format "~a_~a" vname (num ssa-map vn))]
                          [else (format "_~a" (num ssa-map (substring all 1)))]))))
   (define lines
     (for/list ([l (string-split renamed "\n" #:trim? #f)]
