@@ -16,10 +16,11 @@
          "../../kernel/ir/gimple/types.rkt"
          "state.rkt"
          "tree.rkt"
-         "gimple.rkt")
+         "gimple.rkt"
+         "cfg.rkt")
 
-(provide print-function print-lowered-function print-type print-expr print-declarator print-stmt print-cond-rhs
-         print-cfg-mode decl-print-name label-name)
+(provide print-function print-lowered-function print-cfg-function print-type print-expr print-declarator print-stmt
+         print-cond-rhs print-cfg-mode decl-print-name label-name)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -356,4 +357,39 @@
     (fprintf out "  ~a;\n" (print-declarator st (tree-type v) (decl-print-name st v))))
   (unless (pvector-empty? local-decls) (fprintf out "\n"))
   (for ([g (in-pvector body)]) (print-stmt st g 2 out))
+  (fprintf out "}\n\n\n"))
+
+;; ------------------------------------------------------------
+;; .cfg dump: pass messages, ";; N succs { ... }" lines (flow_loops_cfg_dump),
+;; then dump_function_to_file with dump_bb per block.  The loop tree lines
+;; (";; N loops found" ...) are not produced; the test drops ";;" lines
+;; other than the succs lines.
+;; ------------------------------------------------------------
+(define (print-cfg-function st fndecl local-decls cfg out)
+  (for ([m (in-pvector (GCfg-messages cfg))]) (fprintf out "~a\n" m))
+  (define bbs (cfg-bbs cfg))
+  (for ([i (in-pvector bbs)])
+    (fprintf out ";; ~a succs {~a }\n" i
+             (apply string-append (for/list ([e (in-pvector (cfg-succs cfg i))]) (format " ~a" (GEdge-dest e))))))
+  (print-header st fndecl out)
+  (fprintf out "{\n")
+  (for ([v (in-pvector (pvector-reverse local-decls))])
+    (fprintf out "  ~a;\n" (print-declarator st (tree-type v) (decl-print-name st v))))
+  (unless (pvector-empty? local-decls) (fprintf out "\n"))
+  (parameterize ([print-cfg-mode #t])
+    (for ([i (in-pvector bbs)])
+      (define b (cfg-block cfg i))
+      (fprintf out "  <bb ~a> :\n" i)
+      (for ([g (in-pvector (GBlock-stmts b))]) (print-stmt st g (if (glabel? g) 0 2) out))
+      ;; dump_implicit_edges
+      (define last (bb-last-stmt cfg i))
+      (cond
+        [(and (gcond? last) (= 2 (pvector-length (cfg-succs cfg i))))
+         (define-values (t f) (extract-true-false-edges cfg i))
+         (fprintf out "    goto <bb ~a>; [INV]\n  else\n    goto <bb ~a>; [INV]\n" (GEdge-dest t) (GEdge-dest f))]
+        [else
+         (define e (find-fallthru-edge cfg i))
+         (when (and e (not (eqv? (GEdge-dest e) (GBlock-next b))))
+           (fprintf out "  goto <bb ~a>; [INV]\n" (GEdge-dest e)))])
+      (fprintf out "\n")))
   (fprintf out "}\n\n\n"))

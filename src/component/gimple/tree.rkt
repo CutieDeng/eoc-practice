@@ -4,7 +4,7 @@
 ;; gimple: GENERIC tree helpers (pure functions over kernel/ir/gimple)
 ;; ============================================================
 ;;
-;; The functional counterpart of the former component/gccast/generic/
+;; The functional counterpart of the former (deleted) component/gccast/generic/
 ;; tree.rkt: builders, fold subset, predicates, type compatibility and
 ;; statement-list helpers.  Trees are values; type arguments are uids
 ;; resolved through the state; functions that allocate (fresh uids,
