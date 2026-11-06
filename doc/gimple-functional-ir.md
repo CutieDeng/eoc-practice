@@ -150,7 +150,7 @@ CFG → RVSDG（与 roadmap Phase 3.1 的拆分一起做）：接口 = 访问器
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | S1 | kernel/ir/gimple/types.rkt、datum.rkt、component/gimple/{state,tree,import}.rkt | 完成（2026-11-06）：`import-test.rkt` 5 个夹具 × 2 版本导入后 datum 往返 `equal?`，builders/fold/decl-flags 单元测试（11 项） |
-| S2 | genericize.rkt、gimplify.rkt、print.rkt（.gimple） | `gimplify-test` 8/8 切到新模块 |
+| S2 | genericize.rkt、gimplify.rkt、print.rkt（.gimple） | 完成（2026-11-06）：`component/gimple/gimplify-test.rkt` 8/8（纯函数版与可变版并存，S4 后删可变版） |
 | S3 | lower.rkt、print（.lower） | `lower-test` 8/8 |
 | S4 | cfg.rkt、print（.cfg） | `cfg-test` 6/6；删除 `src/component/gccast/` 可变版本 |
 | S5 | 泛型 SSA；Java 链路切换，pipeline-test 输出不变；修 roadmap Phase 1 #3 | 现有 Java 测试 + GIMPLE `.ssa` 对齐（新基准：`-fdump-tree-ssa`，-O0） |

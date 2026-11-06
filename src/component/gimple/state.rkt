@@ -109,7 +109,8 @@
 ;; The value carried by the declaration itself is the default; the
 ;; state's override wins when present.
 (define (decl-flag st d key [default #f])
-  (define over (intmap-ref (GS-decl-flags st) (decl-uid d) #f))
+  (define uid (tree-attr d 'uid #f))
+  (define over (and uid (intmap-ref (GS-decl-flags st) uid #f)))
   (cond
     [(and over (hash-has-key? over key)) (hash-ref over key)]
     [else (tree-attr d key default)]))
