@@ -384,7 +384,7 @@
   (cond
     [(or (not ret-expr) (eq? (tree-code ret-expr) 'result_decl))
      (maybe-add-early-return-predict-stmt! pre)
-     (seq-add! pre (gimple-build-return ret-expr))
+     (seq-add! pre (gimple-build-return ret-expr (tree-loc stmt)))
      GS-ALL-DONE]
     [else
      (define fn (current-function-decl))
@@ -408,7 +408,7 @@
        (set-tree-operand! ret-expr 0 result))
      (gimplify-and-add (tree-operand stmt 0) pre)
      (maybe-add-early-return-predict-stmt! pre)
-     (seq-add! pre (gimple-build-return result))
+     (seq-add! pre (gimple-build-return result (tree-loc stmt)))
      GS-ALL-DONE]))
 
 ;; ------------------------------------------------------------

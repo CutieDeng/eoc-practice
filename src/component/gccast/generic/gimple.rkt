@@ -22,16 +22,16 @@
          (struct-out gpredict) (struct-out gnop) (struct-out gtry) gimple-build-try
          gimple-build-assign gimple-build-call-from-tree gimple-build-cond gimple-build-label
          gimple-build-goto gimple-build-return gimple-build-switch gimple-build-bind gimple-build-predict
-         gimple-cond-get-ops-from-tree extract-ops-from-tree
+         gimple-cond-get-ops-from-tree extract-ops-from-tree gimple-call-noreturn-p
          gimple-seq-may-fallthru gimple-stmt-may-fallthru
          (struct-out seq) make-seq seq-add! seq-add-seq! seq->list in-seq seq-empty? seq-last seq-first seq-length seq-replace-last!)
 
 (struct gassign ([lhs #:mutable] code [rhs1 #:mutable] [rhs2 #:mutable] [rhs3 #:mutable]) #:transparent)
-(struct gcall ([lhs #:mutable] fn args fntype internal?) #:transparent)
+(struct gcall ([lhs #:mutable] fn args fntype internal? flags) #:transparent)   ; flags: call_expr_flags (ECF_*)
 (struct gcond (code lhs rhs [true-label #:mutable] [false-label #:mutable]) #:transparent)
 (struct glabel (label) #:transparent)
 (struct ggoto (dest) #:transparent)
-(struct greturn (retval) #:transparent)
+(struct greturn (retval [loc #:auto #:mutable]) #:transparent)
 (struct gswitch (index default-case cases) #:transparent)   ; cases: list of CASE_LABEL_EXPR trees
 (struct gbind ([vars #:mutable] [body #:mutable] block) #:transparent)
 (struct gpredict (predictor outcome) #:transparent)
@@ -74,7 +74,7 @@
 
 ;; gimple_build_call_from_tree: fn is the (already gimplified) function operand
 (define (gimple-build-call-from-tree call fntype)
-  (gcall #f (call-expr-fn call) (call-expr-args call) fntype (call-expr-internal? call)))
+  (gcall #f (call-expr-fn call) (call-expr-args call) fntype (call-expr-internal? call) (attr call 'flags 0)))
 
 ;; gimple_cond_get_ops_from_tree (gcc/gimple.cc)
 (define (gimple-cond-get-ops-from-tree c)
@@ -92,7 +92,9 @@
 (define (gimple-build-cond code lhs rhs tl fl) (gcond code lhs rhs tl fl))
 (define (gimple-build-label l) (glabel l))
 (define (gimple-build-goto l) (ggoto l))
-(define (gimple-build-return v) (greturn v))
+(define (gimple-build-return v [loc #f]) (define g (greturn v)) (set-greturn-loc! g loc) g)
+(define ECF-NORETURN 8)
+(define (gimple-call-noreturn-p g) (not (zero? (bitwise-and (gcall-flags g) ECF-NORETURN))))
 (define (gimple-build-switch index default-case cases) (gswitch index default-case cases))
 (define (gimple-build-bind vars body block) (gbind vars (or body (make-seq)) block))
 (define (gimple-build-predict p o) (gpredict p o))
@@ -103,10 +105,10 @@
   (cond
     [(or (ggoto? g) (greturn? g)) #f]
     [(gswitch? g) #f]
-    [(gcond? g) #t]   ; GIMPLE_COND: "This can only be a fallthru if the dest is also fallthru"-- GCC returns true
+    [(gcond? g) #f]   ; GIMPLE_COND always ends in gotos
     [(gbind? g) (gimple-seq-may-fallthru (gbind-body g))]
     [(gtry? g) (and (gimple-seq-may-fallthru (gtry-eval g)) (gimple-seq-may-fallthru (gtry-cleanup g)))]
-    [(gcall? g) #t]   ; noreturn calls would be #f; not modelled
+    [(gcall? g) (not (gimple-call-noreturn-p g))]
     [else #t]))
 
 (define (gimple-seq-may-fallthru s)

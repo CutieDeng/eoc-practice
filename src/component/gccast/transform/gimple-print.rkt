@@ -14,7 +14,7 @@
          "../generic/tree.rkt"
          "../generic/gimple.rkt")
 
-(provide print-function print-function->string print-type print-expr print-declarator)
+(provide print-function print-function->string print-type print-expr print-declarator print-lowered-function)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -304,7 +304,7 @@
      (for ([s (in-seq body)]) (print-stmt s (+ indent 2) out))
      (fprintf out "~a}\n" pad)]
     [(gassign lhs _ _ _ _) (fprintf out "~a~a = ~a;\n" pad (print-expr lhs) (print-rhs g))]
-    [(gcall lhs fn args _ _)
+    [(gcall lhs fn args _ _ _)
      (fprintf out "~a~a~a (~a);\n" pad (if lhs (string-append (print-expr lhs) " = ") "")
               (print-expr (if (eq? (tree-code fn) 'addr_expr) (tree-operand fn 0) fn))
               (string-join (for/list ([a (in-pvector args)]) (print-expr a)) ", "))]
@@ -312,7 +312,7 @@
      (fprintf out "~aif (~a ~a ~a) goto ~a; else goto ~a;\n" pad (print-expr l) (hash-ref binary-op code "?") (print-expr r) (label-name t) (label-name f))]
     [(glabel l) (fprintf out "~a~a:\n" pad (label-name l))]
     [(ggoto l) (fprintf out "~agoto ~a;\n" pad (label-name l))]
-    [(greturn v) (fprintf out "~areturn~a;\n" pad (if v (string-append " " (print-expr v)) ""))]
+    [(greturn v _) (fprintf out "~areturn~a;\n" pad (if v (string-append " " (print-expr v)) ""))]
     [(gswitch i d cs)
      (fprintf out "~aswitch (~a) <~a>\n" pad (print-expr i) (string-join (cons (print-case d) (for/list ([c (in-pvector cs)]) (print-case c))) ", "))]
     [(gpredict p o)
@@ -334,6 +334,19 @@
            (string-join (for/list ([p (in-pvector params)]) (print-declarator (tree-type p) (decl-print-name p))) ", "))
   (print-stmt bind 0 out)
   (fprintf out "\n\n"))
+
+;; dump_function_to_file after pass_lower_cf: local decls (FOR_EACH_LOCAL_DECL is
+;; newest first), blank line, flat statement sequence at indent 2.
+(define (print-lowered-function fndecl local-decls body out)
+  (define ftype (tree-type fndecl))
+  (define params (decl-arguments fndecl))
+  (fprintf out "~a ~a (~a)\n{\n" (print-type (tree-type ftype)) (decl-name fndecl)
+           (string-join (for/list ([p (in-pvector params)]) (print-declarator (tree-type p) (decl-print-name p))) ", "))
+  (for ([v (in-pvector (pvector-reverse local-decls))])
+    (fprintf out "  ~a;\n" (print-declarator (tree-type v) (decl-print-name v))))
+  (unless (pvector-empty? local-decls) (fprintf out "\n"))
+  (for ([g (in-seq body)]) (print-stmt g 2 out))
+  (fprintf out "}\n\n\n"))
 
 (define (print-function->string fndecl bind)
   (define o (open-output-string))

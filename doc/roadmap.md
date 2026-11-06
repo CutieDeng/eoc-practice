@@ -266,7 +266,8 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 | 1 | 空插件在 macOS gcc-15 上加载（验证 `-fplugin` 可用） | 完成：gcc-15 15.2.0 与 gcc@12 12.5.0 都能加载；`PRE_GENERICIZE` 对 C/C++ 函数触发 |
 | 2 | `.dat` 能被 `reader.rkt` 读成 `TU`，节点表引用闭合 | 完成：`gccast-plugin/` 骨架 + `src/kernel/ir/gccast/types.rkt` + `src/frontend/gccast/reader.rkt`；夹具 `test/integration/gccast/{basic.c,struct.c,method.cc}.{12.5.0,15.2.0}.dat`；`reader-test.rkt` 10 项（含按访问宏名取 `FOR_COND`/`FOR_BODY`，12 与 15 操作数个数不同但同一测试通过） |
 | 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c / locals.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（8 项） |
-| 3b | GIMPLE → lower → Cfg（`gimple-low.rkt`、`gimple-to-cfg.rkt`），对齐 `.lower`/`.cfg`，再接 `ssa-construct`/`cfg-to-rvsdg` | 待做；实现规格见 `doc/gimple-lower-cfg-spec.md`（lower 的 return 合并与 -O0 非 artificial return label、make_blocks/make_edges 规则、`cleanup_tree_cfg` 在 -O0 的实际行为、dump 格式） |
+| 3b-1 | `gimple-low.rkt`（pass_lower_cf）：拍平 bind、按 retval 合并 return（-O0 下带位置的 return label 置为非 artificial）、删不可达 return、补尾部 `return;`、透传 `gtry` | 完成（2026-11-06）：`lower-test.rkt` 对 4 夹具 × 2 版本的 `.lower` 规范化 diff 为空（8 项） |
+| 3b-2 | `gimple-to-cfg.rkt`：make_blocks/make_edges 建 kernel `Cfg`，再复现 -O0 的 `cleanup_tree_cfg`（不可达块、forwarder、合并、2 标签 switch → cond）对齐 `.cfg`；然后接 `ssa-construct`/`cfg-to-rvsdg` | 待做；规格见 `doc/gimple-lower-cfg-spec.md` |
 | 4 | 指针、结构体、数组、调用 + 内存状态边 | 待做 |
 
 实现备注（3a，gimplify 对齐过程中确认的 GCC 行为）：
