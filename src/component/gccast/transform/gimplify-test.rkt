@@ -61,7 +61,7 @@
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c")])
+         [name '("basic.c" "calls.c" "struct.c" "locals.c")])
     (test-case (format "~a ~a: gimple dump aligns with GCC" name ver)
       (define tu (read-gccast-file (build-path fixtures (format "~a.~a.dat" name ver))))
       (define ours (normalize-gimple-text (lower-tu->gimple-text tu)))

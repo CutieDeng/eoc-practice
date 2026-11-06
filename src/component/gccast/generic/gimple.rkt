@@ -19,7 +19,7 @@
 
 (provide (struct-out gassign) (struct-out gcall) (struct-out gcond) (struct-out glabel)
          (struct-out ggoto) (struct-out greturn) (struct-out gswitch) (struct-out gbind)
-         (struct-out gpredict) (struct-out gnop)
+         (struct-out gpredict) (struct-out gnop) (struct-out gtry) gimple-build-try
          gimple-build-assign gimple-build-call-from-tree gimple-build-cond gimple-build-label
          gimple-build-goto gimple-build-return gimple-build-switch gimple-build-bind gimple-build-predict
          gimple-cond-get-ops-from-tree extract-ops-from-tree
@@ -36,6 +36,8 @@
 (struct gbind ([vars #:mutable] [body #:mutable] block) #:transparent)
 (struct gpredict (predictor outcome) #:transparent)
 (struct gnop () #:transparent)
+(struct gtry ([eval #:mutable] [cleanup #:mutable] kind) #:transparent)   ; kind: 'finally | 'catch
+(define (gimple-build-try eval cleanup kind) (gtry eval cleanup kind))
 
 ;; ---- sequences --------------------------------------------------------
 
@@ -103,6 +105,7 @@
     [(gswitch? g) #f]
     [(gcond? g) #t]   ; GIMPLE_COND: "This can only be a fallthru if the dest is also fallthru"-- GCC returns true
     [(gbind? g) (gimple-seq-may-fallthru (gbind-body g))]
+    [(gtry? g) (and (gimple-seq-may-fallthru (gtry-eval g)) (gimple-seq-may-fallthru (gtry-cleanup g)))]
     [(gcall? g) #t]   ; noreturn calls would be #f; not modelled
     [else #t]))
 

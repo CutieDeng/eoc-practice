@@ -265,7 +265,7 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 |---|---|---|
 | 1 | 空插件在 macOS gcc-15 上加载（验证 `-fplugin` 可用） | 完成：gcc-15 15.2.0 与 gcc@12 12.5.0 都能加载；`PRE_GENERICIZE` 对 C/C++ 函数触发 |
 | 2 | `.dat` 能被 `reader.rkt` 读成 `TU`，节点表引用闭合 | 完成：`gccast-plugin/` 骨架 + `src/kernel/ir/gccast/types.rkt` + `src/frontend/gccast/reader.rkt`；夹具 `test/integration/gccast/{basic.c,struct.c,method.cc}.{12.5.0,15.2.0}.dat`；`reader-test.rkt` 10 项（含按访问宏名取 `FOR_COND`/`FOR_BODY`，12 与 15 操作数个数不同但同一测试通过） |
-| 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（6 项） |
+| 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c / locals.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（8 项） |
 | 3b | GIMPLE → lower → Cfg（`gimple-low.rkt`、`gimple-to-cfg.rkt`），对齐 `.lower`/`.cfg`，再接 `ssa-construct`/`cfg-to-rvsdg` | 待做；实现规格见 `doc/gimple-lower-cfg-spec.md`（lower 的 return 合并与 -O0 非 artificial return label、make_blocks/make_edges 规则、`cleanup_tree_cfg` 在 -O0 的实际行为、dump 格式） |
 | 4 | 指针、结构体、数组、调用 + 内存状态边 | 待做 |
 
@@ -273,7 +273,7 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 - 基准 dump 里 `_1`、`n.0_16` 这类名字说明 `gimplify_body` 以 `into_ssa=true` 运行：寄存器类型的形式临时量直接是 SSA 名，有名来源时标识符为 `create_tmp_var_name(name)`（`tmp_var_id_num` 翻译单元全局）；`create_tmp_var` 产生的 `D.NNNN` 只有 `iftmp`/`retval`/return_temp。
 - `maybe_fold_stmt` 在 -O0 生效且可见：可交换运算与条件按 `tree_swap_operands_p` 规范化操作数顺序（`acc + _19`，常量靠右、SSA 名靠右、decl 靠右）；只读静态变量的常量初值被代入（`half.2_22 = 5.0e-1`）。
 - -O0 的标签劫持规则依赖源码位置：`if (c) break;` 因 COND_EXPR 与 BREAK 生成的 GOTO 位置不同而不劫持，生成 `<L1>: goto <break>; <L2>:`；循环出口 `COND_EXPR` 的两个 GOTO 没有位置，所以劫持。genericize 必须像 `build1_loc` 一样给 break/continue 的 GOTO 带位置。
-- 未覆盖（见 6.3）：CLOBBER 清理（局部聚合/取址变量会生成 `try { } finally { x ={v} {CLOBBER(eos)}; }`）、`gimplify_init_constructor` 完整形态、builtin 折叠、VLA、EH。
+- CLOBBER 清理已实现（`locals.c` 夹具：数组、结构体、取址标量、嵌套作用域；gcc 12 打印 `CLOBBER(eol)`，14+ 打印 `CLOBBER(eos)`）。未覆盖：`gimplify_init_constructor` 完整形态（聚合初始化器在 -O0 会走静态常量 `a = *.LC0` 路径）、builtin 折叠、VLA、EH。
 - 插件产物固定命名 `gccast.so`（macOS 也是）：GCC 以去掉 `.so` 后的文件名作为插件名解析 `-fplugin-arg-<name>-*`，`.dylib` 会匹配不上。
 - 不输出 decl 的 `TREE_CHAIN`：命名空间级声明的 chain 是全部兄弟声明（含 builtin），`method.cc` 曾因此膨胀到 16 022 节点；改为只在拥有链的构造上物化列表（`BIND_EXPR` 的 `vars`、`TYPE_FIELDS`、`DECL_ARGUMENTS`、`BLOCK` 的 `vars`）后为 87 节点。
 - 每个函数独立节点表：`PRE_GENERICIZE` 回调内同步序列化，指针→下标映射只在该函数内有效，避免 GC 复用地址造成跨函数别名；跨函数的类型/声明同一性靠 `DECL_UID`/`TYPE_UID` 恢复。

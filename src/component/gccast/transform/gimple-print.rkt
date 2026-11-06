@@ -14,7 +14,7 @@
          "../generic/tree.rkt"
          "../generic/gimple.rkt")
 
-(provide print-function print-function->string print-type print-expr)
+(provide print-function print-function->string print-type print-expr print-declarator)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -62,6 +62,19 @@
     [(function_type method_type)
      (string-append (print-type (tree-type type)) " (" (print-arg-types type) ")")]
     [else (format "<~a>" (tree-code type))]))
+
+;; print_declaration-style "type name": arrays use declarator syntax (int a[4][2])
+(define (print-declarator type name)
+  (let loop ([t type] [dims '()])
+    (cond
+      [(eq? (tree-code t) 'array_type)
+       (define dom (type-domain t))
+       (define n (and dom (type-max-value dom) (eq? (tree-code (type-max-value dom)) 'integer_cst)
+                      (add1 (integer-cst-value (type-max-value dom)))))
+       (loop (tree-type t) (cons (if n (number->string n) "") dims))]
+      [else
+       (format "~a ~a~a" (print-type t) name
+               (apply string-append (for/list ([d (reverse dims)]) (format "[~a]" d))))])))
 
 (define (print-arg-types ftype)
   (let loop ([p (type-arg-types ftype)] [acc '()])
@@ -228,8 +241,13 @@
        [(abs_expr absu_expr) (format "~a <~a>" (string-upcase (symbol->string code)) (print-expr (tree-operand e 0)))]
        [(constructor)
         (define elts (constructor-elts e))
-        (if (pvector-empty? elts) "{}"
-            (format "{~a}" (string-join (for/list ([p (in-pvector elts)]) (format "~a~a" (if (and (car p) (eq? (tree-code (car p)) 'field_decl)) (format ".~a=" (decl-name (car p))) "") (print-expr (cdr p)))) ", ")))]
+        (cond
+          [(tree-clobber-p e)
+           ;; CLOBBER_STORAGE_END: "eos" since GCC 14, "eol" before
+           (format "{CLOBBER(~a)}" (if (>= (gcc-major-version) 14) "eos" "eol"))]
+          [(pvector-empty? elts) "{}"]
+          [else
+            (format "{~a}" (string-join (for/list ([p (in-pvector elts)]) (format "~a~a" (if (and (car p) (eq? (tree-code (car p)) 'field_decl)) (format ".~a=" (decl-name (car p))) "") (print-expr (cdr p)))) ", "))])]
        [(cond_expr) (format "~a ? ~a : ~a" (print-expr (tree-operand e 0)) (print-expr (tree-operand e 1)) (print-expr (tree-operand e 2)))]
        [(call_expr) (format "~a (~a)" (print-expr (call-expr-fn e)) (string-join (for/list ([a (in-pvector (call-expr-args e))]) (print-expr a)) ", "))]
        [else
@@ -281,7 +299,7 @@
   (match g
     [(gbind vars body _)
      (fprintf out "~a{\n" pad)
-     (for ([v (in-pvector vars)]) (fprintf out "~a  ~a ~a;\n" pad (print-type (tree-type v)) (decl-print-name v)))
+     (for ([v (in-pvector vars)]) (fprintf out "~a  ~a;\n" pad (print-declarator (tree-type v) (decl-print-name v))))
      (unless (pvector-empty? vars) (fprintf out "\n"))
      (for ([s (in-seq body)]) (print-stmt s (+ indent 2) out))
      (fprintf out "~a}\n" pad)]
@@ -299,6 +317,12 @@
      (fprintf out "~aswitch (~a) <~a>\n" pad (print-expr i) (string-join (cons (print-case d) (for/list ([c (in-pvector cs)]) (print-case c))) ", "))]
     [(gpredict p o)
      (fprintf out "~a// predicted ~a by ~a predictor.\n" pad (if (eq? o 'TAKEN) "likely" "unlikely") (hash-ref predictor-names p (symbol->string p)))]
+    [(gtry ev cl kind)
+     (fprintf out "~atry\n~a  {\n" pad pad)
+     (for ([s (in-seq ev)]) (print-stmt s (+ indent 4) out))
+     (fprintf out "~a  }\n~a~a\n~a  {\n" pad pad (if (eq? kind 'finally) "finally" "catch") pad)
+     (for ([s (in-seq cl)]) (print-stmt s (+ indent 4) out))
+     (fprintf out "~a  }\n" pad)]
     [(gnop) (void)]
     [_ (fprintf out "~a<~a>\n" pad g)]))
 
@@ -307,7 +331,7 @@
   (define ftype (tree-type fndecl))
   (define params (decl-arguments fndecl))
   (fprintf out "~a ~a (~a)\n" (print-type (tree-type ftype)) (decl-name fndecl)
-           (string-join (for/list ([p (in-pvector params)]) (format "~a ~a" (print-type (tree-type p)) (decl-print-name p))) ", "))
+           (string-join (for/list ([p (in-pvector params)]) (print-declarator (tree-type p) (decl-print-name p))) ", "))
   (print-stmt bind 0 out)
   (fprintf out "\n\n"))
 

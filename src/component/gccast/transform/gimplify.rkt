@@ -351,7 +351,21 @@
   (define body (make-seq))
   (gimplify-stmt (op-ref bind-expr 1) body)
   (set-gbind-body! bind-stmt body)
-  ;; TODO(roadmap 6.3): CLOBBER cleanup for non-register locals (-fstack-reuse) -> GIMPLE_TRY_FINALLY
+  ;; Add clobbers for all variables that go out of scope (-fstack-reuse=all
+  ;; is the default at every optimization level): only variables that have
+  ;; to live in memory, i.e. !is_gimple_reg.
+  (define cleanup (make-seq))
+  (for ([t (in-pvector (bind-expr-vars bind-expr))])
+    (when (and (var-p t) (not (is-global-var t)) (decl-function-context-is-current? t)
+               (not (attr t 'hard-register #f)) (not (tree-this-volatile t)) (not (attr t 'value-expr #f))
+               (not (is-gimple-reg t)))
+      (define clobber (build-clobber (tree-type t)))
+      (seq-add! cleanup (gimple-build-assign t clobber))))
+  (unless (seq-empty? cleanup)
+    (define gs (gimple-build-try (gbind-body bind-stmt) cleanup 'finally))
+    (define new-body (make-seq))
+    (seq-add! new-body gs)
+    (set-gbind-body! bind-stmt new-body))
   (gimple-pop-bind-expr!)
   (seq-add! pre bind-stmt)
   (cond

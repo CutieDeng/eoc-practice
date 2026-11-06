@@ -34,7 +34,7 @@
 
 (provide (struct-out T)
          (struct-out ref)
-         current-tree-table current-function-decl
+         current-tree-table current-function-decl current-gcc-version gcc-major-version
          ;; refs (tree* in GCC)
          box-ref op-ref attr-ref ref-get ref-set!
          ;; code tables
@@ -42,7 +42,7 @@
          gimple-rhs-class
          ;; construction
          make-tree build0 build1 build2 build3 build4 copy-node
-         build-int-cst build-zero-cst build-real-cst
+         build-int-cst build-zero-cst build-real-cst build-clobber tree-clobber-p
          build-empty-stmt build-label-expr build-goto
          create-artificial-label create-tmp-var-raw create-tmp-var-name next-tmp-var-id!
          make-ssa-name next-uid! ssa-version-counter tmp-var-id uid-counter
@@ -139,6 +139,10 @@
 
 ;; hash: code-symbol -> decode (see frontend/gccast/reader.rkt)
 (define current-tree-table (make-parameter #f))
+;; "15.2.0" etc.; a few printing details differ between major versions
+(define current-gcc-version (make-parameter "15.0.0"))
+(define (gcc-major-version)
+  (string->number (car (regexp-split #rx"[.]" (current-gcc-version)))))
 (define current-function-decl (make-parameter #f))
 
 (define (table-entry code)
@@ -234,6 +238,12 @@
     [else (make-tree 'constructor #:type type #:attrs (list (cons 'elts (pvector-empty)) (cons 'constant #t)))]))
 (define (build-real-cst type x)
   (make-tree 'real_cst #:type type #:attrs (list (cons 'real x) (cons 'constant #t))))
+
+;; build_clobber (tree.cc): an empty CONSTRUCTOR marked as clobber
+(define (build-clobber type [kind 'storage-end])
+  (make-tree 'constructor #:type type
+             #:attrs (list (cons 'elts (pvector-empty)) (cons 'clobber kind) (cons 'volatile #t) (cons 'constant #f))))
+(define (tree-clobber-p t) (and (eq? (tree-code t) 'constructor) (attr t 'clobber #f) #t))
 
 ;; build_empty_stmt: NOP_EXPR of void with integer_zero operand
 (define (build-empty-stmt)

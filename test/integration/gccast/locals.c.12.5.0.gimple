@@ -1,0 +1,69 @@
+int locals (int n)
+{
+  int D.3623;
+  int arr[4];
+  struct P p;
+  int s;
+  int addr;
+
+  try
+    {
+      s = 0;
+      addr = 5;
+      arr[0] = n;
+      _1 = n + 1;
+      arr[1] = _1;
+      _2 = arr[0];
+      _3 = arr[1];
+      _4 = _2 + _3;
+      arr[2] = _4;
+      arr[3] = 0;
+      _5 = arr[2];
+      p.x = _5;
+      _6 = take (&addr);
+      p.y = _6;
+      {
+        int i;
+
+        i = 0;
+        goto <D.3621>;
+        <D.3620>:
+        _7 = arr[i];
+        s = s + _7;
+        i = i + 1;
+        <D.3621>:
+        if (i <= 3) goto <D.3620>; else goto <D.3618>;
+        <D.3618>:
+      }
+      {
+        int inner[2];
+
+        try
+          {
+            inner[0] = s;
+            _8 = p.x;
+            inner[1] = _8;
+            _9 = inner[0];
+            _10 = inner[1];
+            s = _9 + _10;
+          }
+        finally
+          {
+            inner = {CLOBBER(eol)};
+          }
+      }
+      _11 = p.y;
+      _12 = s + _11;
+      addr.0_13 = addr;
+      D.3623 = _12 + addr.0_13;
+      return D.3623;
+    }
+  finally
+    {
+      arr = {CLOBBER(eol)};
+      p = {CLOBBER(eol)};
+      addr = {CLOBBER(eol)};
+    }
+}
+
+

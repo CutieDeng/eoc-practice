@@ -25,7 +25,8 @@
          max-decl-uid)
 
 (define (install-tu-context! tu)
-  (current-tree-table (load-decode-table (TU-gcc-version tu))))
+  (current-tree-table (load-decode-table (TU-gcc-version tu)))
+  (current-gcc-version (TU-gcc-version tu)))
 
 ;; Largest DECL_UID/TYPE_UID seen in a function (fresh uids start above it).
 (define (max-decl-uid fn)
