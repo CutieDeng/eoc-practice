@@ -78,7 +78,7 @@ Last Updated: 2026-11-05
 |---|---|---|---|
 | 1 | `driver/loop/analysis.rkt:222-228, 273-279` | `for/fold` 返回 2 值赋给单个 `define`，`build-loop-forest`/`get-innermost-loop` 一调用就 arity 错误 | 接两个值；补嵌套循环测试 |
 | 2 | `component/cfg/analysis/loops.rkt:72, 79-80` | 对 pvector 用 `null?`/`length` | 改 `pvector-empty?`/`pvector-length`；空分支返回类型与主路径一致 |
-| 3 | `driver/dominance/dominator.rkt:56,113` 要求 RPO，但 `component/cfg/analysis/dominance.rkt:52` 与 `ssa-construct.rkt:160-168` 传的是 vertex-id 分配序 | 已验证构造 CFG（0→2, 2→1\|3, 1→3）上 idom(3) 算成 0，正确为 2 | **SSA 侧已修（2026-11-06）**：`driver/ssa/construct.rkt` 自己按后继序做 DFS 求 RPO 再调支配算法；Java ssa/rvsdg/pipeline 测试输出不变。`component/cfg/analysis/dominance.rkt:52` 的调用方仍待改 |
+| 3 | `driver/dominance/dominator.rkt:56,113` 要求 RPO，但 `component/cfg/analysis/dominance.rkt:52` 与 `ssa-construct.rkt:160-168` 传的是 vertex-id 分配序 | 已验证构造 CFG（0→2, 2→1\|3, 1→3）上 idom(3) 算成 0，正确为 2 | **已修（2026-11-06）**：旧 driver 删除，统一用 `driver/dominance/dom.rkt`（自己按后继序 DFS 求 RPO；CHK idom；支配树 DFS 区间，`dom-dominates?` O(1)；Cooper 支配边界；`dom-fix` 局部重算）。随机 CFG 上与集合定义逐项比对（`dom-test.rkt`）；Java ssa/rvsdg/pipeline 输出不变 |
 | 4 | `driver/dominance/dominator.rkt:126` | `cfg-compute-post-idom` exit 为 #f 时返回 void | 显式报错或返回空映射 |
 | 5 | `component/common/analysis-framework.rkt:131-134` | 缓存命中后结果被丢弃，每次重算 | 返回 `cached` |
 | 6 | `driver/dataflow/liveness.rkt:176-200` | Step 5 的 SCC 结果从未被读取，且遍历方向与 `scc.rkt:85` 声明的逆拓扑序相反 | 删除 Step 5，或修正方向后接入并加测试 |

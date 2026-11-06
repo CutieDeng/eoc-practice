@@ -7,6 +7,6 @@
 ;; Re-exports all dominator algorithms.
 ;; ============================================================
 
-(require "dominator.rkt")
+(require "dom.rkt")
 
-(provide (all-from-out "dominator.rkt"))
+(provide (all-from-out "dom.rkt"))

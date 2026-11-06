@@ -16,7 +16,7 @@
 ;; ============================================================
 
 (require "../../kernel/data/data.rkt")
-(require "../dominance/dominator.rkt")
+(require "../dominance/dom.rkt")
 
 (provide
   ;; Loop detection
@@ -81,11 +81,13 @@
 ;; Returns: pvector of (cons node node) - (tail . header) pairs
 ;;
 (define (find-back-edges nodes entry get-successors get-predecessors)
-  (define dom (compute-dominators nodes entry get-predecessors))
+  (define d (compute-dom nodes entry get-successors))
   (for*/fold ([result (pvector-empty)])
              ([node (in-pvector nodes)]
               [succ (in-pvector (get-successors node))])
-    (if (dominates? dom succ node)
+    (define i (dom-index d node))
+    (define j (dom-index d succ))
+    (if (and i j (dom-dominates? d j i))
         (pvector-cons-right result (cons node succ))
         result)))
 

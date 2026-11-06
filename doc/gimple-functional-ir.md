@@ -150,6 +150,8 @@ SSA（`src/driver/ssa/construct.rkt`，`(ssa-construct port a) → (finish a)`�
 | `finish` | `a → result` | |
 | `prune?` / `child-order` / `phi-names` | 策略 | GCC：剪枝、RPO、插入时命名；Java：不剪枝、分配序、重命名时命名 |
 
+支配信息来自 `driver/dominance/dom.rkt`：一次计算得到持久化的 `Dom`（RPO 编号、CHK idom、支配树 DFS 区间、Cooper 支配边界），`dom-dominates?` 为两次整数比较，`dom-idf` 为位集 worklist，`dom-fix` 在边变化后只对受影响的前向闭包重跑 CHK。实测（随机 CFG，`dom-test.rkt`）：1 362 个可达块 1.6 ms（旧 driver idom+DF 38 ms）；13 161 块 93 ms（旧 3 314 ms）；`dom-fix` 27 ms。GCC `prune_unused_phi_nodes` 的语义（最近支配定义 + 向上传播）与活跃性剪枝在 200 个随机 CFG × 随机 def/use 上结果相同。
+
 两个端口：`component/gimple/ssa.rkt`（GCfg，含 `x_N(D)` 默认定义与 pass_build_ssa 的匿名化）、`component/java/transform/ssa-construct.rkt`（kernel `Cfg`，异常增广图，输出与旧实现相同）。支配信息统一来自 `driver/dominance`，按 RPO 计算（修掉了 roadmap Phase 1 #3）。
 
 CFG → RVSDG（与 roadmap Phase 3.1 的拆分一起做）：接口 = 访问器（entry、succs、phis、insns、defs/uses、op、归一化终结符 `'(cond c t e)`/`'(jump t)`/`'(switch v cases d)`/`'(ret vs)`/`'(throw e)`/`'(unreachable)`）+ 构造器（新块、改终结符、插指令、设 φ）。kernel `Cfg` 与 `GCfg` 各实现一份。
