@@ -35,7 +35,7 @@
          "tree.rkt"
          "gimple.rkt")
 
-(provide build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-clear-messages cfg-add-message
+(provide build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-next-stamp cfg-clear-messages cfg-add-message
          cfg-set-profile prof-count prof-prob split-edge label-to-block make-edge remove-edge create-bb
          EDGE-FALLTHRU EDGE-TRUE-VALUE EDGE-FALSE-VALUE
          cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges
@@ -216,6 +216,17 @@
             [c (set-preds c dest (pvector-cons-right (cfg-preds c dest) src))])
        (values #t c))]))
 
+;; the next use-list stamp of a function (see gimple.rkt restamp)
+(define (cfg-next-stamp c)
+  (add1 (for*/fold ([mx 0]) ([i (in-pvector (cfg-bbs c))]
+                             [g (in-sequences (in-pvector (GBlock-phis (cfg-block c i))) (in-pvector (GBlock-stmts (cfg-block c i))))])
+          (max mx (stmt-max-stamp g)))))
+;; restamp a block's PHIs against their previous versions, (values phis next)
+(define (restamp-phis old-phis new-phis n0)
+  (for/fold ([acc (pvector-empty)] [n n0] #:result (values acc n)) ([old (in-pvector old-phis)] [new (in-pvector new-phis)])
+    (define-values (g n1) (restamp old new n))
+    (values (pvector-cons-right acc g) n1)))
+
 ;; remove_edge (disconnect_src + disconnect_dest, both unordered_remove);
 ;; the PHI arguments of DEST for the edge go with it (remove_phi_args,
 ;; same unordered removal so arguments stay aligned with the preds)
@@ -223,10 +234,14 @@
   (define c (prof-remove-edge c0 src dest))
   (define k (pvector-index-of (cfg-preds c dest) src))
   (define b (cfg-block c dest))
+  (define-values (phis* _n)
+    (restamp-phis (GBlock-phis b)
+                  (for/pvector ([ph (in-pvector (GBlock-phis b))])
+                    (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                          (pvector-unordered-remove (gphi-args ph) k)))
+                  (cfg-next-stamp c)))
   (let* ([c (set-succs c src (pvector-unordered-remove (cfg-succs c src) (edge-index c src dest)))]
-         [c (set-block c (block-set-preds (block-set-phis b (for/pvector ([ph (in-pvector (GBlock-phis b))])
-                                                              (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
-                                                                    (pvector-unordered-remove (gphi-args ph) k))))
+         [c (set-block c (block-set-preds (block-set-phis b phis*)
                                           (pvector-unordered-remove (GBlock-preds b) k)))])
     c))
 
@@ -238,9 +253,13 @@
   (define e (pvector-ref (cfg-succs c src) k))
   (define pk (pvector-index-of (cfg-preds c old) src))
   (define ob (cfg-block c old))
-  (let* ([c (set-block c (block-set-preds (block-set-phis ob (for/pvector ([ph (in-pvector (GBlock-phis ob))])
-                                                                (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
-                                                                      (pvector-unordered-remove (gphi-args ph) pk))))
+  (define-values (phis* _n)
+    (restamp-phis (GBlock-phis ob)
+                  (for/pvector ([ph (in-pvector (GBlock-phis ob))])
+                    (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                          (pvector-unordered-remove (gphi-args ph) pk)))
+                  (cfg-next-stamp c)))
+  (let* ([c (set-block c (block-set-preds (block-set-phis ob phis*)
                                            (pvector-unordered-remove (GBlock-preds ob) pk)))]
          [c (set-succs c src (pvector-set (cfg-succs c src) k (GEdge new (GEdge-flags e) (GEdge-goto-locus e))))]
          [c (set-preds c new (pvector-cons-right (cfg-preds c new) src))])
@@ -717,14 +736,21 @@
       [(gswitch? g) (gswitch (gswitch-loc g) (gswitch-flags g) (f (gswitch-index g)) (gswitch-default-case g) (gswitch-cases g))]
       [(greturn? g) (greturn (greturn-loc g) (greturn-flags g) (f (greturn-retval g)))]
       [else g]))
-  (for/fold ([c c]) ([i (in-pvector (cfg-bbs c))])
+  ;; SET_USE on each replaced PHI argument, update_stmt on each changed statement
+  (for/fold ([c c] [n (cfg-next-stamp c)] #:result c) ([i (in-pvector (cfg-bbs c))])
     (define b (cfg-block c i))
-    (set-block c (block-set-stmts
-                  (block-set-phis b (for/pvector ([ph (in-pvector (GBlock-phis b))])
-                                      (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
-                                            (for/pvector ([arg (in-pvector (gphi-args ph))])
-                                              (cons (car arg) (f (cdr arg)))))))
-                  (for/pvector ([g (in-pvector (GBlock-stmts b))]) (fs g))))))
+    (define-values (phis* n1)
+      (restamp-phis (GBlock-phis b)
+                    (for/pvector ([ph (in-pvector (GBlock-phis b))])
+                      (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                            (for/pvector ([arg (in-pvector (gphi-args ph))])
+                              (cons (car arg) (f (cdr arg))))))
+                    n))
+    (define-values (stmts* n2)
+      (for/fold ([acc (pvector-empty)] [n n1] #:result (values acc n)) ([g (in-pvector (GBlock-stmts b))])
+        (define-values (g* n*) (restamp g (fs g) n))
+        (values (pvector-cons-right acc g*) n*)))
+    (values (set-block c (block-set-stmts (block-set-phis b phis*) stmts*)) n2)))
 
 ;; gimple_merge_blocks + cfghooks merge_blocks
 (define (merge-blocks st c a b)
@@ -829,6 +855,8 @@
   (define db (cfg-block c2 dest))
   (define c3
     (let* ([c (prof-move-edge c2 src dest nb)]
+           ;; gimple_split_edge hides DEST's PHIs while redirecting: the
+           ;; argument keeps its slot and its use-list position (no restamp)
            [c (set-block c (block-set-preds (block-set-phis db (for/pvector ([ph (in-pvector (GBlock-phis db))])
                                                                  (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
                                                                        (for/pvector ([a (in-pvector (gphi-args ph))])
@@ -900,9 +928,13 @@
                  (if had-edge?
                      c1
                      (let ([b (cfg-block c1 dest)])
-                       (set-block c1 (block-set-phis b (for/pvector ([ph (in-pvector (GBlock-phis b))] [arg (in-list bb-args)])
-                                                         (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
-                                                               (pvector-cons-right (gphi-args ph) (cons src arg)))))))))
+                       (define-values (phis* _n)
+                         (restamp-phis (GBlock-phis b)
+                                       (for/pvector ([ph (in-pvector (GBlock-phis b))] [arg (in-list bb-args)])
+                                         (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                                               (pvector-cons-right (gphi-args ph) (cons src arg))))
+                                       (cfg-next-stamp c1)))
+                       (set-block c1 (block-set-phis b phis*)))))
                (loop c2 st1)])))
         ;; move user / forced / nonlocal labels to the start of DEST
         (define moved

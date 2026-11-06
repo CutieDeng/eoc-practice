@@ -14,7 +14,8 @@
          "state.rkt"
          "tree.rkt")
 
-(provide gimple-build-assign gimple-build-call-from-tree gimple-build-cond gimple-build-label gimple-build-goto
+(provide stmt-core stmt-stamp phi-arg-stamps restamp stmt-max-stamp
+         gimple-build-assign gimple-build-call-from-tree gimple-build-cond gimple-build-label gimple-build-goto
          gimple-build-return gimple-build-switch gimple-build-bind gimple-build-predict gimple-build-try gimple-build-nop
          extract-ops-from-tree gimple-cond-get-ops-from-tree
          gimple-call-noreturn-p gimple-stmt-may-fallthru gimple-seq-may-fallthru
@@ -77,6 +78,47 @@
 (define (gimple-build-nop) (gnop #f no-flags))
 
 (define (gimple-call-noreturn-p g) (not (zero? (bitwise-and (gcall-ecf g) ECF-NORETURN))))
+
+;; ------------------------------------------------------------
+;; use-list stamps (the order of GCC's immediate-use lists)
+;; ------------------------------------------------------------
+;;
+;; GCC links a use operand at the head of its SSA name's immediate-use
+;; list whenever the statement's operands are (re)built: into-SSA
+;; rewriting, update_stmt after a change, add_phi_arg / SET_PHI_ARG_DEF.
+;; FOR_EACH_IMM_USE_STMT therefore visits the most recently updated
+;; statement first.  A statement carries the stamp of its last operand
+;; rebuild in the 'stamp flag, a PHI one stamp per argument in
+;; 'arg-stamps; (restamp old new next) gives NEW its stamps given the
+;; statement it replaces: unchanged (flags aside) keeps the old stamp,
+;; a PHI argument keeps the stamp of an equal (pred . value) argument
+;; of OLD (remove_phi_arg_num relinks the moved argument in place),
+;; anything else gets a fresh stamp.  Counter NEXT is threaded.
+(define (stmt-core g) (for/fold ([g g]) ([k (in-list (hash-keys (stmt-flags g)))]) (stmt-set-flag g k #f)))
+(define (stmt-stamp g) (stmt-flag g 'stamp #f))
+(define (phi-arg-stamps ph) (stmt-flag ph 'arg-stamps #f))
+(define (restamp old new next)
+  (cond
+    [(gphi? new)
+     (define old-args (if (and old (gphi? old)) (gphi-args old) (pvector-empty)))
+     (define old-st (or (and old (gphi? old) (phi-arg-stamps old)) (pvector-empty)))
+     (define (old-stamp-of a i)
+       (define (at j) (and (< j (pvector-length old-args)) (< j (pvector-length old-st))
+                           (equal? (pvector-ref old-args j) a) (pvector-ref old-st j)))
+       (or (at i) (for/or ([j (in-range (pvector-length old-args))]) (at j))))
+     (define-values (st next*)
+       (for/fold ([acc (pvector-empty)] [n next]) ([a (in-pvector (gphi-args new))] [i (in-naturals)])
+         (define keep (old-stamp-of a i))
+         (if keep (values (pvector-cons-right acc keep) n) (values (pvector-cons-right acc n) (add1 n)))))
+     (values (stmt-set-flag new 'arg-stamps st) next*)]
+    [else
+     (define keep (and old (not (gphi? old)) (stmt-stamp old) (equal? (stmt-core old) (stmt-core new)) (stmt-stamp old)))
+     (if keep (values (stmt-set-flag new 'stamp keep) next) (values (stmt-set-flag new 'stamp next) (add1 next)))]))
+;; the largest stamp of a statement (0 when none)
+(define (stmt-max-stamp g)
+  (cond
+    [(gphi? g) (for/fold ([m 0]) ([x (in-pvector (or (phi-arg-stamps g) (pvector-empty)))]) (if (and x (> x m)) x m))]
+    [else (or (stmt-stamp g) 0)]))
 
 ;; ---- locations ------------------------------------------------------------
 

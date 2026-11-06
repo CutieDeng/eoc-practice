@@ -30,10 +30,16 @@
         [(null? ls) (reverse (if (null? cur) acc (cons (reverse cur) acc)))]
         [(string=? (car ls) "}") (loop (cdr ls) '() (cons (reverse (cons "}" cur)) acc))]
         [else (loop (cdr ls) (cons (car ls) cur) acc)])))
+  ;; the function signature is the line before the body's opening brace
+  (define (signature c)
+    (let loop ([ls c] [prev #f])
+      (cond
+        [(null? ls) #f]
+        [(string=? (car ls) "{") prev]
+        [else (loop (cdr ls) (car ls))])))
   (for/hash ([c (in-list chunks)]
-             #:when (for/or ([l (in-list c)]) (regexp-match? #px"^[A-Za-z_].*\\)\\s*$" l)))
-    (define sig (for/first ([l (in-list c)] #:when (regexp-match? #px"^[A-Za-z_].*\\)\\s*$" l)) l))
-    (define m (regexp-match #px"([A-Za-z_][A-Za-z0-9_]*) \\(" sig))
+             #:when (let ([sig (signature c)]) (and sig (regexp-match? #px"([A-Za-z_][A-Za-z0-9_]*) \\(" sig))))
+    (define m (regexp-match #px"([A-Za-z_][A-Za-z0-9_]*) \\(" (signature c)))
     (values (cadr m) (normalize-gimple-text (string-join c "\n")))))
 
 ;; per-stage dump texts of a TU: hash stage -> text.  The lowering

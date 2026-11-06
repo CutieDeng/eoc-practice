@@ -11,8 +11,9 @@
 ;; (check_call: the callee's ECF flags through state_from_flags, self
 ;; recursion) lower the state const > pure > neither and may set
 ;; "looping".  A const/pure function with loops stays non-looping only
-;; when every loop is proved finite (opt/niter.rkt loop-finite?).  The
-;; result is dumped ("Function is locally looping/const/pure.") and the
+;; when every loop is proved finite (finite_function_p below, with
+;; opt/niter.rkt loop-finite? for max_loop_iterations).  The result is
+;; dumped ("Function is locally looping/const/pure.") and the
 ;; declaration updated ("Function found to be const: NAME/N",
 ;; "Declaration updated to be const: NAME/N"): the flags live in the GS
 ;; declaration overrides ('readonly, 'pure, 'looping-const-or-pure,
@@ -20,6 +21,14 @@
 ;; gimplify-call-expr.  N is the cgraph uid from GCC 15, the symbol
 ;; order before (symtab_node::get_dump_name); both come from the
 ;; gccast plugin.
+;;
+;; Shared with opt/modref.rkt: dump-name, walk-stmt-loads-stores,
+;; refs-local-or-readonly?, points-to-local-or-readonly?,
+;; ipa-make-function-const / -pure, finite-function?, fixup-cfg.
+;; From GCC 15 finite_loop_p records a proved loop in loop->finite_p
+;; (loops persist between passes), and a later query prints "Assume
+;; loop N to be finite: ... loop was previously finite."; the port keeps
+;; the proved headers in the 'finite-loops declaration flag.
 ;;
 ;; Not ported: exceptions (stmt_could_throw_p, nothrow discovery: the C
 ;; front end marks every function nothrow already), malloc discovery,
@@ -45,15 +54,167 @@
          "loops.rkt"
          "niter.rkt")
 
-(provide local-pure-const)
+(provide local-pure-const
+         dump-name walk-stmt-loads-stores refs-local-or-readonly? points-to-local-or-readonly? auto-var? get-base-address*
+         ipa-make-function-const ipa-make-function-pure finite-function? fixup-cfg
+         binds-to-current-def? function-available?)
 
 ;; pure_const_state_e: IPA_CONST < IPA_PURE < IPA_NEITHER
 (define (state-rank s) (case s [(const) 0] [(pure) 1] [else 2]))
 (define (state-max a b) (if (> (state-rank b) (state-rank a)) b a))
 
+;; symtab_node::dump_name: name/order up to GCC 14, name/uid from 15
 (define (dump-name st d)
   (define n (if (>= (gcc-major-version st) 15) (decl-flag st d 'cgraph-uid #f) (decl-flag st d 'symbol-order #f)))
   (format "~a/~a" (decl-print-name st d) (or n "?")))
+
+;; decl_binds_to_current_def_p / availability for the fixtures' model: a
+;; function defined in this unit binds (no -shared), an external
+;; declaration is not available
+(define (binds-to-current-def? st d) (not (decl-external d)))
+(define (function-available? st d) (not (decl-external d)))
+
+;; auto_var_in_fn_p
+(define (auto-var? d)
+  (and (memq (tree-code d) '(var_decl parm_decl result_decl)) (not (tree-static d)) (not (decl-external d))))
+
+(define (get-base-address* t)
+  (let loop ([t t])
+    (cond
+      [(handled-component-p t) (loop (tree-operand t 0))]
+      [(and (eq? (tree-code t) 'mem_ref) (eq? (tree-code (tree-operand t 0)) 'addr_expr))
+       (loop (tree-operand (tree-operand t 0) 0))]
+      [else t])))
+
+;; refs_local_or_readonly_memory_p / points_to_local_or_readonly_memory_p
+;; (ipa-fnsummary.cc) without points-to: a pointer is local when it is
+;; derived from the address of an automatic variable
+(define (refs-local-or-readonly? st m t)
+  (define b (get-base-address* t))
+  (cond
+    [(and (Tree? b) (memq (tree-code b) '(mem_ref target_mem_ref))) (points-to-local-or-readonly? st m (tree-operand b 0))]
+    [(and (Tree? b) (decl-p st b) (auto-var? b)) #t]
+    [(and (Tree? b) (decl-p st b) (decl-flag st b 'readonly #f)) #t]
+    [else #f]))
+(define (points-to-local-or-readonly? st m t [depth 0])
+  (cond
+    [(> depth 16) #f]
+    [(integer-zerop t) #t]                                   ; flag_delete_null_pointer_checks
+    [(ssa-name? t)
+     (define g (mfn-def-stmt m t))
+     (cond
+       [(not g) #f]                                          ; a parameter / undefined: points to nonlocal memory
+       [(gphi? g) (for/and ([a (in-pvector (gphi-args g))]) (points-to-local-or-readonly? st m (cdr a) (add1 depth)))]
+       [(gassign? g)
+        (case (gassign-code g)
+          [(addr_expr ssa_name nop_expr convert_expr pointer_plus_expr)
+           (points-to-local-or-readonly? st m (gassign-rhs1 g) (add1 depth))]
+          [else #f])]
+       [else #f])]
+    [(eq? (tree-code t) 'addr_expr) (refs-local-or-readonly? st m (tree-operand t 0))]
+    [else #f]))
+
+;; walk_stmt_load_store_ops: ON-LOAD / ON-STORE receive the base
+;; (get_base_loadstore: a declaration or an indirect reference) and the
+;; full operand
+(define (walk-stmt-loads-stores st g on-load on-store)
+  (define (base-loadstore t)
+    (define b (let loop ([t t]) (if (handled-component-p t) (loop (tree-operand t 0)) t)))
+    (and (Tree? b)
+         (or (decl-p st b) (memq (tree-code b) '(indirect_ref mem_ref target_mem_ref)))
+         b))
+  (define (visit t f) (define b (and t (base-loadstore t))) (when b (f b t)))
+  (cond
+    [(and (gassign? g) (gassign-single-p st g))
+     (visit (gassign-lhs g) on-store)
+     (visit (gassign-rhs1 g) on-load)]
+    [(gcall? g)
+     (when (gcall-lhs g) (visit (gcall-lhs g) on-store))
+     (for ([a (in-pvector (gcall-args g))] #:unless (eq? (tree-code a) 'addr_expr)) (visit a on-load))]
+    [(greturn? g)
+     (define v (greturn-retval g))
+     (when (and v (not (eq? (tree-code v) 'addr_expr))) (visit v on-load))]
+    [else (void)]))
+
+;; ------------------------------------------------------------
+;; finite_function_p (shared with modref): (values finite? st)
+;; ------------------------------------------------------------
+
+(define (finite-function? st m cfg fndecl msg!)
+  (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
+                           (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
+  (define-values (loops _back) (find-loops cfg dom))
+  (define major (gcc-major-version st))
+  (define own-flags (decl-ecf-flags st fndecl))
+  (define flags-finite?
+    (and (not (zero? (bitwise-and own-flags (bitwise-ior ECF-CONST ECF-PURE))))
+         (zero? (bitwise-and own-flags ECF-LOOPING))))
+  (define (record st l)
+    (if (>= major 15)
+        (set-decl-flag st fndecl 'finite-loops (cons (Loop-header l) (decl-flag st fndecl 'finite-loops '())))
+        st))
+  (let loop ([ls loops] [st st])
+    (cond
+      [(null? ls) (values #t st)]
+      [else
+       (define l (car ls))
+       (define previously (and (>= major 15) (memv (Loop-header l) (decl-flag st fndecl 'finite-loops '()))))
+       (cond
+         [(and previously (pair? (loop-exits cfg l)))
+          (msg! "Assume loop ~a to be finite: it has an exit and -ffinite-loops is on or loop was previously finite." (Loop-num l))
+          (loop (cdr ls) st)]
+         [flags-finite? (loop (cdr ls) (record st l))]
+         [(loop-finite? st m cfg l) (loop (cdr ls) (record st l))]
+         [else
+          (msg! "    cannot prove finiteness of loop ~a" (Loop-num l))
+          (values #f st)])])))
+
+;; ------------------------------------------------------------
+;; ipa_make_function_const / ipa_make_function_pure (local = true):
+;; (values changed? st)
+;; ------------------------------------------------------------
+
+(define (ipa-make-function-const st fndecl looping msg!)
+  (cond
+    [(and (decl-flag st fndecl 'readonly #f)
+          (or looping (not (decl-flag st fndecl 'looping-const-or-pure #f))))
+     (values #f st)]
+    [else
+     (msg! "Function found to be ~aconst: ~a" (if looping "looping " "") (dump-name st fndecl))
+     (msg! "Declaration updated to be ~aconst: ~a" (if looping "looping " "") (dump-name st fndecl))
+     (values #t (set-decl-flag (set-decl-flag (set-decl-flag st fndecl 'readonly #t) fndecl 'looping-const-or-pure looping) fndecl 'pure #f))]))
+
+(define (ipa-make-function-pure st fndecl looping msg!)
+  (cond
+    [(or (decl-flag st fndecl 'readonly #f)
+         (and (decl-flag st fndecl 'pure #f)
+              (or looping (not (decl-flag st fndecl 'looping-const-or-pure #f)))))
+     (values #f st)]
+    [else
+     (msg! "Function found to be ~apure: ~a" (if looping "looping " "") (dump-name st fndecl))
+     (msg! "Declaration updated to be ~apure: ~a" (if looping "looping " "") (dump-name st fndecl))
+     (values #t (set-decl-flag (set-decl-flag st fndecl 'pure #t) fndecl 'looping-const-or-pure looping))]))
+
+;; execute_fixup_cfg: calls to const/pure functions get update_stmt (a
+;; fresh use-list stamp) and TODO_cleanup_cfg
+(define (fixup-cfg st cfg)
+  (define n0 (cfg-next-stamp cfg))
+  (define-values (cfg1 n1 any?)
+    (for/fold ([c cfg] [n n0] [any? #f]) ([bb (in-pvector (cfg-bbs cfg))])
+      (define b (cfg-block c bb))
+      (define-values (stmts n* any*)
+        (for/fold ([acc (pvector-empty)] [n n] [any? any?]) ([g (in-pvector (GBlock-stmts b))])
+          (cond
+            [(and (gcall? g) (call-fndecl g)
+                  (not (zero? (bitwise-and (gcall-ecf g) (bitwise-ior ECF-CONST ECF-PURE ECF-LOOPING)))))
+             (values (pvector-cons-right acc (stmt-set-flag g 'stamp n)) (add1 n) #t)]
+            [else (values (pvector-cons-right acc g) n any?)])))
+      (values (if any* (set-block c (block-set-stmts b stmts)) c) n* any*)))
+  (if any? (cleanup-tree-cfg st cfg1 print-cond-rhs) (values cfg1 st)))
+
+;; ------------------------------------------------------------
+;; the pass
+;; ------------------------------------------------------------
 
 (define (local-pure-const st fndecl cfg0)
   (define st0 (gs-set-fndecl st fndecl))
@@ -84,76 +245,20 @@
        (unless (decl-flag st0 t 'readonly #f)
          (msg! "    static memory read is not const")
          (set-state! 'pure))]))
-  ;; auto_var_in_fn_p
-  (define (auto-var? d)
-    (and (memq (tree-code d) '(var_decl parm_decl result_decl)) (not (tree-static d)) (not (decl-external d))))
-  ;; refs_local_or_readonly_memory_p / points_to_local_or_readonly_memory_p
-  (define (refs-local-or-readonly? t)
-    (define b (get-base-address* t))
-    (cond
-      [(and (Tree? b) (memq (tree-code b) '(mem_ref target_mem_ref))) (points-to-local-or-readonly? (tree-operand b 0) 0)]
-      [(and (Tree? b) (decl-p st0 b) (auto-var? b)) #t]
-      [(and (Tree? b) (decl-p st0 b) (decl-flag st0 b 'readonly #f)) #t]
-      [else #f]))
-  (define (points-to-local-or-readonly? t depth)
-    (cond
-      [(> depth 16) #f]
-      [(integer-zerop t) #t]                                   ; flag_delete_null_pointer_checks
-      [(ssa-name? t)
-       (define g (mfn-def-stmt m t))
-       (cond
-         [(not g) #f]                                          ; a parameter / undefined: points to nonlocal memory
-         [(gphi? g) (for/and ([a (in-pvector (gphi-args g))]) (points-to-local-or-readonly? (cdr a) (add1 depth)))]
-         [(gassign? g)
-          (case (gassign-code g)
-            [(addr_expr ssa_name nop_expr convert_expr pointer_plus_expr)
-             (points-to-local-or-readonly? (gassign-rhs1 g) (add1 depth))]
-            [else #f])]
-         [else #f])]
-      [(eq? (tree-code t) 'addr_expr) (refs-local-or-readonly? (tree-operand t 0))]
-      [else #f]))
-  (define (get-base-address* t)
-    (let loop ([t t])
-      (cond
-        [(handled-component-p t) (loop (tree-operand t 0))]
-        [(and (eq? (tree-code t) 'mem_ref) (eq? (tree-code (tree-operand t 0)) 'addr_expr))
-         (loop (tree-operand (tree-operand t 0) 0))]
-        [else t])))
   (define (check-op! t write?)
     (define b (get-base-address* t))
     (cond
       [(and (Tree? b) (tree-this-volatile b))
        (set-state! 'neither)
        (msg! "    Volatile indirect ref is not const/pure")]
-      [(refs-local-or-readonly? t) (msg! "    Indirect ref to local or readonly memory is OK")]
+      [(refs-local-or-readonly? st0 m t) (msg! "    Indirect ref to local or readonly memory is OK")]
       [write?
        (set-state! 'neither)
        (msg! "    Indirect ref write is not const/pure")]
       [else
        (msg! "    Indirect ref read is not const")
        (set-state! 'pure)]))
-  ;; get_base_loadstore
-  (define (base-loadstore t)
-    (define b (let loop ([t t]) (if (handled-component-p t) (loop (tree-operand t 0)) t)))
-    (and (Tree? b)
-         (or (decl-p st0 b) (memq (tree-code b) '(indirect_ref mem_ref target_mem_ref)))
-         b))
-  (define (visit! t write?)
-    (define b (and t (base-loadstore t)))
-    (when b (if (decl-p st0 b) (check-decl! b write?) (check-op! b write?))))
-  ;; walk_stmt_load_store_ops
-  (define (walk-loads-stores! g)
-    (cond
-      [(and (gassign? g) (gassign-single-p st0 g))
-       (visit! (gassign-lhs g) #t)
-       (visit! (gassign-rhs1 g) #f)]
-      [(gcall? g)
-       (when (gcall-lhs g) (visit! (gcall-lhs g) #t))
-       (for ([a (in-pvector (gcall-args g))] #:unless (eq? (tree-code a) 'addr_expr)) (visit! a #f))]
-      [(greturn? g)
-       (define v (greturn-retval g))
-       (when (and v (not (eq? (tree-code v) 'addr_expr))) (visit! v #f))]
-      [else (void)]))
+  (define (visit! b t write?) (if (decl-p st0 b) (check-decl! b write?) (check-op! b write?)))
 
   ;; -------- state_from_flags / worse_state
   (define (state-from-flags flags cannot-return?)
@@ -180,18 +285,13 @@
        (worse-state! s l)]))
 
   ;; -------- check_stmt
-  (define (stmt-string g bb)
-    (string-trim
-     (parameterize ([print-cfg-mode #t] [current-print-block (cons cfg bb)])
-       (with-output-to-string (lambda () (print-stmt st0 g 0 (current-output-port)))))
-     "\n" #:left? #f))
   (define (check-stmt! g bb)
-    (msg! "~a  scanning: ~a" (if first-scan " " "") (stmt-string g bb))
+    (msg! "~a  scanning: ~a" (if first-scan " " "") (stmt->string st0 cfg bb g))
     (set! first-scan #f)
     (when (and (stmt-has-volatile-ops? g) (not (and (gassign? g) (tree-clobber-p (gassign-rhs1 g)))))
       (set-state! 'neither)
       (msg! "    Volatile stmt is not const/pure"))
-    (walk-loads-stores! g)
+    (walk-stmt-loads-stores st0 g (lambda (b t) (visit! b t #f)) (lambda (b t) (visit! b t #t)))
     (cond
       [(gcall? g) (check-call! g)]
       [else (void)]))
@@ -201,22 +301,17 @@
     (check-stmt! (mfn-stmt m id) bb))
 
   ;; finite_function_p
-  (when (and (not (eq? state 'neither)) (not looping))
-    (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
-                             (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
-    (define-values (loops _back) (find-loops cfg dom))
-    (define own-flags (decl-ecf-flags st0 fndecl))
-    (define previously-finite?
-      (and (not (zero? (bitwise-and own-flags (bitwise-ior ECF-CONST ECF-PURE))))
-           (zero? (bitwise-and own-flags ECF-LOOPING))))
-    (unless previously-finite?
-      (for/first ([l (in-list loops)] #:unless (loop-finite? st0 m cfg l))
-        (msg! "    cannot prove finiteness of loop ~a" (Loop-num l))
-        (set! looping #t))))
+  (define st-f
+    (cond
+      [(and (not (eq? state 'neither)) (not looping))
+       (define-values (finite? st1) (finite-function? st0 m cfg fndecl msg!))
+       (unless finite? (set! looping #t))
+       st1]
+      [else st0]))
 
   ;; better_state with the previously known state: a plain function adds nothing
   (define-values (known-state known-looping)
-    (state-from-flags (decl-ecf-flags st0 fndecl) (zero? (pvector-length (cfg-preds cfg EXIT)))))
+    (state-from-flags (decl-ecf-flags st-f fndecl) (zero? (pvector-length (cfg-preds cfg EXIT)))))
   (when (< (state-rank known-state) (state-rank state))
     (set! looping (if (eq? state 'neither) known-looping (and looping known-looping)))
     (set! state known-state))
@@ -230,7 +325,7 @@
   ;; pass_local_pure_const::execute
   (define changed #f)
   (define st1
-    (let* ([st st0]
+    (let* ([st st-f]
            [st (cond
                  [(and (zero? (pvector-length (cfg-preds cfg EXIT))) (not (tree-this-volatile fndecl))
                        (not (decl-flag st fndecl 'noreturn #f)))
@@ -239,36 +334,9 @@
                   (set-decl-flag st fndecl 'noreturn #t)]
                  [else st])]
            [st (case state
-                 [(const)
-                  (cond
-                    [(and (decl-flag st fndecl 'readonly #f)
-                          (or looping (not (decl-flag st fndecl 'looping-const-or-pure #f))))
-                     st]
-                    [else
-                     (msg! "Function found to be ~aconst: ~a" (if looping "looping " "") (dump-name st fndecl))
-                     (msg! "Declaration updated to be ~aconst: ~a" (if looping "looping " "") (dump-name st fndecl))
-                     (set! changed #t)
-                     (set-decl-flag (set-decl-flag (set-decl-flag st fndecl 'readonly #t) fndecl 'looping-const-or-pure looping) fndecl 'pure #f)])]
-                 [(pure)
-                  (cond
-                    [(or (decl-flag st fndecl 'readonly #f)
-                         (and (decl-flag st fndecl 'pure #f)
-                              (or looping (not (decl-flag st fndecl 'looping-const-or-pure #f)))))
-                     st]
-                    [else
-                     (msg! "Function found to be ~apure: ~a" (if looping "looping " "") (dump-name st fndecl))
-                     (msg! "Declaration updated to be ~apure: ~a" (if looping "looping " "") (dump-name st fndecl))
-                     (set! changed #t)
-                     (set-decl-flag (set-decl-flag st fndecl 'pure #t) fndecl 'looping-const-or-pure looping)])]
+                 [(const) (let-values ([(ch st) (ipa-make-function-const st fndecl looping msg!)]) (when ch (set! changed #t)) st)]
+                 [(pure) (let-values ([(ch st) (ipa-make-function-pure st fndecl looping msg!)]) (when ch (set! changed #t)) st)]
                  [else st])])
       st))
   (define cfg1 (for/fold ([c cfg]) ([mm (in-list (reverse msgs))]) (cfg-add-message c mm)))
-  ;; execute_fixup_cfg: TODO_cleanup_cfg when the function calls a const/pure function
-  (define needs-cleanup?
-    (and changed
-         (for*/or ([bb (in-pvector (cfg-bbs cfg1))] [g (in-pvector (GBlock-stmts (cfg-block cfg1 bb)))])
-           (and (gcall? g) (call-fndecl g)
-                (not (zero? (bitwise-and (gcall-ecf g) (bitwise-ior ECF-CONST ECF-PURE ECF-LOOPING))))))))
-  (if needs-cleanup?
-      (cleanup-tree-cfg st1 cfg1 print-cond-rhs)
-      (values cfg1 st1)))
+  (if changed (fixup-cfg st1 cfg1) (values cfg1 st1)))

@@ -89,7 +89,7 @@
 
 ;; pass context: the state, the input CFG, its dominators, the lattice
 ;; (vector indexed by SSA version) and the engine once it exists
-(struct C (st cfg dom vals [eng #:mutable] [messages #:mutable]))   ; messages: dump_file lines, reversed
+(struct C (st cfg dom vals [eng #:mutable] [messages #:mutable] [stamp #:mutable]))   ; messages: dump_file lines, reversed; stamp: next use-list stamp
 
 (define (type-prec c ty) (type-precision* (C-st c) ty))
 (define (type-uns? c ty) (type-unsigned?* (C-st c) ty))
@@ -829,6 +829,12 @@
                        [else u]))))
   (values g* replaced))
 
+;; update_stmt / SET_USE bookkeeping: NEW replaces OLD (gimple.rkt restamp)
+(define (restamp! c old new)
+  (define-values (g n) (restamp old new (C-stamp c)))
+  (set-C-stamp! c n)
+  g)
+
 ;; substitute_and_fold_dom_walker::before_dom_children on one block:
 ;; (values cfg changed? dce-worklist)
 (define (fold-block c cfg bb dce0)
@@ -850,12 +856,13 @@
             (set! dce (intbits-set dce (ssa-ver res)))
             ph]
            [else
-            (phi-set-args ph (for/pvector ([arg (in-pvector (gphi-args ph))])
-                               (define a (cdr arg))
-                               (define val (and (ssa-name? a) (get-constant-value c a)))
-                               (cond
-                                 [(and val (not (equal? val a)) (may-propagate-copy c a val)) (set! changed #t) (cons (car arg) val)]
-                                 [else arg])))])])))
+            (restamp! c ph
+                      (phi-set-args ph (for/pvector ([arg (in-pvector (gphi-args ph))])
+                                         (define a (cdr arg))
+                                         (define val (and (ssa-name? a) (get-constant-value c a)))
+                                         (cond
+                                           [(and val (not (equal? val a)) (may-propagate-copy c a val)) (set! changed #t) (cons (car arg) val)]
+                                           [else arg]))))])])))
   ;; statements
   (define succs (cfg-succs cfg bb))
   (define stmts*
@@ -882,7 +889,7 @@
                 [else (values g3 #f)])]
              [else (values g3 #f)]))
          (when (or replaced? folded1? folded2? fixed?) (set! changed #t))
-         g4])))
+         (restamp! c g g4)])))
   (define cfg1 (set-block cfg (block-set-stmts (block-set-phis b phis*) stmts*)))
   ;; propagate_into_phi_args
   (define cfg2
@@ -894,7 +901,8 @@
         [else
          (set-block cfg (block-set-phis
                          db (for/pvector ([ph (in-pvector (GBlock-phis db))])
-                              (phi-set-args ph (for/pvector ([arg (in-pvector (gphi-args ph))])
+                              (restamp! c ph
+                               (phi-set-args ph (for/pvector ([arg (in-pvector (gphi-args ph))])
                                                  (define a (cdr arg))
                                                  (cond
                                                    [(and (= (car arg) bb) (ssa-name? a) (not (ssa-virtual? a)))
@@ -903,7 +911,7 @@
                                                       [(and val (is-gimple-min-invariant st val) (may-propagate-copy c a val))
                                                        (set! changed #t) (cons (car arg) val)]
                                                       [else arg])]
-                                                   [else arg]))))))])))
+                                                   [else arg])))))))])))
   (values cfg2 changed dce))
 
 ;; simple_dce_from_worklist over the folded CFG
@@ -992,7 +1000,7 @@
   (define st0 (gs-set-fndecl st fndecl))
   (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
                            (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
-  (define c (C st0 (cfg-clear-messages cfg) dom (make-vector (add1 (GS-ssa-version st0)) UNINIT) #f '()))
+  (define c (C st0 (cfg-clear-messages cfg) dom (make-vector (add1 (GS-ssa-version st0)) UNINIT) #f '() (cfg-next-stamp cfg)))
   (ssa-propagate cfg dom
                  #:backedge-worklists? (<= (gcc-major-version st0) 12)
                  #:init (lambda (e) (set-C-eng! c e) (ccp-initialize! c e))

@@ -24,18 +24,19 @@
 (require racket/list
          "../../../kernel/data/data.rkt"
          "../../../kernel/ir/gimple/types.rkt"
+         "../gimple.rkt"
          "../cfg.rkt"
          "../ssa.rkt"
          "ssa-ops.rkt")
 
 (provide gcfg->mfn mfn->gcfg mfn-cfg
          mfn-stmt mfn-bb mfn-phi? mfn-phis mfn-stmts mfn-first mfn-last mfn-next mfn-prev
-         mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
+         mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-imm-uses mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
          mfn-replace! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
          stmt-use-names stmt-def-names)
 
 (struct cell (stmt prev next bb) #:mutable)
-(struct mfn (cfg cells [next-id #:mutable] heads tails phi-lists defs uses released))
+(struct mfn (cfg cells [next-id #:mutable] heads tails phi-lists defs uses released [next-stamp #:mutable]))
 
 ;; SSA names used / defined by a statement or PHI, virtual operands included
 (define (stmt-use-names g)
@@ -70,7 +71,10 @@
   id)
 
 (define (gcfg->mfn cfg)
-  (define m (mfn cfg (make-hasheqv) 0 (make-hasheqv) (make-hasheqv) (make-hasheqv) (make-hasheqv) (make-hasheqv) (make-hasheqv)))
+  (define m (mfn cfg (make-hasheqv) 0 (make-hasheqv) (make-hasheqv) (make-hasheqv) (make-hasheqv) (make-hasheqv) (make-hasheqv)
+                 (add1 (for*/fold ([mx 0]) ([bb (in-pvector (cfg-bbs cfg))]
+                                           [g (in-sequences (in-pvector (GBlock-phis (cfg-block cfg bb))) (in-pvector (GBlock-stmts (cfg-block cfg bb))))])
+                         (max mx (stmt-max-stamp g))))))
   (for ([bb (in-pvector (cfg-bbs cfg))])
     (define b (cfg-block cfg bb))
     (hash-set! (mfn-phi-lists m) bb
@@ -116,6 +120,18 @@
 (define (mfn-def-of-version m v) (hash-ref (mfn-defs m) v #f))
 (define (mfn-def-stmt m name) (let ([id (mfn-def m name)]) (and id (mfn-stmt m id))))
 (define (mfn-use-ids m name) (hash-keys (hash-ref (mfn-uses m) (ver name) (hasheqv))))
+;; FOR_EACH_IMM_USE_STMT order: the most recently (re)linked use first
+(define (use-stamp m id name)
+  (define g (mfn-stmt m id))
+  (cond
+    [(gphi? g)
+     (define st (or (phi-arg-stamps g) (pvector-empty)))
+     (for/fold ([mx -1]) ([a (in-pvector (gphi-args g))] [i (in-naturals)])
+       (define x (and (< i (pvector-length st)) (pvector-ref st i)))
+       (if (and x (ssa-name? (cdr a)) (ssa-name=? (cdr a) name) (> x mx)) x mx))]
+    [else (or (stmt-stamp g) -1)]))
+(define (mfn-imm-uses m name)
+  (sort (mfn-use-ids m name) > #:key (lambda (id) (use-stamp m id name))))
 (define (mfn-num-uses m name) (for/sum ([(id n) (in-hash (hash-ref (mfn-uses m) (ver name) (hasheqv)))]) n))
 (define (mfn-single-use? m name) (= 1 (mfn-num-uses m name)))
 (define (mfn-zero-uses? m name) (= 0 (mfn-num-uses m name)))
@@ -123,8 +139,10 @@
 
 ;; ---- mutation ----
 
-(define (mfn-replace! m id g)
+(define (mfn-replace! m id g0)
   (define c (cell-of m id))
+  (define-values (g n) (restamp (cell-stmt c) g0 (mfn-next-stamp m)))
+  (set-mfn-next-stamp! m n)
   (remove-tables! m id (cell-stmt c))
   (set-cell-stmt! c g)
   (add-tables! m id g))
@@ -145,8 +163,10 @@
 
 (define (mfn-release-name! m name) (hash-set! (mfn-released m) (ver name) #t))
 
-(define (link-new! m g bb prev next)
+(define (link-new! m g0 bb prev next)
   (define id (fresh-id! m))
+  (define-values (g n) (restamp #f g0 (mfn-next-stamp m)))
+  (set-mfn-next-stamp! m n)
   (hash-set! (mfn-cells m) id (cell g prev next bb))
   (if prev (set-cell-next! (cell-of m prev) id) (hash-set! (mfn-heads m) bb id))
   (if next (set-cell-prev! (cell-of m next) id) (hash-set! (mfn-tails m) bb id))

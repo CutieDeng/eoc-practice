@@ -42,7 +42,7 @@
 (provide build-ssa ssa-names-in-version-order virtual-operand? stmt-vuse stmt-vdef remove-unused-locals)
 
 ;; adapter value
-(struct ga (st cfg vop))     ; vop: the .MEM declaration
+(struct ga (st cfg vop stamp))     ; vop: the .MEM declaration; stamp: next use-list stamp
 
 (define (reg-decl? st t)
   (and t (memq (tree-code t) '(var_decl parm_decl result_decl)) (is-gimple-reg st t)))
@@ -158,7 +158,8 @@
 
 (define (block-stmts a i) (GBlock-stmts (cfg-block (ga-cfg a) i)))
 (define (block-phis a i) (GBlock-phis (cfg-block (ga-cfg a) i)))
-(define (update-block a i f) (ga (ga-st a) (set-block (ga-cfg a) (f (cfg-block (ga-cfg a) i))) (ga-vop a)))
+(define (update-block a i f) (ga (ga-st a) (set-block (ga-cfg a) (f (cfg-block (ga-cfg a) i))) (ga-vop a) (ga-stamp a)))
+(define (ga-set-stamp a n) (ga (ga-st a) (ga-cfg a) (ga-vop a) n))
 
 ;; every reg decl defined or used anywhere, by DECL_UID; then .MEM when
 ;; any statement has a virtual operand
@@ -195,11 +196,12 @@
 
 (define (new-name a var kind)
   (define-values (name st) (make-ssa-name (ga-st a) var))
-  (values (if (eq? kind 'default) (tree-set-attr name 'default-def #t) name) (ga st (ga-cfg a) (ga-vop a))))
+  (values (if (eq? kind 'default) (tree-set-attr name 'default-def #t) name) (ga st (ga-cfg a) (ga-vop a) (ga-stamp a))))
 
 (define (insert-phi a i var name)
   (define args (for/pvector ([p (in-pvector (cfg-preds (ga-cfg a) i))]) (cons p #f)))
-  (update-block a i (lambda (b) (block-set-phis b (pvector-cons-right (GBlock-phis b) (gphi #f (hasheq) var name args))))))
+  (define stamps (for/pvector ([p (in-pvector args)]) #f))
+  (update-block a i (lambda (b) (block-set-phis b (pvector-cons-right (GBlock-phis b) (gphi #f (hasheq 'arg-stamps stamps) var name args))))))
 
 (define (phis a i) (for/pvector ([ph (in-pvector (block-phis a i))]) (cons (gphi-var ph) (gphi-result ph))))
 
@@ -212,10 +214,16 @@
   (update-phi a i var (lambda (ph) (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) name (gphi-args ph)))))
 
 (define (set-phi-arg a i var pred name)
-  (update-phi a i var (lambda (ph)
-                        (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
-                              (for/pvector ([arg (in-pvector (gphi-args ph))])
-                                (if (= (car arg) pred) (cons pred name) arg))))))
+  ;; add_phi_arg links the argument's use at the head of NAME's use list
+  (define n (ga-stamp a))
+  (ga-set-stamp
+   (update-phi a i var (lambda (ph)
+                         (define stamps (or (phi-arg-stamps ph) (for/pvector ([x (in-pvector (gphi-args ph))]) #f)))
+                         (define k (for/first ([arg (in-pvector (gphi-args ph))] [j (in-naturals)] #:when (= (car arg) pred)) j))
+                         (gphi (gphi-loc ph) (hash-set (gphi-flags ph) 'arg-stamps (if k (pvector-set stamps k n) stamps)) (gphi-var ph) (gphi-result ph)
+                               (for/pvector ([arg (in-pvector (gphi-args ph))])
+                                 (if (= (car arg) pred) (cons pred name) arg)))))
+   (add1 n)))
 
 ;; rewrite_stmt for every statement of the block: real uses, VUSE, VDEF,
 ;; real def
@@ -234,7 +242,9 @@
       (define-values (vdef a3 acc3) (if vd? (def a2 acc2 vop) (values #f a2 acc2)))
       (define d (stmt-def st g))
       (define-values (dn a4 acc4) (if d (def a3 acc3 d) (values #f a3 acc3)))
-      (values (pvector-cons-right out (rewrite-stmt st g (lambda (t) (intmap-ref map1 (decl-uid t))) dn vuse vdef)) a4 acc4)))
+      ;; rewrite_stmt relinks every use operand: the statement takes a fresh stamp
+      (define g* (stmt-set-flag (rewrite-stmt st g (lambda (t) (intmap-ref map1 (decl-uid t))) dn vuse vdef) 'stamp (ga-stamp a4)))
+      (values (pvector-cons-right out g*) (ga-set-stamp a4 (add1 (ga-stamp a4))) acc4)))
   (values (update-block a* i (lambda (b) (block-set-stmts b stmts*))) acc*))
 
 ;; pass_build_ssa::execute's tail: SSA names of DECL_IGNORED_P variables
@@ -281,7 +291,7 @@
     (define stmts* (for/pvector ([g (in-pvector (GBlock-stmts b))]) (map-stmt-trees g an)))
     (set-block c (block-set-stmts (block-set-phis b phis*) stmts*))))
 
-(define (finish a) (ga (ga-st a) (anonymize-cfg (ga-st a) (ga-cfg a)) (ga-vop a)))
+(define (finish a) (ga (ga-st a) (anonymize-cfg (ga-st a) (ga-cfg a)) (ga-vop a) (ga-stamp a)))
 
 (define gimple-port
   (ssa-port (lambda (a) ENTRY)
@@ -308,8 +318,12 @@
 (define (build-ssa st fndecl cfg)
   (let/st st ([vop (make-vop (gs-set-fndecl st fndecl))])
     ;; a new pass, a new dump_file: the cfg pass's messages are not repeated
-    (define a (ssa-construct gimple-port (ga st (cfg-clear-messages cfg) vop)))
-    (values (ga-cfg a) (ga-st a))))
+    (define a (ssa-construct gimple-port (ga st (cfg-clear-messages cfg) vop 1)))
+    ;; ssa_default_def: the default definitions survive their last use
+    (define dd
+      (for/fold ([acc '()]) ([n (in-pvector (ssa-names-in-version-order (ga-cfg a)))])
+        (if (and (tree-attr n 'default-def #f) (ssa-name-var n)) (cons (cons (decl-uid (ssa-name-var n)) n) acc) acc)))
+    (values (ga-cfg a) (set-decl-flag (ga-st a) fndecl 'default-defs (reverse dd)))))
 
 ;; all SSA names of the function in version order (for the dump's
 ;; declaration list), virtual operands included

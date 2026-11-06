@@ -23,7 +23,8 @@
          "dse.rkt"
          "dce.rkt"
          "profile.rkt"
-         "pure-const.rkt")
+         "pure-const.rkt"
+         "modref.rkt")
 
 (provide o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
 (define pass-name car)
@@ -62,4 +63,4 @@
          (p 'phiopt1 identity-pass)
          (p 'iftoswitch identity-pass))
    (if (>= major 14) (list (p 'sccopy1 identity-pass)) '())
-   (list (p 'profile_estimate profile-estimate) (p 'local-pure-const1 local-pure-const))))
+   (list (p 'profile_estimate profile-estimate) (p 'local-pure-const1 local-pure-const) (p 'modref1 modref))))

@@ -11,7 +11,7 @@
 ;; (artificial, label-uid) are resolved through it.
 ;; ============================================================
 
-(require racket/string racket/list racket/match racket/math
+(require racket/port racket/string racket/list racket/match racket/math
          "../../kernel/data/data.rkt"
          "../../kernel/ir/gimple/types.rkt"
          "state.rkt"
@@ -21,7 +21,8 @@
          "ssa.rkt")
 
 (provide print-function print-lowered-function print-cfg-function print-ssa-function print-type print-expr
-         print-declarator print-stmt print-cond-rhs print-cfg-mode current-print-block print-vops? decl-print-name label-name)
+         print-declarator print-stmt print-cond-rhs print-cfg-mode current-print-block print-vops? decl-print-name label-name
+         stmt->string)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -327,6 +328,22 @@
     [(not lo) (format "default: ~a" lab)]
     [hi (format "case ~a ... ~a: ~a" (print-expr st lo) (print-expr st hi) lab)]
     [else (format "case ~a: ~a" (print-expr st lo) lab)]))
+
+;; print_gimple_stmt (flags 0) of one statement or PHI as a string, in
+;; the CFG context of block BB (switch labels print edge probabilities)
+(define (stmt->string st cfg bb g)
+  (cond
+    [(gphi? g)
+     (format "~a = PHI <~a>" (print-expr st (gphi-result g))
+             (string-join (for/list ([arg (in-pvector (gphi-args g))])
+                            (format "~a(~a)" (if (cdr arg) (print-expr st (cdr arg)) "<null>") (car arg)))
+                          ", "))]
+    [else
+     (define s (parameterize ([print-cfg-mode #t] [current-print-block (cons cfg bb)])
+                 (with-output-to-string (lambda () (print-stmt st g 0 (current-output-port))))))
+     (if (and (positive? (string-length s)) (char=? (string-ref s (sub1 (string-length s))) #\newline))
+         (substring s 0 (sub1 (string-length s)))
+         s)]))
 
 ;; print_gimple_expr (TDF_RHS_ONLY) of a GIMPLE_COND
 (define (print-cond-rhs st g)
