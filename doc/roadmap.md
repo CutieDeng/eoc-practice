@@ -267,7 +267,8 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 | 2 | `.dat` 能被 `reader.rkt` 读成 `TU`，节点表引用闭合 | 完成：`gccast-plugin/` 骨架 + `src/kernel/ir/gccast/types.rkt` + `src/frontend/gccast/reader.rkt`；夹具 `test/integration/gccast/{basic.c,struct.c,method.cc}.{12.5.0,15.2.0}.dat`；`reader-test.rkt` 10 项（含按访问宏名取 `FOR_COND`/`FOR_BODY`，12 与 15 操作数个数不同但同一测试通过） |
 | 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c / locals.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（8 项） |
 | 3b-1 | `gimple-low.rkt`（pass_lower_cf）：拍平 bind、按 retval 合并 return（-O0 下带位置的 return label 置为非 artificial）、删不可达 return、补尾部 `return;`、透传 `gtry` | 完成（2026-11-06）：`lower-test.rkt` 对 4 夹具 × 2 版本的 `.lower` 规范化 diff 为空（8 项） |
-| 3b-2 | `gimple-to-cfg.rkt`：make_blocks/make_edges 建 kernel `Cfg`，再复现 -O0 的 `cleanup_tree_cfg`（不可达块、forwarder、合并、2 标签 switch → cond）对齐 `.cfg`；然后接 `ssa-construct`/`cfg-to-rvsdg` | 待做；规格见 `doc/gimple-lower-cfg-spec.md` |
+| 3b-2 | `gimple-to-cfg.rkt`：make_blocks/cleanup_dead_labels×2/group_case_labels/make_edges/assign_discriminators，再复现 -O0 的 `cleanup_tree_cfg`（常量条件折叠、不可达块、forwarder、合并、2 标签 switch → cond）对齐 `.cfg` | 完成（2026-11-06）：`cfg-test.rkt` 对 basic.c / calls.c / struct.c × 2 版本的 `.cfg` 规范化 diff 为空（6 项，含 `;; N succs` 边序与 `Removing`/`Merging` 消息）；locals.c 需先有 pass_lower_eh；规格见 `doc/gimple-lower-cfg-spec.md` |
+| 3c | GIMPLE-CFG → kernel `Cfg`（`CfgBlock`/`VfInsn`/`Term:*`，类型表入 `Cfg-info`），接 `ssa-construct`/`cfg-to-rvsdg` | 待做 |
 | 4 | 指针、结构体、数组、调用 + 内存状态边 | 待做 |
 
 实现备注（3a，gimplify 对齐过程中确认的 GCC 行为）：
@@ -280,6 +281,13 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 - 每个函数独立节点表：`PRE_GENERICIZE` 回调内同步序列化，指针→下标映射只在该函数内有效，避免 GC 复用地址造成跨函数别名；跨函数的类型/声明同一性靠 `DECL_UID`/`TYPE_UID` 恢复。
 - 常量：`INTEGER_CST` 能放进 host word 时直接十进制，否则 `#s(Wide precision limbs)`（`wide_int` 的 `get_len`/`elt` 在 12 与 15 都稳定）；`REAL_CST` 用 `real_to_hexadecimal`；`STRING_CST` 字节串含结尾 NUL。
 - `PLUGIN_FINISH_DECL`/`PLUGIN_FINISH_TYPE`（全局声明与类型）尚未接入；函数可达的类型/声明已随函数序列化。
+
+实现备注（3b，lower/cfg 对齐过程中确认的 GCC 行为）：
+- 位置模型：GIMPLE 语句的 location 是 (spot, BLOCK, discriminator) 三元组（`gloc`），`#f` 为 UNKNOWN。lower 的 `set_block` 让无 spot 的语句（label、人工 goto）得到"只有 BLOCK"的非零位置；`assign_discriminators`（trunk 版，385d9937f0e）给这种位置分配非零 discriminator 时 `location_with_discriminator` 返回 UNKNOWN。cleanup 的 -O0 判据（forwarder 的前驱边/label 位置检查、`gimple_can_merge_blocks_p` 的 goto_locus 检查）比较的都是整个三元组。
+- gimplify 的位置来源：`input_location` 在每次 `gimplify_expr` 进入时取 `EXPR_LOCATION`、退出时恢复；语句级 `annotate_all_with_location_after` 只给没有位置、未标 do-not-emit 且不是 label 的语句赋值；cond/label/case/switch/assign/call 另有显式 `gimple_set_location`；`gimplify_cond_expr` 的 `label_cont` goto 标 do-not-emit；循环与 break/continue 的人工 label 带循环起始位置；return label 带 `function_end_locus`。
+- -O0 下几乎所有 goto 边都带 goto_locus，因此 forwarder 极少被删、块极少合并：只含 `goto <bb N>;` 的空块（struct.c 的 bb4）与只含 `<Ln>:` 的块都保留。`;; N succs { … }` 的顺序由 succ 向量"创建时 push、删除时 unordered_remove（末尾填洞）"决定，测试把这些行保留下来比对。
+- 按 trunk 实现、与 gcc-15 不同的点（三个夹具未触发差异）：`assign_discriminators` 重写（GCC16）、forwarder 判定新增"单前驱且前驱单后继则留给合并"（40c037adb36）、`group_case_labels` 撤销对 `__builtin_unreachable` 目标的删除（f108e23d2bf）。
+- 未移植：abnormal/EH 边、computed goto、setjmp、`convert_single_case_switch` 的区间分支（`generate_range_test`）、`gimple_simplify` 的非常量折叠、循环树输出（`;; N loops found` 等行测试中忽略）。
 
 ## 6. 执行顺序与依赖
 

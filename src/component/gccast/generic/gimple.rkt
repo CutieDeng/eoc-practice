@@ -35,9 +35,9 @@
 (struct gcall gstmt ([lhs #:mutable] fn args fntype internal? flags) #:transparent)   ; flags: call_expr_flags (ECF_*)
 (struct gcond gstmt (code lhs rhs [true-label #:mutable] [false-label #:mutable]) #:transparent)
 (struct glabel gstmt (label) #:transparent)
-(struct ggoto gstmt (dest) #:transparent)
+(struct ggoto gstmt ([dest #:mutable]) #:transparent)
 (struct greturn gstmt (retval) #:transparent)
-(struct gswitch gstmt (index default-case cases) #:transparent)   ; cases: pvector of CASE_LABEL_EXPR trees
+(struct gswitch gstmt (index default-case [cases #:mutable]) #:transparent)   ; cases: pvector of CASE_LABEL_EXPR trees
 (struct gbind gstmt ([vars #:mutable] [body #:mutable] block) #:transparent)
 (struct gpredict gstmt (predictor outcome) #:transparent)
 (struct gnop gstmt () #:transparent)

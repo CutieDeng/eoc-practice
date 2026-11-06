@@ -12,9 +12,11 @@
 (require racket/string racket/list racket/match racket/math
          "../../../kernel/data/data.rkt"
          "../generic/tree.rkt"
-         "../generic/gimple.rkt")
+         "../generic/gimple.rkt"
+         "gimple-to-cfg.rkt")
 
-(provide print-function print-function->string print-type print-expr print-declarator print-lowered-function)
+(provide print-function print-function->string print-type print-expr print-declarator print-lowered-function
+         print-cfg-function print-cond-rhs)
 
 ;; ------------------------------------------------------------
 ;; Types (dump_generic_node on types, no flags)
@@ -94,9 +96,16 @@
     [nm nm]                                  ; artificial but named (iftmp.0, retval.1 ...)
     [else (format "D.~a" (decl-uid d))]))
 
+;; LABEL_DECL: name, else <L%d> once the CFG assigned LABEL_DECL_UID, else <D.%u>
 (define (label-name l)
   (define nm (decl-name l))
-  (if (and nm (not (decl-artificial l))) (format "<~a>" nm) (format "<D.~a>" (decl-uid l))))
+  (cond
+    [(and nm (not (decl-artificial l))) (format "<~a>" nm)]
+    [(attr l 'label-uid #f) => (lambda (u) (format "<L~a>" u))]
+    [else (format "<D.~a>" (decl-uid l))]))
+
+;; dump_gimple_switch appends the edge probability ("[INV]") once a CFG exists
+(define print-cfg-mode (make-parameter #f))
 
 (define (ssa-print-name s)
   (define id (attr s 'identifier #f))
@@ -289,10 +298,15 @@
 
 (define (print-case c)
   (define lo (case-low c)) (define hi (case-high c))
+  (define lab (string-append (label-name (case-label c)) (if (print-cfg-mode) " [INV]" "")))
   (cond
-    [(not lo) (format "default: ~a" (label-name (case-label c)))]
-    [hi (format "case ~a ... ~a: ~a" (print-expr lo) (print-expr hi) (label-name (case-label c)))]
-    [else (format "case ~a: ~a" (print-expr lo) (label-name (case-label c)))]))
+    [(not lo) (format "default: ~a" lab)]
+    [hi (format "case ~a ... ~a: ~a" (print-expr lo) (print-expr hi) lab)]
+    [else (format "case ~a: ~a" (print-expr lo) lab)]))
+
+;; print_gimple_expr (TDF_RHS_ONLY) of a GIMPLE_COND
+(define (print-cond-rhs g)
+  (format "~a ~a ~a" (print-expr (gcond-lhs g)) (hash-ref binary-op (gcond-code g) "?") (print-expr (gcond-rhs g))))
 
 (define (print-stmt g indent out)
   (define pad (make-string indent #\space))
@@ -309,7 +323,8 @@
               (print-expr (if (eq? (tree-code fn) 'addr_expr) (tree-operand fn 0) fn))
               (string-join (for/list ([a (in-pvector args)]) (print-expr a)) ", "))]
     [(gcond _ _ code l r t f)
-     (fprintf out "~aif (~a ~a ~a) goto ~a; else goto ~a;\n" pad (print-expr l) (hash-ref binary-op code "?") (print-expr r) (label-name t) (label-name f))]
+     (fprintf out "~aif (~a)~a\n" pad (print-cond-rhs g)
+              (if (or t f) (format " goto ~a; else goto ~a;" (label-name t) (label-name f)) ""))]
     [(glabel _ _ l) (fprintf out "~a~a:\n" pad (label-name l))]
     [(ggoto _ _ l) (fprintf out "~agoto ~a;\n" pad (label-name l))]
     [(greturn _ _ v) (fprintf out "~areturn~a;\n" pad (if v (string-append " " (print-expr v)) ""))]
@@ -352,3 +367,40 @@
   (define o (open-output-string))
   (print-function fndecl bind o)
   (get-output-string o))
+
+;; ------------------------------------------------------------
+;; .cfg dump: pass messages, ";; N succs { ... }" lines (flow_loops_cfg_dump),
+;; then dump_function_to_file with dump_bb per block.  The loop tree lines
+;; (";; N loops found" ...) are not produced; the test drops ";;" lines
+;; other than the succs lines.
+;; ------------------------------------------------------------
+(define (print-cfg-function fndecl local-decls cfg out)
+  (for ([m (in-pvector (gcfg-messages cfg))]) (fprintf out "~a\n" m))
+  (for-each-bb cfg
+    (lambda (b)
+      (fprintf out ";; ~a succs {~a }\n" (bb-index b)
+               (apply string-append (for/list ([e (in-pvector (bb-succs b))]) (format " ~a" (bb-index (edge-dest e))))))))
+  (define ftype (tree-type fndecl))
+  (define params (decl-arguments fndecl))
+  (fprintf out "~a ~a (~a)\n{\n" (print-type (tree-type ftype)) (decl-name fndecl)
+           (string-join (for/list ([p (in-pvector params)]) (print-declarator (tree-type p) (decl-print-name p))) ", "))
+  (for ([v (in-pvector (pvector-reverse local-decls))])
+    (fprintf out "  ~a;\n" (print-declarator (tree-type v) (decl-print-name v))))
+  (unless (pvector-empty? local-decls) (fprintf out "\n"))
+  (parameterize ([print-cfg-mode #t])
+    (for-each-bb cfg
+      (lambda (b)
+        (fprintf out "  <bb ~a> :\n" (bb-index b))
+        (for ([g (in-pvector (bb-stmts b))]) (print-stmt g (if (glabel? g) 0 2) out))
+        ;; dump_implicit_edges
+        (define last (bb-last-stmt b))
+        (cond
+          [(and (gcond? last) (= 2 (pvector-length (bb-succs b))))
+           (define-values (t f) (extract-true-false-edges b))
+           (fprintf out "    goto <bb ~a>; [INV]\n  else\n    goto <bb ~a>; [INV]\n" (bb-index (edge-dest t)) (bb-index (edge-dest f)))]
+          [else
+           (define e (find-fallthru-edge b))
+           (when (and e (not (eq? (edge-dest e) (bb-next b))))
+             (fprintf out "  goto <bb ~a>; [INV]\n" (bb-index (edge-dest e))))])
+        (fprintf out "\n"))))
+  (fprintf out "}\n\n\n"))
