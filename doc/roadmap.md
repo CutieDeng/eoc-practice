@@ -268,7 +268,7 @@ GCC 侧四段链路及对应的 Racket 模块（放 `src/component/gccast/`）�
 | 3a | GENERIC → GIMPLE 与 GCC 对齐（6.3） | 完成（2026-11-05）：`src/component/gccast/{generic/tree.rkt, generic/import.rkt, generic/gimple.rkt, transform/genericize.rkt, transform/gimplify.rkt, transform/gimple-print.rkt}`；`gimplify-test.rkt` 对 basic.c / calls.c / struct.c / locals.c × gcc 12.5.0 / 15.2.0 的 `.gimple` 规范化 diff 为空（8 项） |
 | 3b-1 | `gimple-low.rkt`（pass_lower_cf）：拍平 bind、按 retval 合并 return（-O0 下带位置的 return label 置为非 artificial）、删不可达 return、补尾部 `return;`、透传 `gtry` | 完成（2026-11-06）：`lower-test.rkt` 对 4 夹具 × 2 版本的 `.lower` 规范化 diff 为空（8 项） |
 | 3b-2 | `gimple-to-cfg.rkt`：make_blocks/cleanup_dead_labels×2/group_case_labels/make_edges/assign_discriminators，再复现 -O0 的 `cleanup_tree_cfg`（常量条件折叠、不可达块、forwarder、合并、2 标签 switch → cond）对齐 `.cfg` | 完成（2026-11-06）：`cfg-test.rkt` 对 basic.c / calls.c / struct.c × 2 版本的 `.cfg` 规范化 diff 为空（6 项，含 `;; N succs` 边序与 `Removing`/`Merging` 消息）；locals.c 需先有 pass_lower_eh；规格见 `doc/gimple-lower-cfg-spec.md` |
-| 3c | GIMPLE-CFG → kernel `Cfg`（`CfgBlock`/`VfInsn`/`Term:*`，类型表入 `Cfg-info`），接 `ssa-construct`/`cfg-to-rvsdg` | 待做 |
+| 3c | （已被决策 13 取代）不再转 kernel `Cfg`；改为持久化 GIMPLE 表示 + 泛化 SSA / cfg-to-rvsdg，阶段 S1–S6 见 `doc/gimple-functional-ir.md` 第 7 节 | 进行中（S1 起） |
 | 4 | 指针、结构体、数组、调用 + 内存状态边 | 待做 |
 
 实现备注（3a，gimplify 对齐过程中确认的 GCC 行为）：
@@ -321,3 +321,4 @@ Phase 0 之前不能跑任何测试，是唯一的硬前置。Phase 1 #3（支�
 10. 内存状态边：AST 无虚拟操作数；在 lowering 之后线程化内存状态，再由 cfg-to-rvsdg 建状态边。Java 链路目前也没有内存状态边（已验证 `cfg-to-rvsdg.rkt` 无 state 处理，仅有 `current-exn-out`），该工作对两个前端共用。
 11. **GCC 插件源码由 Racket 生成器按版本生成**（细节见 6.1），本机以 gcc-15 为主、gcc@12 作第二版本做兼容验证。
 12. **GENERIC → GIMPLE 降级按 GCC trunk 算法逐函数改写**（6.3），用 gcc-15 的 `-fdump-tree-*` 作对齐基准；在 `alpha` 分支开发。
+13. **GIMPLE 层改为持久化数据 + 纯函数式状态线程，并泛化 SSA / CFG→RVSDG 算法**（2026-11-06，设计见 `doc/gimple-functional-ir.md`）。可变的 `src/component/gccast/` 是移植期权宜，按阶段 S1–S6 替换为 `src/kernel/ir/gimple/` + `src/component/gimple/`，每阶段以现有 dump 对齐测试验收。用户在"持久化值 + 命令式算法"与"纯函数式状态线程"两案中选了后者。
