@@ -315,7 +315,15 @@ early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 →
 | pass | 状态 |
 |---|---|
 | ccp1 | 完成（2026-11-06）：`opt/propagate.rkt`（ssa_propagation_engine）、`opt/ccp.rkt`（bit-level 格、evaluate_stmt、substitute_and_fold、simple_dce_from_worklist、TODO_cleanup_cfg）、`opt/fold.rkt`（常量折叠子集）、`opt/ssa-ops.rkt`；4 夹具 × 2 版本逐函数对齐 |
-| forwprop1 | 待做（下一个） |
+| forwprop1 | 完成（2026-11-06）：`opt/mfn.rkt`（函数的可变工作副本：语句单元链、SSA def/立即使用表）、`opt/simplify.rkt`（fold_stmt_1 + match.pd 子集）、`opt/forwprop.rkt`；4 夹具 × 2 版本逐函数对齐 |
+| ethread | 待做（下一个） |
+
+forwprop1 移植记录：
+
+- pass 内部用 `mfn`（gcfg→mfn→gcfg）：GCC 的 gsi 游标 + immediate-use 风格算法直接移植；GCfg 仍是 pass 之间的格式，CFG 结构（块/边）不经 mfn 改动。
+- 版本分叉：gcc ≥ 13 才有 EDGE_EXECUTABLE 可达性跳块与 `find_taken_edge` 标边；gcc ≥ 14 才有 `simple_dce_from_worklist` 与 `to_remove_defs`（之前只删排队语句）。
+- 夹具触发的效果：拷贝格传播（`n.0_16 = n_24` 等）、`fold_stmt` 的交换律操作数规范化（`r_13 + _7` → `_7 + r_13`，依 `tree_swap_operands_p` 的 SSA 版本号）、`p+ 4` 传入解引用（`*_9` → `MEM[(int *)p_18(D) + 4B]`，`forward_propagate_addr_expr`）、match.pd 两条规则串联 `-(A + 1)` → `-1 - A` → `~A`。
+- match.pd 只移植了 simplify.rkt 头部列出的规则；结果需要多于一条语句的规则不应用。`combine_cond_expr_cond` 只覆盖常量、比较结果与 0/1 的比较、布尔转换与常量的比较。未移植：复数/向量/CONSTRUCTOR 改写、聚合拷贝/清零传播与 DSE、builtin 调用简化、rotate/ctz/长乘法识别、`__builtin_unreachable`、`get_addr_base_and_unit_offset` 的 valueize 变体。
 
 ccp1 移植记录：
 

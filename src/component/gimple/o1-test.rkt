@@ -12,10 +12,10 @@
          "../../frontend/gccast/reader.rkt"
          (only-in "gimplify-test.rkt" normalize-gimple-text first-diff)
          "state.rkt" "import.rkt" "genericize.rkt" "gimplify.rkt" "lower.rkt" "cfg.rkt" "ssa.rkt" "print.rkt"
-         "opt/ccp.rkt")
+         "opt/ccp.rkt" "opt/forwprop.rkt")
 
 ;; the -O1 passes ported so far, in GCC's pass order (doc/roadmap.md 7.1)
-(define stages '(gimple lower cfg ssa ccp1))
+(define stages '(gimple lower cfg ssa ccp1 forwprop1))
 
 (provide split-functions o1-stage-texts)
 
@@ -57,7 +57,9 @@
     (print-ssa-function st6 decl locals-ssa cfg* (hash-ref outs 'ssa))
     (define-values (cfg-ccp st7) (ccp st6 decl cfg*))
     (print-ssa-function st7 decl locals-ssa cfg-ccp (hash-ref outs 'ccp1))
-    st7)
+    (define-values (cfg-fw st8) (forwprop st7 decl cfg-ccp))
+    (print-ssa-function st8 decl locals-ssa cfg-fw (hash-ref outs 'forwprop1))
+    st8)
   (for/hash ([(k o) (in-hash outs)]) (values k (get-output-string o))))
 
 (module+ test
