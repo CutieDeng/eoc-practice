@@ -35,7 +35,7 @@
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c" "locals.c")])
+         [name '("basic.c" "calls.c" "struct.c" "locals.c" "ccp.c")])
     (test-case (format "~a ~a: lower dump aligns with GCC (pure pipeline)" name ver)
       (define tu (read-gccast-file (build-path fixtures (format "~a.~a.dat" name ver))))
       (define-values (text st) (lower-tu tu))

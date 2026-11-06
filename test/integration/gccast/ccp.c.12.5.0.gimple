@@ -1,0 +1,90 @@
+int k1 (int a)
+{
+  int D.3637;
+  int x;
+  int y;
+
+  x = 3;
+  y = x + 4;
+  if (y > 5) goto <D.3635>; else goto <D.3636>;
+  <D.3635>:
+  D.3637 = a + y;
+  // predicted unlikely by early return (on trees) predictor.
+  return D.3637;
+  <D.3636>:
+  D.3637 = a - y;
+  return D.3637;
+}
+
+
+int k2 (int n)
+{
+  int D.3639;
+  int s;
+
+  s = 0;
+  {
+    int i;
+
+    i = 0;
+    goto <D.3619>;
+    <D.3618>:
+    s = s + 2;
+    i = i + 1;
+    <D.3619>:
+    if (i < n) goto <D.3618>; else goto <D.3616>;
+    <D.3616>:
+  }
+  D.3639 = s;
+  return D.3639;
+}
+
+
+int k3 (int a)
+{
+  int D.3641;
+  int b;
+  int c;
+
+  b = a;
+  c = b;
+  D.3641 = c;
+  return D.3641;
+}
+
+
+int k4 (unsigned int a)
+{
+  int D.3645;
+  unsigned int m;
+
+  m = a & 6;
+  _1 = m & 1;
+  if (_1 != 0) goto <D.3643>; else goto <D.3644>;
+  <D.3643>:
+  D.3645 = ext (1);
+  // predicted unlikely by early return (on trees) predictor.
+  return D.3645;
+  <D.3644>:
+  D.3645 = ext (2);
+  return D.3645;
+}
+
+
+int k5 (int a, int b)
+{
+  int D.3650;
+  int r;
+
+  if (a > b) goto <D.3647>; else goto <D.3648>;
+  <D.3647>:
+  r = 10;
+  goto <D.3649>;
+  <D.3648>:
+  r = 10;
+  <D.3649>:
+  D.3650 = r + a;
+  return D.3650;
+}
+
+

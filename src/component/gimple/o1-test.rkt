@@ -2,7 +2,7 @@
 
 ;; -O1 alignment: the plugin's -O1 GENERIC (<name>.<ver>.O1.dat) through the
 ;; same chain with GS-optimize = 1 must reproduce GCC's -O1 dumps of
-;; gimplify / lower / cfg / ssa.  Functions are compared one by one (GCC
+;; gimplify / lower / cfg / ssa and then of every ported -O1 pass.  Functions are compared one by one (GCC
 ;; orders them by call-graph position when optimizing), each renumbered.
 
 (require rackunit racket/runtime-path racket/string racket/file racket/list
@@ -11,7 +11,11 @@
          "../../kernel/ir/gccast/types.rkt"
          "../../frontend/gccast/reader.rkt"
          (only-in "gimplify-test.rkt" normalize-gimple-text first-diff)
-         "state.rkt" "import.rkt" "genericize.rkt" "gimplify.rkt" "lower.rkt" "cfg.rkt" "ssa.rkt" "print.rkt")
+         "state.rkt" "import.rkt" "genericize.rkt" "gimplify.rkt" "lower.rkt" "cfg.rkt" "ssa.rkt" "print.rkt"
+         "opt/ccp.rkt")
+
+;; the -O1 passes ported so far, in GCC's pass order (doc/roadmap.md 7.1)
+(define stages '(gimple lower cfg ssa ccp1))
 
 (provide split-functions o1-stage-texts)
 
@@ -37,7 +41,7 @@
 
 ;; per-stage dump texts of a TU: hash stage -> text
 (define (o1-stage-texts tu)
-  (define outs (for/hash ([s '(gimple lower cfg ssa)]) (values s (open-output-string))))
+  (define outs (for/hash ([s stages]) (values s (open-output-string))))
   (for/fold ([st (import-tu tu #:optimize 1)]) ([fn (in-list (TU-fns tu))])
     (define-values (decl body st1) (import-fn st fn))
     (define-values (body* st2) (c-genericize st1 decl body))
@@ -48,16 +52,20 @@
     (define-values (cfg st5) (build-cfg st4 decl lowered #:cond->string print-cond-rhs))
     (print-cfg-function st5 decl locals cfg (hash-ref outs 'cfg))
     (define-values (cfg* st6) (build-ssa st5 decl cfg))
-    (print-ssa-function st6 decl (remove-unused-locals st6 cfg* locals) cfg* (hash-ref outs 'ssa))
-    st6)
+    ;; TODO_remove_unused_locals runs with pass_build_ssa; the optimizers keep the list
+    (define locals-ssa (remove-unused-locals st6 cfg* locals))
+    (print-ssa-function st6 decl locals-ssa cfg* (hash-ref outs 'ssa))
+    (define-values (cfg-ccp st7) (ccp st6 decl cfg*))
+    (print-ssa-function st7 decl locals-ssa cfg-ccp (hash-ref outs 'ccp1))
+    st7)
   (for/hash ([(k o) (in-hash outs)]) (values k (get-output-string o))))
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c")])
+         [name '("basic.c" "calls.c" "struct.c" "ccp.c")])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))
     (define texts (o1-stage-texts tu))
-    (for ([stage '(gimple lower cfg ssa)])
+    (for ([stage stages])
       (test-case (format "~a ~a -O1: ~a dump aligns with GCC" name ver stage)
         (define ours (split-functions (hash-ref texts stage)))
         (define gcc (split-functions (file->string (build-path fixtures (format "~a.~a.O1.~a" name ver stage)))))

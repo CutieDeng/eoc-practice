@@ -1,0 +1,92 @@
+
+;; Function k1 (null)
+;; enabled by -tree-original
+
+
+{
+  int x = 3;
+  int y = x + 4;
+
+    int x = 3;
+    int y = x + 4;
+  if (y > 5)
+    {
+      return a + y;
+    }
+  return a - y;
+}
+
+
+;; Function k2 (null)
+;; enabled by -tree-original
+
+
+{
+  int s = 0;
+
+    int s = 0;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.3619>;
+    <D.3618>:;
+    s = s + 2;
+    i++ ;
+    <D.3619>:;
+    if (i < n) goto <D.3618>; else goto <D.3616>;
+    <D.3616>:;
+  }
+  return s;
+}
+
+
+;; Function k3 (null)
+;; enabled by -tree-original
+
+
+{
+  int b = a;
+  int c = b;
+
+    int b = a;
+    int c = b;
+  return c;
+}
+
+
+;; Function k4 (null)
+;; enabled by -tree-original
+
+
+{
+  unsigned int m = a & 6;
+
+    unsigned int m = a & 6;
+  if ((m & 1) != 0)
+    {
+      return ext (1);
+    }
+  return ext (2);
+}
+
+
+;; Function k5 (null)
+;; enabled by -tree-original
+
+
+{
+  int r;
+
+    int r;
+  if (a > b)
+    {
+      r = 10;
+    }
+  else
+    {
+      r = 10;
+    }
+  return r + a;
+}
+

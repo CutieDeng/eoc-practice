@@ -1,0 +1,130 @@
+
+;; Function k1 (k1, funcdef_no=0, decl_uid=4464, cgraph_uid=1, symbol_order=0)
+
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+int k1 (int a)
+{
+  int y;
+  int x;
+  int _6;
+
+  <bb 2> :
+  _6 = a_4(D) + 7;
+  // predicted unlikely by early return (on trees) predictor.
+  return _6;
+
+}
+
+
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=4469, cgraph_uid=2, symbol_order=1)
+
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+int k2 (int n)
+{
+  int i;
+  int s;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  s_8 = s_1 + 2;
+  i_9 = i_2 + 1;
+
+  <bb 4> :
+  # s_1 = PHI <0(2), s_8(3)>
+  # i_2 = PHI <0(2), i_9(3)>
+  if (i_2 < n_5(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  return s_1;
+
+}
+
+
+
+;; Function k3 (k3, funcdef_no=2, decl_uid=4478, cgraph_uid=3, symbol_order=2)
+
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+int k3 (int a)
+{
+  int c;
+  int b;
+
+  <bb 2> :
+  return a_1(D);
+
+}
+
+
+
+;; Function k4 (k4, funcdef_no=3, decl_uid=4483, cgraph_uid=4, symbol_order=3)
+
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+int k4 (unsigned int a)
+{
+  unsigned int m;
+  int _8;
+
+  <bb 2> :
+  _8 = ext (2);
+  return _8;
+
+}
+
+
+
+;; Function k5 (k5, funcdef_no=4, decl_uid=4488, cgraph_uid=5, symbol_order=4)
+
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+int k5 (int a, int b)
+{
+  int r;
+  int _6;
+
+  <bb 2> :
+  _6 = a_2(D) + 10;
+  return _6;
+
+}
+
+

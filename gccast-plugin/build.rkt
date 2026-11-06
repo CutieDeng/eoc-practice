@@ -99,8 +99,14 @@
                 (string-append "-fdump-tree-gimple=" (path->string (build-path out (string-append name ".gimple"))))
                 (string-append "-fdump-tree-lower=" (path->string (build-path out (string-append name ".lower"))))
                 (string-append "-fdump-tree-cfg=" (path->string (build-path out (string-append name ".cfg"))))
-                (string-append "-fdump-tree-ssa=" (path->string (build-path out (string-append name ".ssa"))))
                 (string-append "-fdump-tree-ssa-vops=" (path->string (build-path out (string-append name ".ssavops"))))
+                "-c" name "-o" (if (eq? (system-type 'os) 'windows) "NUL" "/dev/null")))
+      ;; one dump file per pass: -fdump-tree-ssa= and -fdump-tree-ssa-vops=
+      ;; in one invocation keep only the last file name, so the plain .ssa
+      ;; dump is a separate run
+      (parameterize ([current-directory (rel "tests")])
+        (run/ok (if cxx? gxx gcc) "-O0"
+                (string-append "-fdump-tree-ssa=" (path->string (build-path out (string-append name ".ssa"))))
                 "-c" name "-o" (if (eq? (system-type 'os) 'windows) "NUL" "/dev/null")))
       ;; -O1: the plugin again (the front end folds differently when
       ;; optimizing) plus every pass dump; the optimizer passes are the

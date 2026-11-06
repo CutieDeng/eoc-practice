@@ -38,7 +38,7 @@
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c")]
+         [name '("basic.c" "calls.c" "struct.c" "ccp.c")]
          [oracle '("ssa" "ssavops")])
     (test-case (format "~a ~a: ~a dump aligns with GCC" name ver oracle)
       (define tu (read-gccast-file (build-path fixtures (format "~a.~a.dat" name ver))))

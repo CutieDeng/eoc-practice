@@ -307,7 +307,8 @@
 
 (define (build-ssa st fndecl cfg)
   (let/st st ([vop (make-vop (gs-set-fndecl st fndecl))])
-    (define a (ssa-construct gimple-port (ga st cfg vop)))
+    ;; a new pass, a new dump_file: the cfg pass's messages are not repeated
+    (define a (ssa-construct gimple-port (ga st (cfg-clear-messages cfg) vop)))
     (values (ga-cfg a) (ga-st a))))
 
 ;; all SSA names of the function in version order (for the dump's

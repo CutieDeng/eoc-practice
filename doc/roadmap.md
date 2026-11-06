@@ -314,7 +314,15 @@ early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 →
 
 | pass | 状态 |
 |---|---|
-| ccp1 | 待做（下一个） |
+| ccp1 | 完成（2026-11-06）：`opt/propagate.rkt`（ssa_propagation_engine）、`opt/ccp.rkt`（bit-level 格、evaluate_stmt、substitute_and_fold、simple_dce_from_worklist、TODO_cleanup_cfg）、`opt/fold.rkt`（常量折叠子集）、`opt/ssa-ops.rkt`；4 夹具 × 2 版本逐函数对齐 |
+| forwprop1 | 待做（下一个） |
+
+ccp1 移植记录：
+
+- 引擎按 trunk 实现，三处按 GCC 版本分叉：gcc ≤ 12 用双工作表（`cfg_blocks_back`/`ssa_edge_worklist_back`，r13-5077 去掉）；gcc ≥ 13 的 `set_lattice_value` 对"常量 → 拷贝"不做 meet（r13-3875 "Restore CCP copy propagation"，这决定 `_5 = s_1; return _5;` 是否被折成 `return s_1;`）；gcc ≥ 14 的 finalize 用 `simple_dce_from_worklist`（r14-402），之前只删排队的语句。
+- 拷贝传播来源：VARYING 的 SSA 操作数以"值 = 该 SSA 名、mask = -1 的 CONSTANT"进入格（`get_value_for_expr`、`evaluate_stmt` 末尾），finalize 时 `get_constant_value` 把它当作可替换值。
+- cfg.rkt 为 SSA 之后的 cleanup 补了两处：`remove_edge` 同步删 PHI 实参（与 preds 一样 unordered_remove），`merge_blocks` 把 B 的单实参 PHI 用 `replace_uses_by` 传播掉。forwarder 删除在 dest 有 PHI 时的实参复制仍未做。
+- 未移植：`evaluate_stmt` 的 builtin 分支（malloc/alloca/assume_aligned/bswap）、nonzero-bits/range info、ipa-cp 参数位、`&DECL` 以外的指针对齐（且 dump 无 DECL_ALIGN，用对象 TYPE_ALIGN 代替，与 GCC 的局部变量对齐提升有差）、`fold_stmt` 的 `follow_single_use_edges` 与 match.pd 恒等式、`fold_const_aggregate_ref`。插件未导出 `DECL_BUILT_IN_CLASS`，builtin 判定按 `__builtin_` 前缀。
 
 ## 6. 执行顺序与依赖
 

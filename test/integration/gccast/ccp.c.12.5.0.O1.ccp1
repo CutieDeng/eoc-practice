@@ -1,0 +1,104 @@
+
+;; Function k1 (k1, funcdef_no=0, decl_uid=3607, cgraph_uid=1, symbol_order=0)
+
+Folding predicate 1 != 0 to 1
+Removing basic block 4
+Merging blocks 2 and 3
+Merging blocks 2 and 5
+int k1 (int a)
+{
+  int y;
+  int x;
+  int _6;
+
+  <bb 2> :
+  _6 = a_4(D) + 7;
+  // predicted unlikely by early return (on trees) predictor.
+  return _6;
+
+}
+
+
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=3612, cgraph_uid=2, symbol_order=1)
+
+int k2 (int n)
+{
+  int i;
+  int s;
+  int _6;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  s_8 = s_1 + 2;
+  i_9 = i_2 + 1;
+
+  <bb 4> :
+  # s_1 = PHI <0(2), s_8(3)>
+  # i_2 = PHI <0(2), i_9(3)>
+  if (i_2 < n_5(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  _6 = s_1;
+  return _6;
+
+}
+
+
+
+;; Function k3 (k3, funcdef_no=2, decl_uid=3621, cgraph_uid=3, symbol_order=2)
+
+int k3 (int a)
+{
+  int c;
+  int b;
+
+  <bb 2> :
+  return a_1(D);
+
+}
+
+
+
+;; Function k4 (k4, funcdef_no=3, decl_uid=3626, cgraph_uid=4, symbol_order=3)
+
+Folding predicate 0 != 0 to 0
+Removing basic block 3
+Merging blocks 2 and 4
+Merging blocks 2 and 5
+int k4 (unsigned int a)
+{
+  unsigned int m;
+  int _8;
+
+  <bb 2> :
+  m_5 = a_4(D) & 6;
+  _8 = ext (2);
+  return _8;
+
+}
+
+
+
+;; Function k5 (k5, funcdef_no=4, decl_uid=3631, cgraph_uid=5, symbol_order=4)
+
+Removing basic block 3
+Removing basic block 4
+Merging blocks 2 and 5
+int k5 (int a, int b)
+{
+  int r;
+  int _6;
+
+  <bb 2> :
+  _6 = a_2(D) + 10;
+  return _6;
+
+}
+
+

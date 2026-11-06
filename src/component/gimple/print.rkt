@@ -423,6 +423,7 @@
 ;; .ssa dump (dump_function_to_file with PROP_ssa): local decls, then the
 ;; SSA names without a named variable as "type name;", in version order
 (define (print-ssa-function st fndecl local-decls cfg out)
+  (for ([m (in-pvector (GCfg-messages cfg))]) (fprintf out "~a\n" m))
   (print-header st fndecl out)
   (fprintf out "{\n")
   (for ([v (in-pvector (pvector-reverse local-decls))])

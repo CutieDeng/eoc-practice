@@ -1,0 +1,112 @@
+
+;; Function k1 (k1, funcdef_no=0, decl_uid=4464, cgraph_uid=1, symbol_order=0)
+
+int k1 (int a)
+{
+  int y;
+  int x;
+  int D.4494;
+
+  x = 3;
+  y = x + 4;
+  if (y > 5) goto <D.4492>; else goto <D.4493>;
+  <D.4492>:
+  D.4494 = a + y;
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.4495>;
+  <D.4493>:
+  D.4494 = a - y;
+  goto <D.4495>;
+  <D.4495>:
+  return D.4494;
+}
+
+
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=4469, cgraph_uid=2, symbol_order=1)
+
+int k2 (int n)
+{
+  int i;
+  int s;
+  int D.4496;
+
+  s = 0;
+  i = 0;
+  goto <D.4476>;
+  <D.4475>:
+  s = s + 2;
+  i = i + 1;
+  <D.4476>:
+  if (i < n) goto <D.4475>; else goto <D.4473>;
+  <D.4473>:
+  D.4496 = s;
+  goto <D.4497>;
+  <D.4497>:
+  return D.4496;
+}
+
+
+
+;; Function k3 (k3, funcdef_no=2, decl_uid=4478, cgraph_uid=3, symbol_order=2)
+
+int k3 (int a)
+{
+  int c;
+  int b;
+  int D.4498;
+
+  b = a;
+  c = b;
+  D.4498 = c;
+  goto <D.4499>;
+  <D.4499>:
+  return D.4498;
+}
+
+
+
+;; Function k4 (k4, funcdef_no=3, decl_uid=4483, cgraph_uid=4, symbol_order=3)
+
+int k4 (unsigned int a)
+{
+  unsigned int m;
+  int D.4502;
+
+  m = a & 6;
+  _1 = m & 1;
+  if (_1 != 0) goto <D.4500>; else goto <D.4501>;
+  <D.4500>:
+  D.4502 = ext (1);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.4503>;
+  <D.4501>:
+  D.4502 = ext (2);
+  goto <D.4503>;
+  <D.4503>:
+  return D.4502;
+}
+
+
+
+;; Function k5 (k5, funcdef_no=4, decl_uid=4488, cgraph_uid=5, symbol_order=4)
+
+int k5 (int a, int b)
+{
+  int r;
+  int D.4507;
+
+  if (a > b) goto <D.4504>; else goto <D.4505>;
+  <D.4504>:
+  r = 10;
+  goto <D.4506>;
+  <D.4505>:
+  r = 10;
+  <D.4506>:
+  D.4507 = r + a;
+  goto <D.4508>;
+  <D.4508>:
+  return D.4507;
+}
+
+
