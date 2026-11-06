@@ -31,7 +31,7 @@
 (provide gcfg->mfn mfn->gcfg mfn-cfg
          mfn-stmt mfn-bb mfn-phi? mfn-phis mfn-stmts mfn-first mfn-last mfn-next mfn-prev
          mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
-         mfn-replace! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name!
+         mfn-replace! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
          stmt-use-names stmt-def-names)
 
 (struct cell (stmt prev next bb) #:mutable)
@@ -160,3 +160,18 @@
 (define (mfn-insert-after! m id g)
   (define c (cell-of m id))
   (link-new! m g (cell-bb c) id (cell-next c)))
+
+;; unlink_stmt_vdef: the uses of the statement's vdef become uses of its vuse
+(define (mfn-unlink-vdef! m id)
+  (define g (mfn-stmt m id))
+  (define vdef (and (not (gphi? g)) (stmt-vdef g)))
+  (define vuse (and (not (gphi? g)) (stmt-vuse g)))
+  (when (and vdef vuse)
+    (define (f t) (if (and (ssa-name? t) (ssa-name=? t vdef)) vuse t))
+    (for ([uid (in-list (mfn-use-ids m vdef))])
+      (define ug (mfn-stmt m uid))
+      (mfn-replace! m uid
+                    (cond
+                      [(gphi? ug) (phi-set-args ug (for/pvector ([a (in-pvector (gphi-args ug))]) (cons (car a) (f (cdr a)))))]
+                      [(stmt-vuse ug) (stmt-set-flag ug 'vuse (f (stmt-vuse ug)))]
+                      [else ug])))))

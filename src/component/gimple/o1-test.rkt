@@ -55,10 +55,11 @@
     (define-values (cfg* st6) (build-ssa st5 decl cfg))
     (define locals-ssa (remove-unused-locals st6 cfg* locals))
     (print-ssa-function st6 decl locals-ssa cfg* (out 'ssa))
-    (for/fold ([cfg cfg*] [st st6] #:result st) ([p (in-list (o1-passes st6))])
-      (define-values (cfg1 st1) ((cdr p) st decl cfg))
-      (print-ssa-function st1 decl locals-ssa cfg1 (out (car p)))
-      (values cfg1 st1)))
+    (for/fold ([cfg cfg*] [st st6] [locals locals-ssa] #:result st) ([p (in-list (o1-passes st6))])
+      (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
+      (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
+      (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
+      (values cfg1 st1 locals1)))
   (for/hash ([(k o) (in-hash outs)]) (values k (get-output-string o))))
 
 ;; the stages compared, in dump order; a stage without a GCC dump file
@@ -72,7 +73,7 @@
          [name '("basic.c" "calls.c" "struct.c" "ccp.c")])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))
     (define texts (o1-stage-texts tu))
-    (define stages (append lowering-stages (map car (o1-passes (import-tu tu #:optimize 1)))))
+    (define stages (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))))
     (for ([stage stages]
           #:unless (stage-excluded? ver stage)
           #:when (file-exists? (build-path fixtures (format "~a.~a.O1.~a" name ver stage))))

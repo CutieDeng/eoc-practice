@@ -321,7 +321,11 @@ early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 →
 | ealias | 未移植 points-to 分析；gcc ≥ 13 的 dump 只有求解器进度行（`opt/passes.rkt` 原样输出）；gcc-12 还 dump 约束与 points-to 集，测试排除 ealias@12.5.0 |
 | phiprop1 | 未移植，夹具无触发（恒等 stage；gcc-12 此处无该 pass） |
 | fre1 | 完成（2026-11-06）：`opt/vn.rkt`（RPO VN 非迭代驱动 + 内联消除）、`opt/alias.rkt`（别名预言机子集：get_ref_base_and_extent、refs_may_alias_p、stmt_may_clobber_ref_p、walk_non_aliased_vuses）；4 夹具 × 2 版本逐函数对齐 |
-| mergephi1 | 待做（下一个） |
+| mergephi1 | 未移植，夹具无触发（恒等 stage） |
+| dse1 | 完成（2026-11-06）：`opt/dse.rkt`（逆 RPO、`dse_classify_store` 的 vdef 使用链游走、死 SSA 定义/死 PHI 删除）；alias.rkt 补 `stmt_kills_ref_p`、`ref_may_alias_global_p`、`walk_aliased_vdefs`。未做字节级部分死存储裁剪、memset/memcpy builtin、冗余零存储 |
+| cddce1 | 完成（2026-11-06）：`opt/dce.rkt`。-O1 下 `pass_cd_dce` 的 aggressive = `optimize >= 2` 为假，即普通 DCE（条件/switch 恒必要，无控制依赖）；gcc ≥ 15 才带 `TODO_remove_unused_locals`（pass 表第三列，测试据此重算局部变量表）。未做 aggressive 模式、malloc/free 配对、atomics |
+| phiopt1 / iftoswitch / sccopy1 | 未移植，夹具无触发（恒等 stage；sccopy 自 gcc-14 起存在） |
+| profile_estimate | 待做（下一个）：dump 带 `[local count: N]` 与边概率，`// predicted` 注释消失 |
 
 fre1 移植记录：
 

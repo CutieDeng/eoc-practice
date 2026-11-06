@@ -43,8 +43,9 @@
 
 (provide (struct-out ao-ref) make-ao-ref ao-ref-of-decl get-ref-base-and-extent
          ranges-maybe-overlap? ranges-known-overlap? known-subrange?
-         refs-may-alias? stmt-may-clobber-ref? ref-maybe-used-by-stmt?
-         walk-non-aliased-vuses may-be-aliased? is-global-var? type-size-bits)
+         refs-may-alias? stmt-may-clobber-ref? ref-maybe-used-by-stmt? stmt-kills-ref? ref-may-alias-global?
+         ref-may-be-aliased? stmt-may-clobber-global?
+         walk-non-aliased-vuses walk-aliased-vdefs may-be-aliased? is-global-var? type-size-bits)
 
 (define (icst? t) (and t (eq? (tree-code t) 'integer_cst)))
 (define (cst-value t) (and (icst? t) (integer-cst-value t)))
@@ -296,6 +297,27 @@
      (and (not (ssa-name? lhs)) (refs-may-alias? st r (make-ao-ref st lhs)))]
     [else #f]))
 
+;; ref_may_alias_global_p: a global declaration, or memory behind a
+;; pointer (no points-to information: may be global)
+(define (ref-may-alias-global? st r)
+  (define base (ao-ref-base r))
+  (cond
+    [(decl-p st base) (is-global-var? base)]
+    [(eq? (tree-code base) 'mem_ref) #t]
+    [else #t]))
+
+;; ref_may_be_aliased (tree-ssa-dce.cc): everything but a non-aliased declaration
+(define (ref-may-be-aliased? st ref)
+  (define b (get-base-address ref))
+  (not (and (decl-p st b) (not (may-be-aliased? st b)))))
+
+;; stmt_may_clobber_global_p
+(define (stmt-may-clobber-global? st g)
+  (cond
+    [(not (stmt-vdef g)) #f]
+    [(gassign? g) (let ([lhs (gassign-lhs g)]) (and (not (ssa-name? lhs)) (ref-may-alias-global? st (make-ao-ref st lhs))))]
+    [else #t]))
+
 ;; ref_maybe_used_by_stmt_p (no modref / fnspec / points-to)
 (define (ref-maybe-used-by-stmt? st g r)
   (define (tree-uses? t)
@@ -303,9 +325,10 @@
          (refs-may-alias? st (make-ao-ref st t) r)))
   (cond
     [(gassign? g)
-     (or (tree-uses? (gassign-rhs1 g)) (tree-uses? (gassign-rhs2 g)) (tree-uses? (gassign-rhs3 g))
-         ;; a store to an aggregate lhs reads the aggregate rhs; a memory lhs is not a use
-         #f)]
+     (and (gassign-single-p st g)
+          (let ([rhs (gassign-rhs1 g)])
+            (and (not (is-gimple-reg st rhs)) (not (is-gimple-min-invariant st rhs)) (not (eq? (tree-code rhs) 'constructor))
+                 (refs-may-alias? st (make-ao-ref st rhs) r))))]
     [(gcall? g)
      (define ecf (gcall-ecf g))
      (cond
@@ -320,8 +343,77 @@
           [else #t])])]
     [(greturn? g)
      (define v (greturn-retval g))
-     (and v (not (ssa-name? v)) (not (is-gimple-min-invariant st v)) (refs-may-alias? st (make-ao-ref st v) r))]
+     (or (and v (not (ssa-name? v)) (not (is-gimple-min-invariant st v)) (refs-may-alias? st (make-ao-ref st v) r))
+         ;; the caller sees global memory after the return
+         (let ([base (ao-ref-base r)])
+           (cond
+             [(not base) #f]
+             [(decl-p st base) (is-global-var? base)]
+             [(eq? (tree-code base) 'mem_ref) #t]
+             [else #f])))]
     [else #f]))
+
+;; store_kills_ref_p (same_addr_size_stores_p needs points-to: not ported)
+(define (store-kills-ref? st base off size max-size r)
+  (define rbase (ao-ref-base r))
+  (define-values (off1 roff size1)
+    (cond
+      [(equal? base rbase) (values off (ao-ref-offset r) size)]
+      [(and (eq? (tree-code base) 'mem_ref) (eq? (tree-code rbase) 'mem_ref)
+            (equal? (tree-operand base 0) (tree-operand rbase 0)))
+       (if (= (mem-ref-offset base) (mem-ref-offset rbase))
+           (values off (ao-ref-offset r) size)
+           (values (+ (* 8 (mem-ref-offset base)) off) (+ (* 8 (mem-ref-offset rbase)) (ao-ref-offset r)) size))]
+      [else (values off (ao-ref-offset r) -1)]))
+  (and (= size1 max-size) (known-subrange? roff (ao-ref-max-size r) off1 size1)))
+
+;; stmt_kills_ref_p: a store that covers REF completely
+(define (stmt-kills-ref? st g r)
+  (define lhs (stmt-get-lhs g))
+  (cond
+    [(not (ao-ref-base r)) #f]
+    [(and lhs (not (ssa-name? lhs)))
+     (or (and (ao-ref-ref r)
+              ;; the same reference, or a component path of it
+              (let loop ([base (ao-ref-ref r)])
+                (cond
+                  [(and (equal? (strip-base lhs) (strip-base base))
+                        (let ([s1 (type-size-bits st (tree-type lhs))] [s2 (type-size-bits st (tree-type base))])
+                          (or (equal? lhs base) (and s1 s2 (= s1 s2) (equal? lhs base)))))
+                   #t]
+                  [(handled-component-p base) (loop (tree-operand base 0))]
+                  [else #f])))
+         (and (>= (ao-ref-max-size r) 0)
+              (let-values ([(base off size max-size) (get-ref-base-and-extent st lhs)])
+                (store-kills-ref? st base off size max-size r))))]
+    [else #f]))
+(define (strip-base t) t)
+
+;; walk_aliased_vdefs: WALKER : vdef -> stop? ; returns the count or -1 (limit)
+(define (walk-aliased-vdefs st m r vdef0 walker limit)
+  (define visited (make-hasheqv))
+  (let walk ([vdef vdef0] [cnt 0])
+    (cond
+      [(hash-ref visited (ssa-name-version vdef) #f) cnt]
+      [else
+       (hash-set! visited (ssa-name-version vdef) #t)
+       (define did (mfn-def m vdef))
+       (define g (and did (mfn-stmt m did)))
+       (cond
+         [(not g) cnt]
+         [(gphi? g)
+          (let loop ([args (map cdr (pvector->list (gphi-args g)))] [cnt cnt])
+            (cond
+              [(null? args) cnt]
+              [else
+               (define res (walk (car args) cnt))
+               (if (= res -1) -1 (loop (cdr args) res))]))]
+         [else
+          (define cnt1 (add1 cnt))
+          (cond
+            [(= cnt1 limit) -1]
+            [(and (or (not r) (stmt-may-clobber-ref? st g r)) (walker vdef)) cnt1]
+            [else (let ([nv (stmt-vuse g)]) (if nv (walk nv cnt1) cnt1))])])])))
 
 ;; ------------------------------------------------------------
 ;; walk_non_aliased_vuses

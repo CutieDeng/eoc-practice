@@ -1131,27 +1131,11 @@
 ;; eliminate_cleanup: remove the queued statements (reverse order)
 ;; ------------------------------------------------------------
 
-;; unlink_stmt_vdef: uses of the vdef become uses of the vuse
-(define (unlink-vdef! v id)
-  (define m (V-m v)) (define st (V-st v))
-  (define g (mfn-stmt m id))
-  (define vdef (stmt-vdef g)) (define vuse (stmt-vuse g))
-  (when (and vdef vuse)
-    (for ([uid (in-list (mfn-use-ids m vdef))])
-      (define ug (mfn-stmt m uid))
-      (define (f t) (if (and (ssa-name? t) (ssa-name=? t vdef)) vuse t))
-      (mfn-replace! m uid
-                    (cond
-                      [(gphi? ug) (phi-set-args ug (for/pvector ([a (in-pvector (gphi-args ug))]) (cons (car a) (f (cdr a)))))]
-                      [else
-                       (let* ([g1 (if (stmt-vuse ug) (stmt-set-flag ug 'vuse (f (stmt-vuse ug))) ug)])
-                         g1)])))))
-
 (define (eliminate-cleanup! v)
   (define m (V-m v))
   (define any? (pair? (V-to-remove v)))
   (for ([id (in-list (V-to-remove v))])          ; newest first = GCC's pop order
-    (unless (gphi? (mfn-stmt m id)) (unlink-vdef! v id))
+    (mfn-unlink-vdef! m id)
     (mfn-remove! m id))
   (when any? (set-V-cfg-changed! v #t)))
 
