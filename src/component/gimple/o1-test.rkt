@@ -12,10 +12,7 @@
          "../../frontend/gccast/reader.rkt"
          (only-in "gimplify-test.rkt" normalize-gimple-text first-diff)
          "state.rkt" "import.rkt" "genericize.rkt" "gimplify.rkt" "lower.rkt" "cfg.rkt" "ssa.rkt" "print.rkt"
-         "opt/ccp.rkt" "opt/forwprop.rkt")
-
-;; the -O1 passes ported so far, in GCC's pass order (doc/roadmap.md 7.1)
-(define stages '(gimple lower cfg ssa ccp1 forwprop1))
+         "opt/passes.rkt")
 
 (provide split-functions o1-stage-texts)
 
@@ -39,35 +36,46 @@
     (define m (regexp-match #px"([A-Za-z_][A-Za-z0-9_]*) \\(" sig))
     (values (cadr m) (normalize-gimple-text (string-join c "\n")))))
 
-;; per-stage dump texts of a TU: hash stage -> text
+;; per-stage dump texts of a TU: hash stage -> text.  The lowering
+;; stages print their own dump format; every optimizer pass prints the
+;; SSA-form dump with the local-decl list TODO_remove_unused_locals left
+;; at pass_build_ssa (the early passes do not prune it).
 (define (o1-stage-texts tu)
-  (define outs (for/hash ([s stages]) (values s (open-output-string))))
+  (define outs (make-hasheq))
+  (define (out s) (hash-ref! outs s open-output-string))
   (for/fold ([st (import-tu tu #:optimize 1)]) ([fn (in-list (TU-fns tu))])
     (define-values (decl body st1) (import-fn st fn))
     (define-values (body* st2) (c-genericize st1 decl body))
     (define-values (bind st3) (gimplify-function st2 decl body*))
-    (print-function st3 decl bind (hash-ref outs 'gimple))
+    (print-function st3 decl bind (out 'gimple))
     (define-values (lowered locals st4) (lower-function st3 decl bind))
-    (print-lowered-function st4 decl locals lowered (hash-ref outs 'lower))
+    (print-lowered-function st4 decl locals lowered (out 'lower))
     (define-values (cfg st5) (build-cfg st4 decl lowered #:cond->string print-cond-rhs))
-    (print-cfg-function st5 decl locals cfg (hash-ref outs 'cfg))
+    (print-cfg-function st5 decl locals cfg (out 'cfg))
     (define-values (cfg* st6) (build-ssa st5 decl cfg))
-    ;; TODO_remove_unused_locals runs with pass_build_ssa; the optimizers keep the list
     (define locals-ssa (remove-unused-locals st6 cfg* locals))
-    (print-ssa-function st6 decl locals-ssa cfg* (hash-ref outs 'ssa))
-    (define-values (cfg-ccp st7) (ccp st6 decl cfg*))
-    (print-ssa-function st7 decl locals-ssa cfg-ccp (hash-ref outs 'ccp1))
-    (define-values (cfg-fw st8) (forwprop st7 decl cfg-ccp))
-    (print-ssa-function st8 decl locals-ssa cfg-fw (hash-ref outs 'forwprop1))
-    st8)
+    (print-ssa-function st6 decl locals-ssa cfg* (out 'ssa))
+    (for/fold ([cfg cfg*] [st st6] #:result st) ([p (in-list (o1-passes st6))])
+      (define-values (cfg1 st1) ((cdr p) st decl cfg))
+      (print-ssa-function st1 decl locals-ssa cfg1 (out (car p)))
+      (values cfg1 st1)))
   (for/hash ([(k o) (in-hash outs)]) (values k (get-output-string o))))
+
+;; the stages compared, in dump order; a stage without a GCC dump file
+;; for that version (a pass GCC does not run there) is skipped
+(define lowering-stages '(gimple lower cfg ssa))
+;; ealias at GCC 12 dumps the points-to constraints and sets, which are not reproduced
+(define (stage-excluded? ver stage) (and (eq? stage 'ealias) (string=? ver "12.5.0")))
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
          [name '("basic.c" "calls.c" "struct.c" "ccp.c")])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))
     (define texts (o1-stage-texts tu))
-    (for ([stage stages])
+    (define stages (append lowering-stages (map car (o1-passes (import-tu tu #:optimize 1)))))
+    (for ([stage stages]
+          #:unless (stage-excluded? ver stage)
+          #:when (file-exists? (build-path fixtures (format "~a.~a.O1.~a" name ver stage))))
       (test-case (format "~a ~a -O1: ~a dump aligns with GCC" name ver stage)
         (define ours (split-functions (hash-ref texts stage)))
         (define gcc (split-functions (file->string (build-path fixtures (format "~a.~a.O1.~a" name ver stage)))))

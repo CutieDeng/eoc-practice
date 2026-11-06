@@ -316,7 +316,11 @@ early（`pass_build_ssa_passes` → `pass_all_early_optimizations`）：ccp1 →
 |---|---|
 | ccp1 | 完成（2026-11-06）：`opt/propagate.rkt`（ssa_propagation_engine）、`opt/ccp.rkt`（bit-level 格、evaluate_stmt、substitute_and_fold、simple_dce_from_worklist、TODO_cleanup_cfg）、`opt/fold.rkt`（常量折叠子集）、`opt/ssa-ops.rkt`；4 夹具 × 2 版本逐函数对齐 |
 | forwprop1 | 完成（2026-11-06）：`opt/mfn.rkt`（函数的可变工作副本：语句单元链、SSA def/立即使用表）、`opt/simplify.rkt`（fold_stmt_1 + match.pd 子集）、`opt/forwprop.rkt`；4 夹具 × 2 版本逐函数对齐 |
-| ethread | 待做（下一个） |
+| ethread | 未移植，夹具无触发（恒等 stage，dump 须与前一 pass 相同，测试检查）。需要 backward threader + path ranger + threadupdate |
+| esra | 未移植，夹具无触发（恒等 stage）。需要寄存器化聚合的夹具 |
+| ealias | 未移植 points-to 分析；gcc ≥ 13 的 dump 只有求解器进度行（`opt/passes.rkt` 原样输出）；gcc-12 还 dump 约束与 points-to 集，测试排除 ealias@12.5.0 |
+| phiprop1 | 未移植，夹具无触发（恒等 stage；gcc-12 此处无该 pass） |
+| fre1 | 待做（下一个）：夹具触发表达式冗余消除（struct.c）与 store→load 转发（calls.c） |
 
 forwprop1 移植记录：
 
