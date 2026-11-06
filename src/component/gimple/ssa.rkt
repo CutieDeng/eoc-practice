@@ -83,8 +83,11 @@
   (define (u t) (subst-reg-uses st t use-f))
   (cond
     [(gassign? g)
-     (gassign (gassign-loc g) (gassign-flags g) (or def-name (u (gassign-lhs g))) (gassign-code g)
-              (u (gassign-rhs1 g)) (u (gassign-rhs2 g)) (u (gassign-rhs3 g)))]
+     (define rhs1 (u (gassign-rhs1 g)))
+     ;; gimple_assign_rhs_code: for a GIMPLE_SINGLE_RHS the code is TREE_CODE (rhs1)
+     (define code (if (eq? (gimple-rhs-class st (gassign-code g)) 'single) (tree-code rhs1) (gassign-code g)))
+     (gassign (gassign-loc g) (gassign-flags g) (or def-name (u (gassign-lhs g))) code
+              rhs1 (u (gassign-rhs2 g)) (u (gassign-rhs3 g)))]
     [(gcall? g)
      (gcall (gcall-loc g) (gcall-flags g) (or def-name (u (gcall-lhs g))) (u (gcall-fn g))
             (for/pvector ([x (in-pvector (gcall-args g))]) (u x)) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g))]

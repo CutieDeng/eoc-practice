@@ -165,7 +165,7 @@ CFG → RVSDG（与 roadmap Phase 3.1 的拆分一起做）：接口 = 访问器
 | S3 | lower.rkt、print（.lower） | 完成（2026-11-06）：`component/gimple/lower-test.rkt` 8/8 |
 | S4 | cfg.rkt、print（.cfg） | 完成（2026-11-06）：`component/gimple/cfg-test.rkt` 6/6 + GCfg datum 往返；`src/component/gccast/` 已删除 |
 | S5 | 泛型 SSA；Java 链路切换，pipeline-test 输出不变；修 roadmap Phase 1 #3 | 完成（2026-11-06）：`driver/ssa/construct.rkt` + 端口 `component/gimple/ssa.rkt`、`component/java/transform/ssa-construct.rkt`；`ssa-test.rkt` 3 夹具 × 2 版本 `.ssa` 对齐 6/6；Java ssa/rvsdg/pipeline 测试不变（48 项） |
-| S6 | cfg-to-rvsdg 泛化（与 Phase 3.1 合并） | 进行中。S6-a 完成（2026-11-06）：算法移到 `component/rvsdg/structurize.rkt`，只经 `component/rvsdg/port.rkt` 的 `rvsdg-port`（entry/blocks/block/info）读 CFG，交换格式为 kernel 的 `CfgBlock`/`PhiInsn`/`VfInsn`/`Term:*`；Java 的 `cfg->rvsdg` 变成薄适配；`test/integration/java-rvsdg-golden.rktd` + `pipeline/java/golden-test.rkt` 逐方法 `equal?` 守护。S6-b：按 Phase 3.1 拆文件；S6-c：GCfg 适配器 + GIMPLE 夹具生成 RVSDG |
+| S6 | cfg-to-rvsdg 泛化（与 Phase 3.1 合并） | 进行中。S6-a 完成（2026-11-06）：算法移到 `component/rvsdg/structurize.rkt`，只经 `component/rvsdg/port.rkt` 的 `rvsdg-port`（entry/blocks/block/info）读 CFG，交换格式为 kernel 的 `CfgBlock`/`PhiInsn`/`VfInsn`/`Term:*`；Java 的 `cfg->rvsdg` 变成薄适配；`test/integration/java-rvsdg-golden.rktd` + `pipeline/java/golden-test.rkt` 逐方法 `equal?` 守护。S6-b 完成：按 Phase 3.1 拆成 `structurize/{ctx,reach,regions,insn,sinks,gamma,theta,kappa}.rkt`；S6-c 完成：`component/gimple/rvsdg.rkt` 把 SSA GCfg 适配为端口视图（语句 → `VfInsn`，内存引用为 `load`/`store` 占位，`gcond` 合成比较指令），`rvsdg-test.rkt` 8 项：basic.c 的 `f` → Gamma、`g` → Theta，calls.c 的 `twice`；`use`（短路梯形）与 struct.c 的 `sum`（循环体内 break）是结构化器本身的缺口，测试以预期错误钉住 |
 
 ## 8. 风险
 

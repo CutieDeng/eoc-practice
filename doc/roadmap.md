@@ -133,6 +133,11 @@ Last Updated: 2026-11-05
 
 进度（2026-11-06）：步骤 1–2 已做——`src/component/rvsdg/structurize/{ctx,reach,regions,insn,sinks,gamma,theta,kappa}.rkt`，主文件 459 行只剩入口与 `translate-segment`，递归经 `ctx.rkt` 的 `current-translate-segment` 注入；golden 逐方法相同。步骤 3（合并 4 份前向可达）、4（拆测试）、5（注释）待做。步骤 0 已做——算法整体移到 `src/component/rvsdg/structurize.rkt`，CFG 访问全部改走 `src/component/rvsdg/port.rkt`（决策 13 的端口模式），Java 侧 `component/java/transform/cfg-to-rvsdg.rkt` 只剩适配；验收基线固化为 `test/integration/java-rvsdg-golden.rktd`（5 个方法的 RVSDG datum），`src/pipeline/java/golden-test.rkt` 逐方法比对。步骤 1–5 待做。
 
+**结构化器的已知缺口（2026-11-06，由 C 夹具暴露，`component/gimple/rvsdg-test.rkt` 以预期错误钉住）**：
+- 短路梯形：`if (a > 0 && b < 10) … else if (a == 0 || !p) …`（calls.c `use`）——else 目标同时从 then 臂内部可达，`pick-phi-source` 在汇合块找不到来自该臂的 φ 来源。
+- 循环体内 `break`（struct.c `sum`）——循环有两个出口在循环后汇合，`translate-segment` 报 unresolved phi。
+javac 对同类源码生成相同形状，只是现有 Java 夹具没覆盖。根治方向是 Bahmann/Reissmann 的分支重构 + 循环重构（引入谓词变量把任意可归约 CFG 变成严格嵌套的 Gamma/Theta），而不是继续给 `translate-segment` 加特判；建议作为 Phase 3 的独立子项。
+
 ### 3.2 `jvm-to-cfg.rkt`（717 行）
 
 `translate-insn`（369-564，29 分支 match）改为 opcode → handler 的分派表；按描述符解析（48-85）/栈模型（315-338）/指令（364-621）/terminator（622-717）拆 4 个文件。

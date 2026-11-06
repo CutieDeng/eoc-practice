@@ -33,7 +33,10 @@ test-gccast:
 	             src/component/gimple/gimplify-test.rkt \
 	             src/component/gimple/lower-test.rkt \
 	             src/component/gimple/cfg-test.rkt \
-	             src/component/gimple/ssa-test.rkt
+	             src/component/gimple/ssa-test.rkt \
+	             src/component/gimple/rvsdg-test.rkt \
+	             src/driver/dominance/dom-test.rkt \
+	             src/pipeline/java/golden-test.rkt
 
 # Build the GCC plugin for the default gcc (override: make gccast-plugin GCC=gcc-15)
 GCC ?= gcc-15

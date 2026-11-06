@@ -22,12 +22,19 @@
 (struct PV (elems) #:prefab)
 (struct IM (entries) #:prefab)
 
+;; map over the values of an immutable hash, keeping its comparison kind
+(define (hash-map/kind h f)
+  (cond
+    [(hash-eq? h) (for/hasheq ([(k x) (in-hash h)]) (values k (f x)))]
+    [(hash-eqv? h) (for/hasheqv ([(k x) (in-hash h)]) (values k (f x)))]
+    [else (for/hash ([(k x) (in-hash h)]) (values k (f x)))]))
+
 (define (value->datum v)
   (cond
     [(pvector? v) (PV (for/list ([x (in-pvector v)]) (value->datum x)))]
     [(intmap? v) (IM (for/list ([p (in-list (intmap->literal-datum v))])
                        (cons (car p) (value->datum (cdr p)))))]
-    [(hash? v) (for/hasheq ([(k x) (in-hash v)]) (values k (value->datum x)))]
+    [(hash? v) (hash-map/kind v value->datum)]
     [(prefab-struct-key v)
      => (lambda (key)
           (apply make-prefab-struct key
@@ -40,7 +47,7 @@
     [(PV? d) (list->pvector (map datum->value (PV-elems d)))]
     [(IM? d) (literal-datum->intmap (for/list ([p (in-list (IM-entries d))])
                                       (cons (car p) (datum->value (cdr p)))))]
-    [(hash? d) (for/hasheq ([(k x) (in-hash d)]) (values k (datum->value x)))]
+    [(hash? d) (hash-map/kind d datum->value)]
     [(prefab-struct-key d)
      => (lambda (key)
           (apply make-prefab-struct key
