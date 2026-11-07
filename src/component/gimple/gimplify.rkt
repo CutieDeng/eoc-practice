@@ -32,7 +32,7 @@
          "tree.rkt"
          "gimple.rkt")
 
-(provide gimplify-function decl-ecf-flags
+(provide gimplify-function
          (struct-out gctx)
          is-gimple-reg is-gimple-val is-gimple-lvalue is-gimple-reg-type
          is-gimple-constant is-gimple-min-invariant get-symbol-constant-value tree-swap-operands-p
@@ -695,14 +695,6 @@
 ;; ------------------------------------------------------------
 ;; gimplify_call_expr (no builtin folding): (values e* ret pre st)
 ;; ------------------------------------------------------------
-;; flags_from_decl_or_type for the bits the local passes discover
-;; (pure/const, looping, noreturn), kept as GS declaration overrides
-(define (decl-ecf-flags st d)
-  (bitwise-ior (if (decl-flag st d 'readonly #f) ECF-CONST 0)
-               (if (decl-flag st d 'pure #f) ECF-PURE 0)
-               (if (decl-flag st d 'looping-const-or-pure #f) ECF-LOOPING 0)
-               (if (decl-flag st d 'noreturn #f) ECF-NORETURN 0)))
-
 ;; call_expr_flags: the front end's bits, plus what later analysis
 ;; recorded on the callee
 (define (call-expr-flags c [st #f])

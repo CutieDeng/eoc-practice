@@ -782,7 +782,7 @@
     [(gcall? g)
      (define lhs (gcall-lhs g))
      (define val (and (ssa-name? lhs) (get-constant-value c lhs)))
-     (define ecf (gcall-ecf g))
+     (define ecf (call-ecf (C-st c) g))
      (cond
        [(and val (not (zero? (bitwise-and ecf (bitwise-ior ECF-CONST ECF-PURE)))) (zero? (bitwise-and ecf ECF-LOOPING)))
         ;; gimplify_and_update_call_from_tree with a gimple value: lhs = val
@@ -870,7 +870,7 @@
       (define lhs (stmt-ssa-lhs g))
       (define sprime (and lhs (get-constant-value c lhs)))
       (cond
-        [(and sprime (not (equal? sprime lhs)) (may-propagate-copy c lhs sprime) (not (stmt-has-side-effects? g)))
+        [(and sprime (not (equal? sprime lhs)) (may-propagate-copy c lhs sprime) (not (stmt-has-side-effects? (C-st c) g)))
          (set! dce (intbits-set dce (ssa-ver lhs)))
          g]
         [else
@@ -949,7 +949,7 @@
          (define n-uses (hash-ref uses i 0))
          (cond
            [(and (> n-uses 0) (or (not phi?) (not (= n-uses (hash-ref self i 0))))) (loop wl1)]
-           [(and (not phi?) (stmt-has-side-effects? t))
+           [(and (not phi?) (stmt-has-side-effects? (C-st c) t))
             (cond
               [(gcall? t)
                (vector-set! (hash-ref stmts bb) k (gcall (gcall-loc t) (gcall-flags t) #f (gcall-fn t) (gcall-args t) (gcall-fntype t) (gcall-internal? t) (gcall-ecf t)))

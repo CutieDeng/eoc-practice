@@ -692,7 +692,7 @@
   (define (call-arg-flags g i)
     (define s (callee-summary st0 (call-fndecl g)))
     (if (and s (msum-arg-flags s) (< i (vector-length (msum-arg-flags s)))) (vector-ref (msum-arg-flags s) i) 0))
-  (define (call-return-flags g) (if (f? (gcall-ecf g) ECF-MALLOC) ERF-NOALIAS 0))
+  (define (call-return-flags g) (if (f? (call-ecf st0 g) ECF-MALLOC) ERF-NOALIAS 0))
   (define (recursive-call? g) (let ([d (call-fndecl g)]) (and d (decl-eq? d fndecl))))
 
   ;; memory_access_to
@@ -821,7 +821,7 @@
            (cond
              [(and callee (recursive-call? g)) (lat-merge! l 0)]
              [else
-              (define ecf (gcall-ecf g))
+              (define ecf (call-ecf st0 g))
               (define ign-st (ignore-stores? ecf))
               (define ign-rv (ignore-retval? ecf))
               (when (and (gcall-lhs g) (memory-access-to? (gcall-lhs g) name))
@@ -1009,7 +1009,7 @@
        (define idx (for/first ([p (in-list params)] [i (in-naturals)] #:when (decl-eq? p (ssa-name-var op))) i))
        (vector (or idx UNKNOWN-PARM) known offset)]
       [(points-to-local-or-readonly? st0 m op) (vector LOCAL-PARM #f 0)]
-      [(and (ssa-name? op) (let ([g (mfn-def-stmt m op)]) (and g (gcall? g) (f? (gcall-ecf g) ECF-MALLOC)))) (vector LOCAL-PARM #f 0)]
+      [(and (ssa-name? op) (let ([g (mfn-def-stmt m op)]) (and g (gcall? g) (f? (call-ecf st0 g) ECF-MALLOC)))) (vector LOCAL-PARM #f 0)]
       [else (vector UNKNOWN-PARM #f 0)]))
 
   (define (get-access r)
@@ -1084,7 +1084,7 @@
       (not (verify-arg arg (bitwise-ior (call-arg-flags g i) implicit) load?))))
 
   (define (process-fnspec! g)
-    (define flags (gcall-ecf g))
+    (define flags (call-ecf st0 g))
     (when (or (not (f? flags (bitwise-ior ECF-CONST ECF-PURE))) (f? flags ECF-LOOPING))
       (set-side-effects!)
       (unless (ignore-nondeterminism? flags) (set-nondeterministic!)))
@@ -1100,7 +1100,7 @@
          (if (not (may-access-nonescaping-parm? g flags #t)) (record-global-memory-load!) (record-unknown-load!))])))
 
   (define (merge-call-side-effects! g callee-sum callee record?)
-    (define flags (gcall-ecf g))
+    (define flags (call-ecf st0 g))
     (let/ec k
       (when (and (f? flags ECF-CONST) (not (f? flags ECF-LOOPING))) (k #f))
       (define changed #f)
@@ -1140,7 +1140,7 @@
       changed))
 
   (define (analyze-call! g bb)
-    (define flags (gcall-ecf g))
+    (define flags (call-ecf st0 g))
     (msg! " - Analyzing call:~a" (stmt->string st0 cfg bb g))
     (let/ec k
       (when (and (f? flags ECF-CONST) (not (f? flags ECF-LOOPING)))

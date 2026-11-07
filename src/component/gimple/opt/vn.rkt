@@ -943,7 +943,7 @@
           [else (defs-to-varying! v g)])])]
     [(gcall? g)
      (define lhs (gcall-lhs g))
-     (define ecf (gcall-ecf g))
+     (define ecf (call-ecf (V-st v) g))
      (cond
        [(or (not (zero? (bitwise-and ecf (bitwise-ior ECF-PURE ECF-CONST)))) (stmt-vdef g))
         (visit-reference-op-call! v (and (ssa-name? lhs) lhs) g)]

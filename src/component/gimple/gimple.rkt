@@ -14,7 +14,7 @@
          "state.rkt"
          "tree.rkt")
 
-(provide stmt-core stmt-stamp phi-arg-stamps restamp stmt-max-stamp
+(provide stmt-core stmt-stamp phi-arg-stamps restamp stmt-max-stamp decl-ecf-flags gcall-fndecl call-ecf
          gimple-build-assign gimple-build-call-from-tree gimple-build-cond gimple-build-label gimple-build-goto
          gimple-build-return gimple-build-switch gimple-build-bind gimple-build-predict gimple-build-try gimple-build-nop
          extract-ops-from-tree gimple-cond-get-ops-from-tree
@@ -78,6 +78,24 @@
 (define (gimple-build-nop) (gnop #f no-flags))
 
 (define (gimple-call-noreturn-p g) (not (zero? (bitwise-and (gcall-ecf g) ECF-NORETURN))))
+
+;; flags_from_decl_or_type for the bits the local passes discover
+;; (pure/const, looping, noreturn), kept as GS declaration overrides
+(define (decl-ecf-flags st d)
+  (bitwise-ior (if (decl-flag st d 'readonly #f) ECF-CONST 0)
+               (if (decl-flag st d 'pure #f) ECF-PURE 0)
+               (if (decl-flag st d 'looping-const-or-pure #f) ECF-LOOPING 0)
+               (if (decl-flag st d 'noreturn #f) ECF-NORETURN 0)))
+;; gimple_call_fndecl
+(define (gcall-fndecl g)
+  (define fn (gcall-fn g))
+  (and fn (eq? (tree-code fn) 'addr_expr) (eq? (tree-code (tree-operand fn 0)) 'function_decl) (tree-operand fn 0)))
+;; gimple_call_flags: GCC recomputes the callee's flags on every query,
+;; so a callee found const by local-pure-const is const for every
+;; existing call at once (the stored ecf bits are the front end's)
+(define (call-ecf st g)
+  (define d (gcall-fndecl g))
+  (bitwise-ior (gcall-ecf g) (if d (decl-ecf-flags st d) 0)))
 
 ;; ------------------------------------------------------------
 ;; use-list stamps (the order of GCC's immediate-use lists)

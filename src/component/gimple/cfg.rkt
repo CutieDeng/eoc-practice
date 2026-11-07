@@ -746,9 +746,15 @@
                             (for/pvector ([arg (in-pvector (gphi-args ph))])
                               (cons (car arg) (f (cdr arg))))))
                     n))
+    ;; the virtual operands live in the flags: a removed virtual PHI's
+    ;; result is replaced in VUSEs too
+    (define (fv g)
+      (let* ([g (if (stmt-flag g 'vuse #f) (stmt-set-flag g 'vuse (f (stmt-flag g 'vuse #f))) g)]
+             [g (if (stmt-flag g 'vdef #f) (stmt-set-flag g 'vdef (f (stmt-flag g 'vdef #f))) g)])
+        g))
     (define-values (stmts* n2)
       (for/fold ([acc (pvector-empty)] [n n1] #:result (values acc n)) ([g (in-pvector (GBlock-stmts b))])
-        (define-values (g* n*) (restamp g (fs g) n))
+        (define-values (g* n*) (restamp g (fv (fs g)) n))
         (values (pvector-cons-right acc g*) n*)))
     (values (set-block c (block-set-stmts (block-set-phis b phis*) stmts*)) n2)))
 

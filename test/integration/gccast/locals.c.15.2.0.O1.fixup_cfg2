@@ -1,0 +1,77 @@
+
+;; Function locals (locals, funcdef_no=0, decl_uid=4467, cgraph_uid=1, symbol_order=0)
+
+int locals (int n)
+{
+  int inner[2];
+  int i;
+  int addr;
+  int s;
+  struct P p;
+  int arr[4];
+  int _1;
+  int _2;
+  int _3;
+  int _4;
+  int _5;
+  int _6;
+  int _7;
+  int _8;
+  int _9;
+  int _10;
+  int _11;
+  int _12;
+  int addr.0_13;
+  int _32;
+
+  <bb 2> :
+  s_16 = 0;
+  addr = 5;
+  arr[0] = n_19(D);
+  _1 = n_19(D) + 1;
+  arr[1] = _1;
+  _2 = arr[0];
+  _3 = arr[1];
+  _4 = _2 + _3;
+  arr[2] = _4;
+  arr[3] = 0;
+  _5 = arr[2];
+  p.x = _5;
+  _6 = take (&addr);
+  p.y = _6;
+  i_27 = 0;
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _7 = arr[i_15];
+  s_36 = s_14 + _7;
+  i_37 = i_15 + 1;
+
+  <bb 4> :
+  # s_14 = PHI <s_16(2), s_36(3)>
+  # i_15 = PHI <i_27(2), i_37(3)>
+  if (i_15 <= 3)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  inner[0] = s_14;
+  _8 = p.x;
+  inner[1] = _8;
+  _9 = inner[0];
+  _10 = inner[1];
+  s_30 = _9 + _10;
+  inner ={v} {CLOBBER(eos)};
+  _11 = p.y;
+  _12 = s_30 + _11;
+  addr.0_13 = addr;
+  _32 = _12 + addr.0_13;
+  arr ={v} {CLOBBER(eos)};
+  p ={v} {CLOBBER(eos)};
+  addr ={v} {CLOBBER(eos)};
+  return _32;
+
+}
+
+

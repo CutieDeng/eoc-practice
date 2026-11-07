@@ -24,7 +24,9 @@
          "dce.rkt"
          "profile.rkt"
          "pure-const.rkt"
-         "modref.rkt")
+         "modref.rkt"
+         "release-ssa.rkt"
+         "fixup-cfg.rkt")
 
 (provide o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
 (define pass-name car)
@@ -45,11 +47,17 @@
       "Uniting pointer but not location equivalent variables" "Finding indirect cycles" "Solving graph"))
   (values (for/fold ([c (cfg-clear-messages cfg)]) ([l (in-list lines)]) (cfg-add-message c l)) st))
 
+; pass_early_inline: nothing is inlined by the port (early inlining is not
+;; ported), which is what the fixtures show; the dump still reports the
+;; iteration count
+(define (einline st fndecl cfg)
+  (values (cfg-add-message (cfg-clear-messages cfg) "Iterations: 0") st))
+
 (define (o1-passes st)
   (define major (gcc-major-version st))
   (define (p name fn [locals? #f]) (list name fn locals?))
   (append
-   (list (p 'ccp1 ccp)
+   (list (p 'fixup_cfg2 fixup-cfg-pass) (p 'einline einline) (p 'ccp1 ccp)
          (p 'forwprop1 forwprop)
          (p 'ethread identity-pass)
          (p 'esra identity-pass)
@@ -63,4 +71,4 @@
          (p 'phiopt1 identity-pass)
          (p 'iftoswitch identity-pass))
    (if (>= major 14) (list (p 'sccopy1 identity-pass)) '())
-   (list (p 'profile_estimate profile-estimate) (p 'local-pure-const1 local-pure-const) (p 'modref1 modref))))
+   (list (p 'profile_estimate profile-estimate) (p 'local-pure-const1 local-pure-const) (p 'modref1 modref) (p 'release_ssa release-ssa #t))))

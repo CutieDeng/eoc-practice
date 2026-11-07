@@ -103,7 +103,7 @@
     (when (and name (ssa-name? name) (not (mfn-released? m name)) (not (ssa-default-def? name)) (mfn-zero-uses? m name))
       (define id (mfn-def m name))
       (define g (and id (mfn-stmt m id)))
-      (when (and g (not (gphi? g)) (not (stmt-has-side-effects? g)))
+      (when (and g (not (gphi? g)) (not (stmt-has-side-effects? (F-st f) g)))
         (fwprop-invalidate-lattice! f (stmt-get-lhs g))
         (mfn-remove! m id)
         (loop (and (gassign? g) (gassign-rhs1 g)))))))
@@ -495,7 +495,7 @@
           [else (for ([e (in-pvector (cfg-succs cfg bb))]) (hash-set! exec (cons bb (GEdge-dest e)) #t))]))))
 
   ;; removals
-  (when dce-walk? (simple-dce! m (unbox (F-dce f))))
+  (when dce-walk? (simple-dce! (F-st f) m (unbox (F-dce f))))
   (for ([v (in-list to-remove-defs)])          ; LIFO = GCC's pop order
     (define id (mfn-def-of-version m v))
     (when id (mfn-remove! m id)))
@@ -521,7 +521,7 @@
               (for/or ([a (in-pvector (gphi-args d))]) (and (ssa-name? (cdr a)) (ssa-name=? (cdr a) lhs)))))))
 
 ;; simple_dce_from_worklist over the working copy
-(define (simple-dce! m worklist0)
+(define (simple-dce! st m worklist0)
   (let loop ([wl worklist0])
     (unless (intbits-empty? wl)
       (define v (intbits-first wl))
@@ -537,7 +537,7 @@
            (and (gphi? g) (for/and ([u (in-list (mfn-use-ids m def))]) (eqv? u id))))
          (cond
            [(and (> n 0) (not self-only?)) (loop wl1)]
-           [(and (not (gphi? g)) (stmt-has-side-effects? g))
+           [(and (not (gphi? g)) (stmt-has-side-effects? st g))
             (when (gcall? g)
               (mfn-replace! m id (gcall (gcall-loc g) (gcall-flags g) #f (gcall-fn g) (gcall-args g) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g)))
               (mfn-release-name! m def))

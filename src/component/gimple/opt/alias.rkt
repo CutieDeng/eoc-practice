@@ -271,7 +271,7 @@
 
 ;; call_may_clobber_ref_p_1 without modref / fnspec / points-to
 (define (call-may-clobber-ref? st g r)
-  (define ecf (gcall-ecf g))
+  (define ecf (call-ecf st g))
   (cond
     [(not (zero? (bitwise-and ecf (bitwise-ior ECF-CONST ECF-PURE ECF-LOOPING)))) #f]
     [else
@@ -330,7 +330,7 @@
             (and (not (is-gimple-reg st rhs)) (not (is-gimple-min-invariant st rhs)) (not (eq? (tree-code rhs) 'constructor))
                  (refs-may-alias? st (make-ao-ref st rhs) r))))]
     [(gcall? g)
-     (define ecf (gcall-ecf g))
+     (define ecf (call-ecf st g))
      (cond
        [(not (zero? (bitwise-and ecf ECF-CONST))) (for/or ([a (in-pvector (gcall-args g))]) (tree-uses? a))]
        [(ao-ref-volatile? r) #t]

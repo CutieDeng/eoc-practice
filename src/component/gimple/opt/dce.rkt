@@ -78,7 +78,7 @@
       [(and (gcall? g) (stmt-flag g 'ctrl-altering #f)) (mark-necessary! id #t)]
       [(or (gcond? g) (gswitch? g)) (mark-necessary! id #t)]
       [(and (clobber? g) (pair? (stmt-real-uses g))) (void)]
-      [(or (stmt-has-side-effects? g) (stmt-ends-bb? g)) (mark-necessary! id #t)]
+      [(or (stmt-has-side-effects? st0 g) (stmt-ends-bb? g)) (mark-necessary! id #t)]
       [(stmt-may-clobber-global? st0 g) (mark-necessary! id #t)]
       [else (void)]))
 

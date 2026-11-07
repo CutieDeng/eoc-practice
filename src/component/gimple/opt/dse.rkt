@@ -130,7 +130,7 @@
              (when (eq? status 'dead)
                (cond
                  [(and (gassign? g) (tree-clobber-p (gassign-rhs1 g)) (not by-clobber)) (void)]
-                 [(and (gcall? g) (stmt-has-side-effects? g))
+                 [(and (gcall? g) (stmt-has-side-effects? st0 g))
                   (mfn-replace! m id (gcall (gcall-loc g) (gcall-flags g) #f (gcall-fn g) (gcall-args g) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g)))]
                  [else
                   (mfn-unlink-vdef! m id)
@@ -138,7 +138,7 @@
           [else
            (define defs (stmt-def-names g))
            (when (and (= 1 (length defs)) (mfn-zero-uses? m (car defs))
-                      (not (stmt-has-side-effects? g)) (not (stmt-ends-bb? g)))
+                      (not (stmt-has-side-effects? st0 g)) (not (stmt-ends-bb? g)))
              (mfn-remove! m id))])
         (loop prev)))
     ;; PHIs without uses

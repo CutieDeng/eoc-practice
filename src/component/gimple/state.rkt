@@ -29,7 +29,7 @@
          "../../frontend/gccast/reader.rkt")
 
 (provide let/st
-         make-gs optimize? gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-globals
+         make-gs optimize? gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-ssa-version gs-set-globals
          gcc-major-version
          fresh-uid fresh-tmp-var-id fresh-ssa-version
          decl-flag set-decl-flag decl-initial
@@ -66,6 +66,9 @@
 (define (gs-set-ctx st c)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
       (GS-ssa-version st) (GS-globals st) (GS-loc st) c (GS-optimize st)))
+(define (gs-set-ssa-version st n)
+  (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
+      n (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))
 (define (gs-reset-ssa st)
   (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
       0 (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))

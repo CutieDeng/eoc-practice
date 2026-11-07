@@ -32,7 +32,7 @@
 (provide gcfg->mfn mfn->gcfg mfn-cfg
          mfn-stmt mfn-bb mfn-phi? mfn-phis mfn-stmts mfn-first mfn-last mfn-next mfn-prev
          mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-imm-uses mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
-         mfn-replace! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
+         mfn-replace! mfn-relink! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
          stmt-use-names stmt-def-names)
 
 (struct cell (stmt prev next bb) #:mutable)
@@ -172,6 +172,15 @@
   (if next (set-cell-prev! (cell-of m next) id) (hash-set! (mfn-tails m) bb id))
   (add-tables! m id g)
   id)
+
+
+;; update_stmt without an operand change still relinks the uses
+(define (mfn-relink! m id)
+  (define c (cell-of m id))
+  (define g (cell-stmt c))
+  (unless (gphi? g)
+    (set-cell-stmt! c (stmt-set-flag g 'stamp (mfn-next-stamp m)))
+    (set-mfn-next-stamp! m (add1 (mfn-next-stamp m)))))
 
 (define (mfn-insert-before! m id g)
   (define c (cell-of m id))

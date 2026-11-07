@@ -106,11 +106,11 @@
     [else #f]))
 
 ;; gimple_has_side_effects (gimple.cc)
-(define (stmt-has-side-effects? g)
+(define (stmt-has-side-effects? st g)
   (cond
     [(stmt-has-volatile-ops? g) #t]
     [(gcall? g)
-     (define f (gcall-ecf g))
+     (define f (call-ecf st g))
      (or (zero? (bitwise-and f (bitwise-ior ECF-CONST ECF-PURE)))
          (not (zero? (bitwise-and f ECF-LOOPING))))]
     [else #f]))

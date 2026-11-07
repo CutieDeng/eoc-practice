@@ -194,7 +194,7 @@
 ;; block-level predictions
 ;; ------------------------------------------------------------
 
-(define (call-noreturn? g) (and (gcall? g) (gimple-call-noreturn-p g)))
+(define (call-noreturn? p g) (and (gcall? g) (not (zero? (bitwise-and (call-ecf (P-st p) g) ECF-NORETURN)))))
 
 (define (tree-bb-level-predictions! p)
   (define st (P-st p)) (define cfg (P-cfg p)) (define m (P-m p))
@@ -205,7 +205,7 @@
     (define g (mfn-stmt m id))
     (cond
       [(gcall? g)
-       (when (and (call-noreturn? g) has-return-edges) (predict-paths-leading-to! p bb 'noreturn #f))
+       (when (and (call-noreturn? p g) has-return-edges) (predict-paths-leading-to! p bb 'noreturn #f))
        (define d (call-fndecl g))
        (when (and d (decl-eq? d (GS-fndecl st))) (predict-paths-leading-to! p bb 'recursive-call #f))]
       [(gpredict? g)
@@ -586,7 +586,7 @@
                (dominates? (P-dom p) bb d) (not (pdominates? p d bb)))
       (for/first ([id (in-list (mfn-stmts m d))]
                   #:when (let ([g (mfn-stmt m id)])
-                           (and (gcall? g) (stmt-has-side-effects? g)
+                           (and (gcall? g) (stmt-has-side-effects? (P-st p) g)
                                 (not (call-fndecl-builtin? (call-fndecl g))))))
         (define g (mfn-stmt m id))
         (cond

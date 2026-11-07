@@ -137,7 +137,7 @@
             (copy-file src (build-path fixtures (string-append name "." ver "." ext)) #t)))
         ;; -O1 dumps: <name>.<ver>.O1.<pass> for the early pipeline and the final form
         (copy-file dat-o1 (build-path fixtures (string-append name "." ver ".O1.dat")) #t)
-        (define keep '("original" "gimple" "lower" "cfg" "ssa" "ccp1" "forwprop1" "ethread" "esra" "ealias" "phiprop1"
+        (define keep '("original" "gimple" "lower" "cfg" "ssa" "fixup_cfg2" "einline" "ccp1" "forwprop1" "ethread" "esra" "ealias" "phiprop1"
                        "fre1" "mergephi1" "dse1" "cddce1" "phiopt1" "iftoswitch" "sccopy1" "profile_estimate"
                        "local-pure-const1" "modref1" "release_ssa" "optimized"))
         (for ([f (in-list (directory-list o1-dir))])

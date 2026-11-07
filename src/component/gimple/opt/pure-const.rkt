@@ -206,7 +206,7 @@
         (for/fold ([acc (pvector-empty)] [n n] [any? any?]) ([g (in-pvector (GBlock-stmts b))])
           (cond
             [(and (gcall? g) (call-fndecl g)
-                  (not (zero? (bitwise-and (gcall-ecf g) (bitwise-ior ECF-CONST ECF-PURE ECF-LOOPING)))))
+                  (not (zero? (bitwise-and (call-ecf st g) (bitwise-ior ECF-CONST ECF-PURE ECF-LOOPING)))))
              (values (pvector-cons-right acc (stmt-set-flag g 'stamp n)) (add1 n) #t)]
             [else (values (pvector-cons-right acc g) n any?)])))
       (values (if any* (set-block c (block-set-stmts b stmts)) c) n* any*)))
@@ -273,7 +273,7 @@
 
   ;; -------- check_call
   (define (check-call! g)
-    (define flags (gcall-ecf g))
+    (define flags (call-ecf st0 g))
     (define callee (call-fndecl g))
     (cond
       [(and callee (decl-eq? callee fndecl))

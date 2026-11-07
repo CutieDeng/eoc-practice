@@ -39,7 +39,7 @@
          "gimplify.rkt"
          "cfg.rkt")
 
-(provide build-ssa ssa-names-in-version-order virtual-operand? stmt-vuse stmt-vdef remove-unused-locals)
+(provide build-ssa ssa-names-in-version-order virtual-operand? stmt-vuse stmt-vdef remove-unused-locals map-stmt-trees)
 
 ;; adapter value
 (struct ga (st cfg vop stamp))     ; vop: the .MEM declaration; stamp: next use-list stamp
