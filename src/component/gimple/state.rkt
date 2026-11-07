@@ -31,7 +31,7 @@
 (provide let/st
          make-gs optimize? gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-ssa-version gs-set-globals
          gcc-major-version
-         fresh-uid fresh-tmp-var-id fresh-ssa-version ssa-free-queue ssa-queue-release ssa-flush-free ssa-clear-free
+         fresh-uid fresh-type-uid fresh-tmp-var-id fresh-ssa-version ssa-free-queue ssa-queue-release ssa-flush-free ssa-clear-free
          ssa-pass-log log-ssa-release!
          decl-flag set-decl-flag decl-initial gimple-add-tmp-var take-added-locals
          type-ref type-code type-attr add-type type-type type-main-variant
@@ -89,6 +89,11 @@
 ;; ------------------------------------------------------------
 ;; Counters
 ;; ------------------------------------------------------------
+
+;; TYPE_UID: types have their own counter in GCC (the decl uids, which
+;; the dumps print as D.N, are not consumed by new types)
+(define (fresh-type-uid st)
+  (values (add1 (for/fold ([m 0]) ([p (in-list (intmap->literal-datum (GS-types st)))]) (max m (car p)))) st))
 
 (define (fresh-uid st)
   (define n (GS-next-uid st))

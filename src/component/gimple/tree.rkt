@@ -154,7 +154,7 @@
   (cond
     [found (values found st)]
     [else
-     (let/st st ([uid (fresh-uid st)])
+     (let/st st ([uid (fresh-type-uid st)])
        (add-type st (make-tree 'pointer_type #:type type
                                #:attrs (list (cons 'uid uid) (cons 'name #f) (cons 'quals 0) (cons 'align 64)
                                              (cons 'mode "DI") (cons 'size (build-int-cst st (sizetype st) 64))

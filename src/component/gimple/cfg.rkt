@@ -91,6 +91,13 @@
     [(and pf (hash-ref (GProf-probs pf) (cons src old) #f))
      => (lambda (p) (cfg-set-profile c (GProf (GProf-counts pf) (hash-set (hash-remove (GProf-probs pf) (cons src old)) (cons src new) p))))]
     [else c]))
+;; the edge SRC -> DEST now leaves NEW (split_block moves the successors)
+(define (prof-move-src c src new dest)
+  (define pf (GCfg-profile c))
+  (cond
+    [(and pf (hash-ref (GProf-probs pf) (cons src dest) #f))
+     => (lambda (p) (cfg-set-profile c (GProf (GProf-counts pf) (hash-set (hash-remove (GProf-probs pf) (cons src dest)) (cons new dest) p))))]
+    [else c]))
 ;; a pass starts with an empty dump_file: the messages belong to one pass
 (define (cfg-clear-messages c)
   (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (pvector-empty) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
@@ -253,7 +260,7 @@
       (define d (GEdge-dest e))
       (define db (cfg-block c d))
       (define pk (pvector-index-of (GBlock-preds db) bb))
-      (let* ([c (prof-move-edge c bb d nb)]
+      (let* ([c (prof-move-src c bb nb d)]
              [c (set-block c (block-set-preds (block-set-phis db (for/pvector ([ph (in-pvector (GBlock-phis db))])
                                                                    (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
                                                                          (for/pvector ([a (in-pvector (gphi-args ph))])
@@ -1020,7 +1027,7 @@
 ;; split_critical_edges (true): critical edges, and the edges out of a
 ;; control statement into a block with several predecessors, PHIs or the
 ;; exit (for_edge_insertion_p); every block of the chain, new ones included
-(define (split-edges-for-insertion st c0)
+(define (split-edges-for-insertion st c0 #:for-insertion? [for-insertion? #t])
   (let loop ([bb ENTRY] [c c0] [st st])
     (cond
       [(not bb) (values c st)]
@@ -1036,7 +1043,8 @@
               (define critical (and (>= (pvector-length ss) 2) (>= (pvector-length (cfg-preds c d)) 2)))
               (define last (and (not (= bb ENTRY)) (not (= bb EXIT)) (bb-last-stmt c bb)))
               (define insertion
-                (and (or (not (= 1 (pvector-length (cfg-preds c d))))
+                (and for-insertion?
+                     (or (not (= 1 (pvector-length (cfg-preds c d))))
                          (and (cfg-block c d) (not (pvector-empty? (GBlock-phis (cfg-block c d)))))
                          (= d EXIT))
                      (not (= bb ENTRY))
@@ -1152,6 +1160,8 @@
 (define (maybe-remove-forwarder-block st c i)
   (cond
     [(not (single-succ-p c i)) (values #f c st)]
+    ;; tree_forwarder_block_p (bb, phi_wanted = false): no PHI nodes
+    [(not (pvector-empty? (GBlock-phis (cfg-block c i)))) (values #f c st)]
     [(= (single-succ c i) EXIT) (values #f c st)]
     [(= (single-succ c i) i) (values #f c st)]
     [(edge-flag? (single-succ-edge c i) EDGE-ABNORMAL) (values #f c st)]

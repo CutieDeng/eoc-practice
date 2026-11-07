@@ -28,7 +28,7 @@
 ;; From GCC 15 finite_loop_p records a proved loop in loop->finite_p
 ;; (loops persist between passes), and a later query prints "Assume
 ;; loop N to be finite: ... loop was previously finite."; the port keeps
-;; the proved headers in the 'finite-loops declaration flag.
+;; the proved loop numbers in the 'finite-loops declaration flag.
 ;;
 ;; Not ported: exceptions (stmt_could_throw_p, nothrow discovery: the C
 ;; front end marks every function nothrow already), malloc discovery,
@@ -151,14 +151,16 @@
          (zero? (bitwise-and own-flags ECF-LOOPING))))
   (define (record st l)
     (if (>= major 15)
-        (set-decl-flag st fndecl 'finite-loops (cons (Loop-header l) (decl-flag st fndecl 'finite-loops '())))
+        (set-decl-flag st fndecl 'finite-loops (cons (Loop-num l) (decl-flag st fndecl 'finite-loops '())))
         st))
   (let loop ([ls loops] [st st])
     (cond
       [(null? ls) (values #t st)]
       [else
        (define l (car ls))
-       (define previously (and (>= major 15) (memv (Loop-header l) (decl-flag st fndecl 'finite-loops '()))))
+       ;; loop->finite_p lives in the loop structure, which keeps its
+       ;; number while the passes change the blocks
+       (define previously (and (>= major 15) (memv (Loop-num l) (decl-flag st fndecl 'finite-loops '()))))
        (cond
          [(and previously (pair? (loop-exits cfg l)))
           (msg! "Assume loop ~a to be finite: it has an exit and -ffinite-loops is on or loop was previously finite." (Loop-num l))

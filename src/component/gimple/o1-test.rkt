@@ -55,10 +55,19 @@
   ;; pass_build_ssa_passes runs for every function (callee first) before
   ;; pass_local_optimization_passes: a callee's pure/const result is not
   ;; known while its callers are gimplified and put into SSA
-  (define-values (st-ssa fns)
+  ;; the front end parses and genericizes every function, then
+  ;; pop_file_scope builds the TRANSLATION_UNIT_DECL (one decl uid), then
+  ;; the cgraph analysis gimplifies and lowers
+  (define-values (st-gen gens)
     (for/fold ([st (import-tu tu #:optimize 1)] [acc '()] #:result (values st (reverse acc))) ([fn (in-list (TU-fns tu))])
       (define-values (decl body st1) (import-fn st fn))
       (define-values (body* st2) (c-genericize st1 decl body))
+      (values st2 (cons (cons decl body*) acc))))
+  (define st-tu (let-values ([(_uid st) (fresh-uid st-gen)]) st))
+  (define-values (st-ssa fns)
+    (for/fold ([st st-tu] [acc '()] #:result (values st (reverse acc))) ([g (in-list gens)])
+      (define decl (car g)) (define body* (cdr g))
+      (define st2 st)
       (define-values (bind st3) (gimplify-function st2 decl body*))
       (print-function st3 decl bind (out 'gimple))
       (define-values (lowered locals st4) (lower-function st3 decl bind))
@@ -98,7 +107,8 @@
         [else (values (vector-ref f 1) (vector-ref f 2) st0)]))
     (for/fold ([cfg cfg-i] [st st-i] [locals locals-i] #:result st)
               ([p (in-list (late-passes st-i))] #:when (pass-enabled? p st decl cfg))
-      (define-values (cfg1 st1a) (run-pass p st decl cfg))
+      ;; the local decls, for passes that dump the function (dump_function_to_file)
+      (define-values (cfg1 st1a) (run-pass p (set-decl-flag st decl 'local-decls locals) decl cfg))
       (define-values (locals0 st1) (take-added-locals st1a decl locals))
       (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals0) locals0))
       (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))

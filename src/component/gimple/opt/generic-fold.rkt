@@ -105,7 +105,7 @@
         (car p))
       (let* ([like (or (find-int-type prec uns?) (find-int-type prec (not uns?)))]
              [base (type-ref (gs) like)])
-        (let-values ([(uid st) (fresh-uid (gs))])
+        (let-values ([(uid st) (fresh-type-uid (gs))])
           (define t (make-tree 'integer_type
                                #:attrs (hash-set* (hash-remove (hash-remove (Tree-attrs base) 'main-variant) 'name)
                                                   'uid uid 'unsigned uns? 'nonstandard #t)))

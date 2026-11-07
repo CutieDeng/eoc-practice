@@ -591,9 +591,13 @@
 ;; ------------------------------------------------------------
 
 (struct msum (loads stores kills arg-flags retslot-flags static-chain-flags writes-errno side-effects nondeterministic
-                    calls-interposable global-read global-written try-dse)
+                    calls-interposable global-read global-written try-dse
+                    ;; IPA propagation (modref_propagate_in_scc) collapses the
+                    ;; summary for a call left to an unavailable callee:
+                    ;; #f, 'loads (the callee's stores are ignored) or 'all
+                    ipa-collapse)
   #:mutable)
-(define (make-msum) (msum (make-mtree) (make-mtree) (make-dyn) #f 0 0 #f #f #f #f #f #f #f))
+(define (make-msum) (msum (make-mtree) (make-mtree) (make-dyn) #f 0 0 #f #f #f #f #f #f #f #f))
 
 (define (eaf-flags-useful? flags ecf)
   (and flags (for/or ([f (in-vector flags)]) (not (zero? (remove-useless-eaf f ecf #f))))))
@@ -654,6 +658,20 @@
   (unless (zero? (msum-retslot-flags s)) (msg (string-append "  Retslot flags:" (eaf-flags-string (msum-retslot-flags s)))))
   (unless (zero? (msum-static-chain-flags s)) (msg (string-append "  Static chain flags:" (eaf-flags-string (msum-static-chain-flags s))))))
 
+;; the summary after IPA propagation: a call left to an unavailable
+;; callee collapses the loads (and the stores unless that callee's stores
+;; are ignored) to every base; the global memory flags follow
+(define (ipa-propagated s)
+  (case (msum-ipa-collapse s)
+    [(#f) s]
+    [else
+     (define t (struct-copy msum s))
+     (set-msum-loads! t (let ([x (make-mtree)]) (set-mtree-every-base?! x #t) x))
+     (when (eq? (msum-ipa-collapse s) 'all)
+       (set-msum-stores! t (let ([x (make-mtree)]) (set-mtree-every-base?! x #t) x)))
+     (sum-finalize! t)
+     t]))
+
 ;; the callee's summary (get_modref_function_summary)
 (define (callee-summary st d) (and d (decl-flag st d 'modref #f)))
 
@@ -682,6 +700,12 @@
   (msg! "modref analyzing '~a' (ipa=0)~a~a" (dump-name st0 fndecl)
         (if (decl-flag st0 fndecl 'readonly #f) " (const)" "")
         (if (decl-flag st0 fndecl 'pure #f) " (pure)" ""))
+  ;; a summary kept from an earlier run (the late instance): the IPA
+  ;; pass's summary, i.e. this function's early summary as propagated
+  (define past (let ([s (callee-summary st0 fndecl)]) (and s (msum-loads s) (ipa-propagated s))))
+  (when past
+    (msg! "Past summary:")
+    (parameterize ([current-msg! (lambda (s) (msg! "~a" s))]) (dump-summary past)))
 
   ;; ---------------- helpers on calls
   (define (ignore-nondeterminism? flags)
@@ -1158,6 +1182,7 @@
         (k (void)))
       (unless (function-available? st0 callee)
         (msg! " - Function availability <= AVAIL_INTERPOSABLE.")
+        (set-msum-ipa-collapse! summary (if (or (eq? (msum-ipa-collapse summary) 'all) (not (ignore-stores? flags))) 'all 'loads))
         (process-fnspec! g)
         (k (void)))
       (define cs (callee-summary st0 callee))
@@ -1295,6 +1320,23 @@
     (when keep? (sum-finalize! summary))
     (msg! " - modref done with result: tracked.")
     (when keep? (dump-summary summary))
+    ;; compare the IPA and local solutions
+    (when past
+      (define old-flags (or (msum-arg-flags past) (vector)))
+      (cond
+        [keep?
+         (define new-flags (or (msum-arg-flags summary) (vector)))
+         (for ([i (in-range (max (vector-length old-flags) (vector-length new-flags)))])
+           (define o (remove-useless-eaf (if (< i (vector-length old-flags)) (vector-ref old-flags i) 0) ecf2 returns-void?))
+           (define n (if (< i (vector-length new-flags)) (vector-ref new-flags i) 0))
+           (unless (= o n)
+             (msg! "  Flags for param ~a ~a:~a -> ~a" i
+                   (if (or (zero? (bitwise-and o (bitwise-not n))) (f? n EAF-UNUSED)) "improved" "changed")
+                   (eaf-flags-string o) (eaf-flags-string n))))]
+        [else
+         (for ([i (in-range (vector-length old-flags))])
+           (define o (remove-useless-eaf (vector-ref old-flags i) ecf2 returns-void?))
+           (unless (zero? o) (msg! "  Flags for param ~a worsened:~a -> " i (eaf-flags-string o))))]))
     (define st3 (if keep? (set-decl-flag st2 fndecl 'modref summary) st2))
     (define cfg1 (for/fold ([c cfg]) ([mm (in-list (reverse msgs))]) (cfg-add-message c mm)))
     (if fixup? (fixup-cfg st3 cfg1) (values cfg1 st3))))

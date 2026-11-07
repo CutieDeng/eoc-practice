@@ -44,7 +44,8 @@
          "fold.rkt"
          "bit-value.rkt"
          "irange.rkt"
-         "range-info.rkt")
+         "range-info.rkt"
+         (only-in "simplify.rkt" gimple-fold-stmt-to-constant follow-ssa-edges?))
 
 (provide ccp dce-from-worklist)
 
@@ -194,6 +195,7 @@
   (when changed? (vector-set! vals i new))
   changed?)
 
+
 ;; ------------------------------------------------------------
 ;; likely_value, surely_varying_stmt_p, ccp_initialize
 ;; ------------------------------------------------------------
@@ -266,7 +268,13 @@
 (define (fold-stmt-to-constant-1 c g)
   (define st (C-st c))
   (define (valueize t) (valueize-op c t))
-  (or (gimple-simplify-const st g valueize)
+  ;; valueize_op_1: a definition is looked through only when its statement
+  ;; will not be simulated again
+  (define (def-of t)
+    (and (not (sim-again-def? c t)) (not (get-constant-value c t)) (eng-def-stmt (C-eng c) t)))
+  (or (let ([r (parameterize ([follow-ssa-edges? #t]) (gimple-fold-stmt-to-constant st def-of g valueize))])
+        (and r (or (ssa-name? r) (is-gimple-min-invariant st r)) r))
+      (gimple-simplify-const st g valueize)
       (cond
         [(gassign? g)
          (case (gimple-rhs-class st (gassign-code g))

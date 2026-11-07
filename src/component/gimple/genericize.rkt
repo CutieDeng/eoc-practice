@@ -203,7 +203,8 @@
                  (gz-set-st z5 (set-decl-flag (gz-st z5) blab 'switch-break-label #t))
                  z5))
   (define-values (body2 z7) (finish-bc-block z6 body1 bc-break blab))
-  (values (build2 (gz-st z7) 'switch_expr type cnd body2) z7))
+  ;; build2_loc (stmt_locus, SWITCH_EXPR, ...)
+  (values (tree-set-loc (build2 (gz-st z7) 'switch_expr type cnd body2) (tree-loc stmt)) z7))
 
 (define (genericize-continue-stmt z stmt)
   (define st (gz-st z))

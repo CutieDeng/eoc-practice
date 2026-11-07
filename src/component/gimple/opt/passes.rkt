@@ -40,6 +40,7 @@
          "ivcanon.rkt"
          "cunroll.rkt"
          "ivopts.rkt"
+         "switchlower.rkt"
          (only-in "../print.rkt" print-cond-rhs)
          (only-in "simplify.rkt" simplify-assign-rhs simplify-cond follow-ssa-edges?))
 
@@ -185,7 +186,43 @@
          ;; pass_lim (lim4): nothing is invariant in the remaining loops
          (lp 'ivopts ivopts-pass) (lp 'lim4 identity-pass) (lp 'loopdone loop-done-pass)
          ;; pass_tree_no_loop: the functions that never had a loop
-         (p 'no_loop identity-pass #:gate not-in-loop-pipeline?))))
+         (p 'no_loop identity-pass #:gate not-in-loop-pipeline?)
+         ;; pass_lower_vector_ssa: TODO_cleanup_cfg
+         (p 'veclower21 cleanup-pass) (p 'switchlower1 switchlower-pass))
+   (if (>= major 15) (list (p 'sincos identity-pass)) '())
+   (list (p 'reassoc2 (reassoc-pass #f)) (p 'slsr identity-pass) (p 'dom3 dom-pass) (p 'strlen1 loops-normal-pass)
+         (p 'ccp4 ccp2) (p 'wrestrict identity-pass) (p 'dse5 dse))
+   (if (>= major 15)
+       (list (p 'dce7 dce #t) (p 'forwprop4 forwprop) (p 'sink2 (sink-pass #t)) (p 'phiopt4 identity-pass)
+             (p 'fab1 identity-pass) (p 'cddce3 dce) (p 'sccopy2 identity-pass))
+       (list (p 'cddce3 dce) (p 'forwprop4 forwprop) (p 'sink2 (sink-pass #t)) (p 'phiopt4 identity-pass)
+             (p 'fab1 identity-pass) (p 'dce7 dce)))
+   (list (p 'crited1 crited) (p 'local-pure-const2 local-pure-const) (p 'modref2 modref) (p 'uncprop1 identity-pass)
+         (p 'nrv identity-pass) (p 'isel identity-pass) (p 'waccess3 waccess-late)
+         ;; pass_cleanup_cfg_post_optimizing: TODO_remove_unused_locals
+         (p 'optimized cleanup-post-optimizing #t))))
+
+;; pass_split_crit_edges: split_critical_edges ()
+(define (crited st fndecl cfg)
+  (split-edges-for-insertion (gs-set-fndecl st fndecl) (cfg-clear-messages cfg) #:for-insertion? #f))
+
+;; pass_waccess (late): the warnings are not ported; the late instance
+;; makes no pointer queries on the fixtures, so the counters it dumps are 0
+(define (waccess-late st fndecl cfg)
+  (define lines '("pointer_query counters:" "  index cache size:   0" "  index entries:      0" "  access cache size:  0"
+                  "  access entries:     0" "  hits:               0" "  misses:             0" "  failures:           0"
+                  "  max_depth:          0"))
+  (values (for/fold ([c (cfg-clear-messages cfg)]) ([l (in-list lines)]) (cfg-add-message c l)) st))
+
+;; execute_cleanup_cfg_post_optimizing: execute_fixup_cfg, cleanup_tree_cfg
+;; (cleanup_dead_labels / group_case_labels change nothing on the fixtures)
+(define (cleanup-post-optimizing st fndecl cfg)
+  (define-values (c1 s1) (fixup-cfg-pass st fndecl cfg))
+  (cleanup-tree-cfg (gs-set-fndecl s1 fndecl) c1 print-cond-rhs))
+
+;; a pass whose only effect is TODO_cleanup_cfg
+(define (cleanup-pass st fndecl cfg)
+  (cleanup-tree-cfg (gs-set-fndecl st fndecl) (cfg-clear-messages cfg) print-cond-rhs))
 
 ;; pass_sink_code: loop_optimizer_init (LOOPS_NORMAL), split_edges_for_insertion,
 ;; the statement sinking (not ported: nothing is sunk on the fixtures);

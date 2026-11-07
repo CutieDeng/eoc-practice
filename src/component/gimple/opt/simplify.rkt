@@ -219,8 +219,10 @@
   (define integral? (integral-type-p st type))
   (define cls (gimple-rhs-class st code))
   (define (defr t) (if (ssa-name? t) (let-values ([(dc d1 d2) (def-rhs* t)]) (values dc d1 d2)) (values #f #f #f)))
+  ;; M: an mfn, or a procedure name -> defining statement / #f (the
+  ;; caller's valueization of SSA edges, e.g. CCP's valueize_op_1)
   (define (def-rhs* t)
-    (define g (and (ssa-name? t) (follow-ssa-edges?) (mfn-def-stmt m t)))
+    (define g (and (ssa-name? t) (follow-ssa-edges?) (if (procedure? m) (m t) (mfn-def-stmt m t))))
     (if (and g (gassign? g)) (values (gassign-code g) (gassign-rhs1 g) (gassign-rhs2 g)) (values #f #f #f)))
   (cond
     ;; constants
@@ -274,6 +276,10 @@
      (cond
        ;; useless conversion
        [(and (memq code '(nop_expr convert_expr)) (useless-type-conversion-p st type (tree-type a))) (val a)]
+       ;; (convert (convert@1 @0)): two conversions in a row
+       [(and (memq code '(nop_expr convert_expr)) (memq ac '(nop_expr convert_expr))
+             (two-conversions-foldable? st type (tree-type a) (tree-type a1)))
+        (un 'nop_expr a1)]
        ;; -(-x), ~~x
        [(and (eq? code 'negate_expr) (eq? ac 'negate_expr) (useless-type-conversion-p st type (tree-type a1))) (val a1)]
        [(and (eq? code 'bit_not_expr) (eq? ac 'bit_not_expr) (useless-type-conversion-p st type (tree-type a1))) (val a1)]
@@ -287,6 +293,34 @@
        [(and (eq? code 'negate_expr) (eq? ac 'minus_expr) integral?) (bin 'minus_expr a2 a1)]
        [else #f])]
     [else #f]))
+
+;; match.pd "Handle cases of two conversions in a row" for integral and
+;; pointer types: FINAL <- INTER <- INSIDE
+(define (two-conversions-foldable? st final inter inside)
+  (define (int? t) (integral-type-p st t)) (define (ptr? t) (pointer-type-p st t))
+  (define (prec t) (or (type-attr st t 'precision #f) 64))
+  (define (uns? t) (or (ptr? t) (and (type-attr st t 'unsigned #f) #t)))
+  (define inside-int (int? inside)) (define inside-ptr (ptr? inside))
+  (define inter-int (int? inter)) (define inter-ptr (ptr? inter))
+  (define final-int (int? final)) (define final-ptr (ptr? final))
+  (define inside-prec (prec inside)) (define inter-prec (prec inter)) (define final-prec (prec final))
+  (define inside-uns (uns? inside)) (define inter-uns (uns? inter)) (define final-uns (uns? final))
+  (and (or inside-int inside-ptr) (or inter-int inter-ptr) (or final-int final-ptr)
+       (or
+        ;; converting to its own type through one at least as wide
+        (and (useless-type-conversion-p st final inside) (or inter-int inter-ptr) final-int (>= inter-prec final-prec))
+        ;; the middle conversion widens without changing the signedness
+        (and inter-int inside-int final-int (>= inter-prec inside-prec) (eq? inter-uns inside-uns))
+        ;; sign-extension of a zero-extension, or no precision change at the end
+        (and inside-int inter-int final-int
+             (or (and (< inside-prec inter-prec) (< inter-prec final-prec) inside-uns (not inter-uns))
+                 (= final-prec inter-prec)))
+        ;; two conversions in a row are not needed unless ...
+        (and (or (>= inter-prec inside-prec) (>= inter-prec final-prec))
+             (not (and inside-int inter-int (not (eq? inter-uns inside-uns)) (< inter-prec final-prec)))
+             (eq? (and inter-uns (> inter-prec inside-prec)) (and final-uns (> final-prec inter-prec)))
+             (not (and inside-ptr (not (= inter-prec final-prec))))
+             (not (and final-ptr (not (= inside-prec inter-prec))))))))
 
 ;; canonical operand order for a binary rhs: (values code a b changed?)
 (define (canonicalize-binary st code a b)

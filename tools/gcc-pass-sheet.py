@@ -88,6 +88,22 @@ status={
  'tree-lim4':'恒等（夹具循环无不变量）',
  'tree-loopdone':'完成（loop_optimizer_finalize：clean_up_loop_closed_phi（按记录出口的逆序）、loops-state 清空，TODO_cleanup_cfg 删除 forwarder 并压缩块号）',
  'tree-no_loop':'恒等（gate：函数从未进入循环流水线）',
+ 'tree-veclower21':'完成（无向量运算；TODO_cleanup_cfg 删除 sink1 拆出的 forwarder）',
+ 'tree-switchlower1':'完成（`opt/switchlower.rkt`：simple cluster、balance_case_nodes（≤2 节点）、emit_case_nodes 的 do_jump_if_equal（GCC ≥13 缩放 false 块计数）、函数中途 dump、PHI 参数修补、.MEM 符号重命名的 update_ssa 消息；bit-test / jump-table 未移植）',
+ 'tree-sincos':'恒等','tree-slsr':'恒等','tree-wrestrict':'恒等','tree-fab1':'恒等','tree-sccopy2':'恒等','tree-phiopt4':'恒等',
+ 'tree-reassoc2':'完成（复用 reassoc，early_p = false）',
+ 'tree-dom3':'部分（复用 dom；gcc 15 struct.c 的跳转线程化需要线程路径的 CFG 更新（块复制、SSA 替换表、profile），未移植）',
+ 'tree-strlen1':'完成（只有 loop_optimizer_init (LOOPS_NORMAL)；无字符串函数）',
+ 'tree-ccp4':'完成（复用 ccp，nonzero_p；ccp_fold 改为 gimple_simplify + valueize_op_1 跟随 SSA 定义）',
+ 'tree-dse5':'完成（复用 dse）','tree-dce7':'完成（复用 dce）','tree-cddce3':'完成（复用 dce）',
+ 'tree-forwprop4':'部分（复用 forwprop；gcc 12 struct.c 的 (int)((unsigned)(n + -1) + 1) 化简与 A - CST 规范化未覆盖）',
+ 'tree-sink2':'完成（复用 sink，unsplit）',
+ 'tree-crited1':'完成（split_critical_edges）',
+ 'tree-local-pure-const2':'完成（复用 pure-const；finite_p 按循环号保存）',
+ 'tree-modref2':'完成（复用 modref；Past summary（IPA 传播对不可用被调函数的 collapse）与参数标志比较）',
+ 'tree-uncprop1':'恒等','tree-nrv':'恒等','tree-isel':'恒等',
+ 'tree-waccess3':'完成（警告未移植；后期实例在夹具上不做 pointer query，计数为 0）',
+ 'tree-optimized':'完成（execute_fixup_cfg + cleanup_tree_cfg，TODO_remove_unused_locals）',
  'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
@@ -200,11 +216,12 @@ L.append("| 合计 | %d | %d | %d | %d | %d |"%(sum(v for (k,s),v in cnt.items()
 # last pass before the first enabled, unported one
 names=[r[1] for r in rows]
 ao=names.index('*all_optimizations')
-first_todo=next(i for i,r in enumerate(rows) if i>ao and r[5] and r[4].startswith('未移植'))
+# the first enabled pass that is not ported or only partly aligned
+first_todo=next((i for i,r in enumerate(rows) if i>ao and r[5] and (r[4].startswith('未移植') or r[4].startswith('部分'))), len(rows))
 ao_first=next(r[1] for r in rows[ao:] if r[1].startswith('tree-') and r[5])
 ao_last=next(r[1] for r in reversed(rows[:first_todo]) if r[1].startswith('tree-') and r[5])
 def bare(n): return re.sub(r'^(tree|ipa|rtl)-','',n)
-L.append("\n完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 %s 到 %s（其间每个 -O1 执行的 pass 都是完成或恒等）；下一个未移植的是 `%s`，之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。\n" % (bare(ao_first), bare(ao_last), rows[first_todo][1]))
+L.append("\n完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 %s 到 %s（其间每个 -O1 执行的 pass 都是完成或恒等）；%s gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。\n" % (bare(ao_first), bare(ao_last), ("下一个未完成的是 `%s`（%s），之后的阶段在依赖它的夹具上尚未对齐。" % (rows[first_todo][1], rows[first_todo][4])) if first_todo < len(rows) else "晚期 GIMPLE 序列全部完成或恒等。"))
 L.append("## 2. 夹具上真正改变代码的晚期 pass（release_ssa 之后）\n")
 L.append("按 dump 两两比较函数体得到（`;;` 行与函数之间的消息不计）；没有列出的晚期 pass 在该夹具上是恒等的（对齐时只需输出与前一 pass 相同的 dump）。这是晚期序列的移植优先级依据。gcc-12 的 dump 编号与 gcc-15 不同，两表分列。\n")
 st_by_name={}
@@ -245,7 +262,9 @@ for n in sorted(levels):
 L.append("\n● 启用，○ 关闭，其他为开关的非布尔取值。\n")
 L.append("## 6. 测试\n")
 if O1_TESTS or SUITE:
-    L.append("- 最近一次实测：`o1-test.rkt` %s 项（4 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` %s 通过（失败的 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。" % (O1_TESTS or '未记录', SUITE or '未记录'))
+    o1=O1_TESTS or '未记录'
+    o1s=("%s 项通过（4 夹具 × 2 版本 × 阶段；未通过的见第 2 节的未完成 pass）" % o1) if '/' in o1 else ("%s 项（4 夹具 × 2 版本 × 阶段）全部通过" % o1)
+    L.append("- 最近一次实测：`o1-test.rkt` %s；全套 `raco test -x -j 4 src test` %s 通过（其余失败中有 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。" % (o1s, SUITE or '未记录'))
 else:
     L.append("- 测试数未随本次生成记录（运行时加 `--o1-tests N --suite P/T`）。")
 L.append("- 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。")

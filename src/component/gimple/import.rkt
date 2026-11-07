@@ -139,7 +139,7 @@
   (for/first ([p (in-list (intmap->literal-datum (GS-types st)))] #:when (pred (car p) (cdr p))) (car p)))
 
 (define (synth-type st code name #:precision [prec #f] #:unsigned [uns #f] #:mode [mode #f] #:pointee [pointee #f])
-  (let/st st ([uid (fresh-uid st)])
+  (let/st st ([uid (fresh-type-uid st)])
     (define name-node (and name (make-tree 'identifier_node #:attrs (list (cons 'id name)))))
     (add-type st (make-tree code #:type pointee
                             #:attrs (append (list (cons 'uid uid) (cons 'name name-node) (cons 'quals 0) (cons 'align 8))

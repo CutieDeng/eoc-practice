@@ -1386,7 +1386,7 @@
      (cond
        [found (values found st)]
        [else
-        (let/st st ([uid (fresh-uid st)])
+        (let/st st ([uid (fresh-type-uid st)])
           (define base (type-ref st mv))
           (define nstr (type-name-string st mv))
           (define t (make-tree 'integer_type
