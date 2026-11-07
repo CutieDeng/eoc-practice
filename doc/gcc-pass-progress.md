@@ -13,11 +13,11 @@
 
 | 类别 | ON | OFF | 完成 | 恒等 | 未移植（ON） |
 |---|---|---|---|---|---|
-| GIMPLE（tree-） | 141 | 85 | 20 | 16 | 93 |
+| GIMPLE（tree-） | 141 | 85 | 22 | 25 | 82 |
 | IPA（ipa-） | 19 | 17 | 4 | 0 | 0 |
 | RTL（rtl-） | 49 | 45 | 0 | 0 | 0 |
 | 无 dump 名（*） | 20 | 12 | 1 | 0 | 0 |
-| 合计 | 229 | 159 | 25 | 16 | 93 |
+| 合计 | 229 | 159 | 27 | 25 | 82 |
 
 完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 fixup_cfg3 到 dce2；之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
 
@@ -173,18 +173,18 @@
 | 133 | 　　`tree-bounds` | OFF | 无 | gate 关闭（-O1 不执行） |
 | 134 | 　　`tree-dse2` | ON | ON | 完成（复用 dse） |
 | 135 | 　　`tree-dce2` | ON | ON | 完成（复用 dce；remove_unused_locals 仅 ≥15） |
-| 136 | 　　`tree-stdarg` | ON | ON | 未移植 |
-| 137 | 　　`tree-cdce` | ON | ON | 未移植 |
-| 138 | 　　`tree-cselim` | ON | ON | 未移植 |
-| 139 | 　　`tree-copyprop1` | ON | ON | 未移植 |
-| 140 | 　　`tree-ifcombine` | ON | ON | 未移植 |
-| 141 | 　　`tree-mergephi3` | ON | ON | 未移植（可复用已实现的 mergephi） |
-| 142 | 　　`tree-phiopt2` | ON | ON | 未移植 |
+| 136 | 　　`tree-stdarg` | ON | ON | 恒等（TODO_remove_unused_locals 在 pass 开始处） |
+| 137 | 　　`tree-cdce` | ON | ON | 恒等 |
+| 138 | 　　`tree-cselim` | ON | ON | 完成（子集：只有 loop_optimizer_init (LOOPS_NORMAL) 的 latch 重建；条件存储消除未移植，夹具无触发） |
+| 139 | 　　`tree-copyprop1` | ON | ON | 恒等 |
+| 140 | 　　`tree-ifcombine` | ON | ON | 恒等 |
+| 141 | 　　`tree-mergephi3` | ON | ON | 恒等 |
+| 142 | 　　`tree-phiopt2` | ON | ON | 恒等 |
 | 143 | 　　`tree-tailr2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 144 | 　　`tree-ch2` | ON | ON | 未移植 |
-| 145 | 　　`tree-cplxlower1` | ON | ON | 未移植 |
-| 146 | 　　`tree-bitintlower1` | ON | 无 | 未移植 |
-| 147 | 　　`tree-sra` | ON | ON | 未移植 |
+| 144 | 　　`tree-ch2` | ON | ON | 完成（`opt/ch.rkt`：should_duplicate_loop_header_p 15/12 两版决策、do-while 判定、SEME 区域复制、update_profile_after_ch、按名字的增量 update_ssa 与其 dump、区域 VN 子集、TODO_cleanup_cfg） |
+| 145 | 　　`tree-cplxlower1` | ON | ON | 恒等 |
+| 146 | 　　`tree-bitintlower1` | ON | 无 | 恒等（gcc ≥ 14） |
+| 147 | 　　`tree-sra` | ON | ON | 恒等 |
 | 148 | 　　`tree-thread1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 149 | 　　`tree-dom2` | ON | ON | 未移植 |
 | 150 | 　　`tree-copyprop2` | ON | ON | 未移植 |

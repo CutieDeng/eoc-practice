@@ -26,7 +26,9 @@
          "pure-const.rkt"
          "modref.rkt"
          "release-ssa.rkt"
-         "fixup-cfg.rkt")
+         "fixup-cfg.rkt"
+         "loops.rkt"
+         "ch.rkt")
 
 (provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
 (define pass-name car)
@@ -89,4 +91,15 @@
    (list (p 'backprop identity-pass)
          (p (if (>= major 13) 'phiprop2 'phiprop) identity-pass)
          (p 'forwprop2 forwprop) (p 'alias ealias) (p 'retslot identity-pass) (p 'fre3 fre) (p 'mergephi2 identity-pass)
-         (p 'dse2 dse) (p 'dce2 dce (>= major 15)))))
+         (p 'dse2 dse) (p 'dce2 dce (>= major 15))
+         (p 'stdarg identity-pass #t) (p 'cdce identity-pass)   ; stdarg: TODO_remove_unused_locals at start
+         ;; pass_cselim: loop_optimizer_init (LOOPS_NORMAL) re-creates the simple latches
+         (p 'cselim loops-normal-pass) (p 'copyprop1 identity-pass) (p 'ifcombine identity-pass) (p 'mergephi3 identity-pass)
+         (p 'phiopt2 identity-pass)
+         (p 'ch2 ch-pass) (p 'cplxlower1 identity-pass))
+   (if (>= major 14) (list (p 'bitintlower1 identity-pass)) '())
+   (list (p 'sra identity-pass))))
+
+;; a pass whose only visible effect on the fixtures is loop_optimizer_init (LOOPS_NORMAL)
+(define (loops-normal-pass st fndecl cfg)
+  (values (normalize-loops (gs-set-fndecl st fndecl) (cfg-clear-messages cfg)) st))

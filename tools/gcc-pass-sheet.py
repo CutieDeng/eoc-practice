@@ -57,6 +57,11 @@ status={
  'tree-objsz1':'恒等','tree-waccess2':'不比较（pointer_query 计数器随 GCC 内部缓存变化）','tree-rebuild_frequencies1':'完成（只有 "Profile is consistent"）',
  'tree-backprop':'恒等','tree-phiprop2':'恒等','tree-phiprop':'恒等','tree-forwprop2':'完成（复用 forwprop）','tree-alias':'恒等（PTA 未移植；≥13 求解器进度行；12 排除）',
  'tree-retslot':'恒等','tree-fre3':'完成（复用 fre）','tree-mergephi2':'恒等','tree-dse2':'完成（复用 dse）','tree-dce2':'完成（复用 dce；remove_unused_locals 仅 ≥15）',
+ 'tree-stdarg':'恒等（TODO_remove_unused_locals 在 pass 开始处）','tree-cdce':'恒等',
+ 'tree-cselim':'完成（子集：只有 loop_optimizer_init (LOOPS_NORMAL) 的 latch 重建；条件存储消除未移植，夹具无触发）',
+ 'tree-copyprop1':'恒等','tree-ifcombine':'恒等','tree-mergephi3':'恒等','tree-phiopt2':'恒等',
+ 'tree-ch2':'完成（`opt/ch.rkt`：should_duplicate_loop_header_p 15/12 两版决策、do-while 判定、SEME 区域复制、update_profile_after_ch、按名字的增量 update_ssa 与其 dump、区域 VN 子集、TODO_cleanup_cfg）',
+ 'tree-cplxlower1':'恒等','tree-bitintlower1':'恒等（gcc ≥ 14）','tree-sra':'恒等',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
 def our_status(n,st,seen):

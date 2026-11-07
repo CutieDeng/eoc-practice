@@ -33,7 +33,8 @@
          "../../kernel/ir/gimple/types.rkt"
          "state.rkt"
          "tree.rkt"
-         "gimple.rkt")
+         "gimple.rkt"
+         (only-in "gimplify.rkt" tree-swap-operands-p))
 
 (provide build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-next-stamp cfg-clear-messages cfg-add-message
          cfg-set-profile prof-count prof-prob split-edge label-to-block make-edge remove-edge create-bb
@@ -41,7 +42,8 @@
          cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges
          set-block block-set-phis block-set-stmts ENTRY EXIT
          split-block set-succs set-preds prof-move-edge assign-label-uid register-label link-block unlink-block
-         bb-next bb-prev)
+         bb-next bb-prev
+         redirect-edge-succ find-edge edge-flag? single-succ-p single-pred-p single-succ last-basic-block block-set-preds)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -745,8 +747,33 @@
 (define (phi-arg ph pred) (for/first ([a (in-pvector (gphi-args ph))] #:when (= (car a) pred)) (cdr a)))
 
 ;; replace_uses_by: every use of NAME (statements and PHI arguments) becomes VAL
-(define (replace-uses-by c name val)
+(define (commutative-tree-code code)
+  (and (memq code '(plus_expr mult_expr mult_highpart_expr min_expr max_expr bit_ior_expr bit_xor_expr bit_and_expr
+                    ne_expr eq_expr unordered_expr ordered_expr uneq_expr ltgt_expr truth_and_expr truth_xor_expr truth_or_expr
+                    widen_mult_expr)) #t))
+(define (comparison-code? code)
+  (and (memq code '(lt_expr le_expr gt_expr ge_expr eq_expr ne_expr unordered_expr ordered_expr unlt_expr unle_expr ungt_expr unge_expr uneq_expr ltgt_expr)) #t))
+(define (swap-tree-comparison code)
+  (case code
+    [(lt_expr) 'gt_expr] [(gt_expr) 'lt_expr] [(le_expr) 'ge_expr] [(ge_expr) 'le_expr]
+    [(unlt_expr) 'ungt_expr] [(ungt_expr) 'unlt_expr] [(unle_expr) 'unge_expr] [(unge_expr) 'unle_expr]
+    [else code]))
+
+(define (replace-uses-by st c name val)
   (define v (ssa-name-version name))
+  ;; fold_stmt on each changed statement: the operand-order canonicalization
+  ;; of gimple_resimplify2 / fold_stmt_1 (GIMPLE_COND)
+  (define (canonicalize g)
+    (cond
+      [(and (gcond? g) (tree-swap-operands-p st (gcond-lhs g) (gcond-rhs g)))
+       (gcond (gcond-loc g) (gcond-flags g) (swap-tree-comparison (gcond-code g)) (gcond-rhs g) (gcond-lhs g)
+              (gcond-true-label g) (gcond-false-label g))]
+      [(and (gassign? g) (gassign-rhs2 g) (not (gassign-rhs3 g))
+            (or (commutative-tree-code (gassign-code g)) (comparison-code? (gassign-code g)))
+            (tree-swap-operands-p st (gassign-rhs1 g) (gassign-rhs2 g)))
+       (gassign (gassign-loc g) (gassign-flags g) (gassign-lhs g) (swap-tree-comparison (gassign-code g))
+                (gassign-rhs2 g) (gassign-rhs1 g) #f)]
+      [else g]))
   (define (f t)
     (cond
       [(not t) #f]
@@ -789,7 +816,8 @@
         g))
     (define-values (stmts* n2)
       (for/fold ([acc (pvector-empty)] [n n1] #:result (values acc n)) ([g (in-pvector (GBlock-stmts b))])
-        (define-values (g* n*) (restamp g (fv (fs g)) n))
+        (define g1 (fs g))
+        (define-values (g* n*) (restamp g (fv (if (equal? (stmt-core g1) (stmt-core g)) g1 (canonicalize g1))) n))
         (values (pvector-cons-right acc g*) n*)))
     (values (set-block c (block-set-stmts (block-set-phis b phis*) stmts*)) n2)))
 
@@ -798,7 +826,7 @@
   ;; V_i = PHI <V_j> in B: V_j replaces V_i everywhere (A is B's only pred)
   (define c0
     (for/fold ([c (dump c "Merging blocks ~a and ~a" a b)]) ([ph (in-pvector (GBlock-phis (cfg-block c b)))])
-      (replace-uses-by c (gphi-result ph) (cdr (pvector-first (gphi-args ph))))))
+      (replace-uses-by st c (gphi-result ph) (cdr (pvector-first (gphi-args ph))))))
   (define c1 (link-block (unlink-block (set-block c0 (block-set-phis (cfg-block c0 b) (pvector-empty))) b) b a))
   ;; B's labels are dropped (a FORCED_LABEL moves to the start of A)
   (define-values (c2 kept)
@@ -812,8 +840,16 @@
   (let* ([c (set-stmts c2 a (pvector-append (stmts c2 a) kept))]
          [c (set-stmts c b (pvector-empty))]
          [c (altered c a)]
-         ;; cfghooks.cc merge_blocks: A takes over B's successor edges
+         ;; cfghooks.cc merge_blocks: A takes over B's successor edges (the
+         ;; edges keep their probabilities)
          [c (for/fold ([c c]) ([e (in-pvector (cfg-succs c a))]) (remove-edge c a (GEdge-dest e)))]
+         [c (for/fold ([c c]) ([e (in-pvector (cfg-succs c b))])
+              (define d (GEdge-dest e))
+              (define pf (GCfg-profile c))
+              (define p (and pf (hash-ref (GProf-probs pf) (cons b d) #f)))
+              (if p
+                  (cfg-set-profile c (GProf (GProf-counts pf) (hash-set (hash-remove (GProf-probs pf) (cons b d)) (cons a d) p)))
+                  c))]
          [c (for/fold ([c c]) ([e (in-pvector (cfg-succs c b))])
               (define d (GEdge-dest e))
               (define db (cfg-block c d))
@@ -912,9 +948,18 @@
            [c (set-succs c src (pvector-set (cfg-succs c src) (edge-index c src dest) (GEdge nb (GEdge-flags e) (GEdge-goto-locus e))))]
            [c (set-preds c nb (pvector-cons-right (cfg-preds c nb) src))])
       c))
-  ;; the new block's single successor edge is always taken
+  ;; the new block's count is the edge count (src count scaled by the
+  ;; probability, RDIV) and its single successor edge is always taken
   (define pf (GCfg-profile c3))
-  (define c4 (if pf (cfg-set-profile c3 (GProf (GProf-counts pf) (hash-set (GProf-probs pf) (cons nb dest) 134217728))) c3))
+  (define c4
+    (cond
+      [pf
+       (define src-count (intmap-ref (GProf-counts pf) src #f))
+       (define pr (hash-ref (GProf-probs pf) (cons src nb) #f))   ; moved there by prof-move-edge
+       (define cnt (and src-count pr (quotient (+ (* src-count pr) (quotient 134217728 2)) 134217728)))
+       (cfg-set-profile c3 (GProf (if cnt (intmap-set (GProf-counts pf) nb cnt) (GProf-counts pf))
+                                  (hash-set (GProf-probs pf) (cons nb dest) 134217728)))]
+      [else c3]))
   (values nb c4))
 
 ;; ---- forwarder blocks -------------------------------------------------------
@@ -940,8 +985,8 @@
                    (or (loc-has-location? (GEdge-goto-locus e)) (loc-has-location? locus))
                    (not (equal? (GEdge-goto-locus e) locus)))))
         (values #f c st)]
-       ;; trunk: leave single-pred/single-succ chains to block merging
-       [(and (single-pred-p c i) (single-succ-p c (single-pred c i))) (values #f c st)]
+       ;; trunk (GCC 16, 40c037adb36): leave single-pred/single-succ chains to block merging
+       [(and (>= (gcc-major-version st) 16) (single-pred-p c i) (single-succ-p c (single-pred c i))) (values #f c st)]
        [(let ([f (bb-first-stmt c dest)]) (and (glabel? f) (label-nonlocal? st (glabel-label f)))) (values #f c st)]
        [(not (for/and ([g (in-pvector (stmts c i))])
                (and (glabel? g)
