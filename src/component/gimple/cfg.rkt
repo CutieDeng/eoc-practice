@@ -43,7 +43,8 @@
          set-block block-set-phis block-set-stmts ENTRY EXIT
          split-block set-succs set-preds prof-move-edge assign-label-uid register-label link-block unlink-block
          bb-next bb-prev
-         redirect-edge-succ find-edge edge-flag? single-succ-p single-pred-p single-succ last-basic-block block-set-preds)
+         redirect-edge-succ find-edge edge-flag? single-succ-p single-pred-p single-succ last-basic-block block-set-preds
+         split-edge/st split-edges-for-insertion)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -961,6 +962,52 @@
                                   (hash-set (GProf-probs pf) (cons nb dest) 134217728)))]
       [else c3]))
   (values nb c4))
+
+;; gimple_split_edge for any source: a switch source sends the cases of
+;; DEST to a label of the new block (gimple_redirect_edge_and_branch with
+;; gimple_block_label); (values nb cfg st)
+(define (split-edge/st st c src dest)
+  (define g (bb-last-stmt c src))
+  (define-values (nb c1) (split-edge c src dest))
+  (cond
+    [(gswitch? g)
+     (define-values (label c2 st2) (gimple-block-label st c1 nb))
+     (define (fix cs) (if (eqv? (label-to-block c2 (case-label cs)) dest) (tree-set-operand cs 2 label) cs))
+     (define g2 (gswitch (gswitch-loc g) (gswitch-flags g) (gswitch-index g) (fix (gswitch-default-case g))
+                         (for/pvector ([cs (in-pvector (gswitch-cases g))]) (fix cs))))
+     (values nb (cfg-set-touched (bb-set-last-stmt c2 src g2) (intbits-set (GCfg-touched c2) src)) st2)]
+    [else (values nb c1 st)]))
+
+;; split_critical_edges (true): critical edges, and the edges out of a
+;; control statement into a block with several predecessors, PHIs or the
+;; exit (for_edge_insertion_p); every block of the chain, new ones included
+(define (split-edges-for-insertion st c0)
+  (let loop ([bb ENTRY] [c c0] [st st])
+    (cond
+      [(not bb) (values c st)]
+      [else
+       (define-values (c1 st1)
+         (let eloop ([k 0] [c c] [st st])
+           (define ss (cfg-succs c bb))
+           (cond
+             [(>= k (pvector-length ss)) (values c st)]
+             [else
+              (define e (pvector-ref ss k))
+              (define d (GEdge-dest e))
+              (define critical (and (>= (pvector-length ss) 2) (>= (pvector-length (cfg-preds c d)) 2)))
+              (define last (and (not (= bb ENTRY)) (not (= bb EXIT)) (bb-last-stmt c bb)))
+              (define insertion
+                (and (or (not (= 1 (pvector-length (cfg-preds c d))))
+                         (and (cfg-block c d) (not (pvector-empty? (GBlock-phis (cfg-block c d)))))
+                         (= d EXIT))
+                     (not (= bb ENTRY))
+                     last (stmt-ends-bb? last) (not (greturn? last))))
+              (cond
+                [(and (not (edge-flag? e EDGE-ABNORMAL)) (or critical insertion))
+                 (define-values (_nb c2 st2) (split-edge/st st c bb d))
+                 (eloop (add1 k) c2 st2)]
+                [else (eloop (add1 k) c st)])])))
+       (loop (if (= bb EXIT) #f (or (bb-next c1 bb) EXIT)) c1 st1)])))
 
 ;; ---- forwarder blocks -------------------------------------------------------
 

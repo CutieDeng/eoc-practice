@@ -15,13 +15,13 @@
 
 | 类别 | 执行 | 不执行 | 完成 | 恒等 | 未移植（执行） |
 |---|---|---|---|---|---|
-| GIMPLE（tree-） | 110 | 116 | 23 | 25 | 50 |
+| GIMPLE（tree-） | 110 | 116 | 33 | 30 | 35 |
 | IPA（ipa-） | 19 | 17 | 4 | 0 | 0 |
 | RTL（rtl-） | 49 | 45 | 0 | 0 | 0 |
 | 无 dump 名（*） | 20 | 12 | 1 | 0 | 0 |
-| 合计 | 198 | 190 | 28 | 25 | 50 |
+| 合计 | 198 | 190 | 38 | 30 | 35 |
 
-完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 ccp2 到 dom2（其间每个 -O1 执行的 pass 都是完成或恒等）；下一个未移植的是 `tree-copyprop2`，之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
+完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 ccp2 到 fix_loops（其间每个 -O1 执行的 pass 都是完成或恒等）；下一个未移植的是 `tree-loop`，之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
 
 ## 2. 夹具上真正改变代码的晚期 pass（release_ssa 之后）
 
@@ -45,9 +45,9 @@
 | struct.c | `102t.ccp2`, `120t.cselim`, `130t.dom2`, `133t.reassoc1`, `141t.lim2`, `144t.sink1`, `152t.loopinit`, `180t.ivopts`, `182t.loopdone`, `187t.switchlower1`, `195t.dom3`, `196t.strlen1`, `199t.ccp4`, `201t.dse5`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
 | ccp.c | `126t.ch2`, `141t.lim2`, `144t.sink1`, `151t.loop`, `152t.loopinit`, `154t.sccp`, `158t.cddce2`, `180t.ivopts`, `182t.loopdone`, `183t.no_loop`, `186t.veclower21`, `195t.dom3`, `196t.strlen1`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
 
-gcc-15 合并去重：已对齐 7 个（`ch2`, `dom2`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`）；仍需移植 24 个（按出现次数）：`lim2`×3, `loopinit`×3, `veclower21`×3, `dom3`×3, `sink1`×3, `crited1`×3, `optimized`×3, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `copyprop2`×1, `ivcanon`×1, `cunroll`×1, `reassoc2`×1, `dce7`×1, `reassoc1`×1, `switchlower1`×1, `sink2`×1。
+gcc-15 合并去重：已对齐 11 个（`lim2`, `sink1`, `ch2`, `dom2`, `copyprop2`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`, `reassoc1`）；仍需移植 20 个（按出现次数）：`loopinit`×3, `veclower21`×3, `dom3`×3, `crited1`×3, `optimized`×3, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `ivcanon`×1, `cunroll`×1, `reassoc2`×1, `dce7`×1, `switchlower1`×1, `sink2`×1。
 
-gcc-12 合并去重：已对齐 7 个（`ch2`, `dom2`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`）；仍需移植 25 个（按出现次数）：`optimized`×4, `lim2`×3, `loopinit`×3, `veclower21`×3, `dom3`×3, `sink1`×3, `crited1`×3, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `sink2`×2, `copyprop2`×1, `ivcanon`×1, `copyprop3`×1, `cunroll`×1, `reassoc2`×1, `reassoc1`×1, `switchlower1`×1, `dse5`×1。
+gcc-12 合并去重：已对齐 11 个（`lim2`, `sink1`, `ch2`, `dom2`, `copyprop2`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`, `reassoc1`）；仍需移植 21 个（按出现次数）：`optimized`×4, `loopinit`×3, `veclower21`×3, `dom3`×3, `crited1`×3, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `sink2`×2, `ivcanon`×1, `copyprop3`×1, `cunroll`×1, `reassoc2`×1, `switchlower1`×1, `dse5`×1。
 
 `optimized` 的变化来自 pass_cleanup_cfg_post_optimizing 与 out-of-SSA 前的整理。
 
@@ -193,7 +193,7 @@ gcc-12 合并去重：已对齐 7 个（`ch2`, `dom2`, `fixup_cfg3`, `forwprop2`
 | 136 | 　　`tree-stdarg` | ON | ON | 恒等（TODO_remove_unused_locals 在 pass 开始处） |
 | 137 | 　　`tree-cdce` | ON | ON | 恒等 |
 | 138 | 　　`tree-cselim` | ON | ON | 完成（子集：只有 loop_optimizer_init (LOOPS_NORMAL) 的 latch 重建；条件存储消除未移植，夹具无触发） |
-| 139 | 　　`tree-copyprop1` | ON | ON | 恒等 |
+| 139 | 　　`tree-copyprop1` | ON | ON | 完成（`opt/copyprop.rkt`：copy-of 格 + SSA 传播 + substitute_and_fold） |
 | 140 | 　　`tree-ifcombine` | ON | ON | 恒等 |
 | 141 | 　　`tree-mergephi3` | ON | ON | 恒等 |
 | 142 | 　　`tree-phiopt2` | ON | ON | 恒等 |
@@ -204,26 +204,26 @@ gcc-12 合并去重：已对齐 7 个（`ch2`, `dom2`, `fixup_cfg3`, `forwprop2`
 | 147 | 　　`tree-sra` | ON | ON | 恒等 |
 | 148 | 　　`tree-thread1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 149 | 　　`tree-dom2` | ON | ON | 完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle） |
-| 150 | 　　`tree-copyprop2` | ON | ON | 未移植 |
+| 150 | 　　`tree-copyprop2` | ON | ON | 完成（同 copyprop1；basic.c 删掉 dom2 留下的单参数 PHI） |
 | 151 | 　　`tree-isolate-paths` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 152 | 　　`tree-reassoc1` | ON | ON | 未移植 |
-| 153 | 　　`tree-dce3` | ON | ON | 未移植（可复用已实现的 dce） |
-| 154 | 　　`tree-forwprop3` | ON | ON | 未移植（可复用已实现的 forwprop） |
-| 155 | 　　`tree-phiopt3` | ON | ON | 未移植 |
-| 156 | 　　`tree-ccp3` | ON | ON | 未移植（可复用已实现的 ccp） |
-| 157 | 　　`tree-pow` | ON | 无 | 未移植 |
+| 152 | 　　`tree-reassoc1` | ON | ON | 完成（`opt/reassoc.rkt`：rank、linearize、按 rank 排序、常量合并、串行 rewrite_expr_tree；新名字取 SSA 空闲表；range test / undistribute / 并行重写未移植） |
+| 153 | 　　`tree-dce3` | ON | ON | 完成（复用 dce） |
+| 154 | 　　`tree-forwprop3` | ON | ON | 完成（复用 forwprop） |
+| 155 | 　　`tree-phiopt3` | ON | ON | 恒等 |
+| 156 | 　　`tree-ccp3` | ON | ON | 完成（复用 ccp，nonzero_p） |
+| 157 | 　　`tree-pow` | ON | 无 | 恒等 |
 | 158 | 　　`tree-bswap` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 159 | 　　`tree-laddress` | ON | ON | 未移植 |
-| 160 | 　　`tree-lim2` | ON | ON | 未移植 |
-| 161 | 　　`tree-walloca2` | ON | ON | 未移植 |
+| 159 | 　　`tree-laddress` | ON | ON | 恒等 |
+| 160 | 　　`tree-lim2` | ON | ON | 完成（子集：只有 loop_optimizer_init 的 preheader / latch；不变量外提未移植，夹具无触发） |
+| 161 | 　　`tree-walloca2` | ON | ON | 恒等 |
 | 162 | 　　`tree-pre` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 163 | 　　`tree-sink1` | ON | ON | 未移植 |
+| 163 | 　　`tree-sink1` | ON | ON | 完成（子集：loop_optimizer_init + split_edges_for_insertion（switch 边新建 case 标号）；语句下沉未移植，夹具无触发） |
 | 164 | 　　`tree-sancov1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 165 | 　　`tree-asan1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 166 | 　　`tree-tsan1` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 167 | 　　`tree-dse3` | ON | ON | 未移植（可复用已实现的 dse） |
-| 168 | 　　`tree-dce4` | ON | ON | 未移植（可复用已实现的 dce） |
-| 169 | 　　`tree-fix_loops` | ON | ON | 未移植 |
+| 167 | 　　`tree-dse3` | ON | ON | 完成（复用 dse） |
+| 168 | 　　`tree-dce4` | ON | ON | 完成（复用 dce） |
+| 169 | 　　`tree-fix_loops` | ON | ON | 恒等 |
 | 170 | 　　`tree-loop` | ON | ON | 未移植 |
 | 171 | 　　　`tree-loopinit` | ON | ON | 未移植 |
 | 172 | 　　　`tree-unswitch` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -263,7 +263,7 @@ gcc-12 合并去重：已对齐 7 个（`ch2`, `dom2`, `fixup_cfg3`, `forwprop2`
 | 206 | 　　`tree-simduid1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 207 | 　　`tree-veclower21` | ON | ON | 未移植 |
 | 208 | 　　`tree-switchlower1` | ON | ON | 未移植 |
-| 209 | 　　`tree-sincos` | ON | ON | 未移植 |
+| 209 | 　　`tree-sincos` | ON | ON | 恒等 |
 | 210 | 　　`tree-recip` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 211 | 　　`tree-reassoc2` | ON | ON | 未移植 |
 | 212 | 　　`tree-slsr` | ON | ON | 未移植 |
@@ -672,7 +672,7 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 | `-ftree-ccp` | ○ | ● | ● | ● | 完成（ccp1） |
 | `-ftree-ch` | ○ | ● | ● | ● | 完成（ch2） |
 | `-ftree-coalesce-vars` | ○ | ● | ● | ● | 未移植（out-of-SSA） |
-| `-ftree-copy-prop` | ○ | ● | ● | ● | 未移植 |
+| `-ftree-copy-prop` | ○ | ● | ● | ● | 完成（copyprop1/2） |
 | `-ftree-cselim` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
 | `-ftree-dce` | ○ | ● | ● | ● | 完成（cddce1、dce2；后续实例未） |
 | `-ftree-dominator-opts` | ○ | ● | ● | ● | 完成（dom2） |
@@ -691,9 +691,9 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 | `-ftree-phiprop` | ● | ● | ● | ● | 恒等 |
 | `-ftree-pre` | ○ | ○ | ● | ● | 不在 -O1 范围（-O2） |
 | `-ftree-pta` | ○ | ● | ● | ● | 恒等 / 未移植（PTA） |
-| `-ftree-reassoc` | ● | ● | ● | ● | 未移植 |
+| `-ftree-reassoc` | ● | ● | ● | ● | 完成（reassoc1 串行子集） |
 | `-ftree-scev-cprop` | ● | ● | ● | ● | 未移植 |
-| `-ftree-sink` | ○ | ● | ● | ● | 未移植 |
+| `-ftree-sink` | ○ | ● | ● | ● | 部分（sink1 的边拆分；下沉未移植） |
 | `-ftree-slp-vectorize` | ○ | ○ | ● | ● | 不在 -O1 范围（-O2） |
 | `-ftree-slsr` | ○ | ● | ● | ● | 未移植 |
 | `-ftree-sra` | ○ | ● | ● | ● | 恒等（esra）/ 未移植（sra） |
@@ -734,5 +734,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- 最近一次实测：`o1-test.rkt` 368 项（4 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 721/722 通过（失败的 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
+- 最近一次实测：`o1-test.rkt` 480 项（4 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 833/834 通过（失败的 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。

@@ -29,7 +29,7 @@
          "../ssa.rkt"
          "ssa-ops.rkt")
 
-(provide gcfg->mfn mfn->gcfg mfn-cfg
+(provide gcfg->mfn mfn->gcfg mfn-cfg mfn-live?
          mfn-stmt mfn-bb mfn-phi? mfn-phis mfn-stmts mfn-first mfn-last mfn-next mfn-prev
          mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-imm-uses mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
          mfn-replace! mfn-relink! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
@@ -105,6 +105,7 @@
 
 (define (cell-of m id) (hash-ref (mfn-cells m) id))
 (define (mfn-stmt m id) (cell-stmt (cell-of m id)))
+(define (mfn-live? m id) (hash-has-key? (mfn-cells m) id))
 (define (mfn-bb m id) (cell-bb (cell-of m id)))
 (define (mfn-phi? m id) (gphi? (mfn-stmt m id)))
 (define (mfn-phis m bb) (hash-ref (mfn-phi-lists m) bb '()))

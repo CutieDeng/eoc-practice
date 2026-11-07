@@ -75,7 +75,7 @@
       (define st0 (gs-set-ssa-version (gs-set-fndecl st decl) (vector-ref f 3)))
       (define-values (cfg* st* locals*)
         (for/fold ([cfg (vector-ref f 1)] [st st0] [locals (vector-ref f 2)]) ([p (in-list (o1-passes st0))])
-          (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
+          (define-values (cfg1 st1) (run-pass p st decl cfg))
           (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
           (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
           (values cfg1 st1 locals1)))
@@ -97,7 +97,7 @@
          (values c2 (remove-unused-locals s2 c2 l) s2)]
         [else (values (vector-ref f 1) (vector-ref f 2) st0)]))
     (for/fold ([cfg cfg-i] [st st-i] [locals locals-i] #:result st) ([p (in-list (late-passes st-i))])
-      (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
+      (define-values (cfg1 st1) (run-pass p st decl cfg))
       (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
       (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
       (values cfg1 st1 locals1)))

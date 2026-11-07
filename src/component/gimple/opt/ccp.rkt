@@ -46,7 +46,7 @@
          "irange.rkt"
          "range-info.rkt")
 
-(provide ccp)
+(provide ccp dce-from-worklist)
 
 
 ;; ------------------------------------------------------------
@@ -712,6 +712,12 @@
     (define (keep-stmt? g) (let ([l (stmt-ssa-lhs g)]) (not (and l (intbits-ref queued (ssa-ver l))))))
     (set-block cfg (block-set-stmts (block-set-phis b (pvector-filter (GBlock-phis b) keep-phi?))
                                     (pvector-filter (GBlock-stmts b) keep-stmt?)))))
+
+;; substitute_and_fold's dead code removal for another propagator
+;; (simple_dce_from_worklist from GCC 14 on, the queued statements before)
+(define (dce-from-worklist st cfg wl)
+  (define c (C st cfg #f #f #f '() 0))
+  (if (>= (gcc-major-version st) 14) (simple-dce c cfg wl) (remove-queued c cfg wl)))
 
 ;; substitute_and_fold: (values cfg changed?)
 (define (ccp-finalize c)

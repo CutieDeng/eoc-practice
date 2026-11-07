@@ -31,7 +31,7 @@
 (provide let/st
          make-gs optimize? gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-ssa-version gs-set-globals
          gcc-major-version
-         fresh-uid fresh-tmp-var-id fresh-ssa-version
+         fresh-uid fresh-tmp-var-id fresh-ssa-version ssa-free-queue ssa-queue-release ssa-flush-free ssa-clear-free
          decl-flag set-decl-flag decl-initial
          type-ref type-code type-attr add-type type-type type-main-variant
          global-type void-type boolean-type size-type sizetype ptr-type
@@ -100,11 +100,36 @@
   (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (add1 n)
                 (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st))))
 
-;; SSA versions start at 1 (0 is reserved)
+;; SSA versions start at 1 (0 is reserved).  make_ssa_name_fn takes the
+;; last released version of the current function first (FREE_SSANAMES is a
+;; LIFO), else a new one.
 (define (fresh-ssa-version st)
-  (define n (add1 (GS-ssa-version st)))
-  (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
-                n (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st))))
+  (define fn (GS-fndecl st))
+  (define free (if fn (decl-flag st fn 'ssa-free '()) '()))
+  (cond
+    [(pair? free) (values (car free) (set-decl-flag st fn 'ssa-free (cdr free)))]
+    [else
+     (define n (add1 (GS-ssa-version st)))
+     (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
+                   n (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))]))
+
+;; release_ssa_name_fn queues a version (FREE_SSANAMES_QUEUE); execute_todo's
+;; flush_ssaname_freelist appends the queue to the free list after a pass;
+;; release_ssa (compaction) empties both.  Lists are kept with the most
+;; recently released version first.
+(define (ssa-free-queue st) (let ([fn (GS-fndecl st)]) (if fn (decl-flag st fn 'ssa-free-queue '()) '())))
+(define (ssa-queue-release st v)
+  (define fn (GS-fndecl st))
+  (if fn (set-decl-flag st fn 'ssa-free-queue (cons v (ssa-free-queue st))) st))
+(define (ssa-flush-free st)
+  (define fn (GS-fndecl st))
+  (if fn
+      (set-decl-flag (set-decl-flag st fn 'ssa-free (append (ssa-free-queue st) (decl-flag st fn 'ssa-free '())))
+                     fn 'ssa-free-queue '())
+      st))
+(define (ssa-clear-free st)
+  (define fn (GS-fndecl st))
+  (if fn (set-decl-flag (set-decl-flag st fn 'ssa-free '()) fn 'ssa-free-queue '()) st))
 
 ;; ------------------------------------------------------------
 ;; Declaration flags (mutable bits of a decl, keyed by uid)

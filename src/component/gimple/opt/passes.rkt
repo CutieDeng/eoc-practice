@@ -17,6 +17,7 @@
          "../../../kernel/ir/gimple/types.rkt"
          "../state.rkt"
          "../cfg.rkt"
+         (only-in "../ssa.rkt" ssa-names-in-version-order)
          "ccp.rkt"
          "forwprop.rkt"
          "vn.rkt"
@@ -29,12 +30,38 @@
          "fixup-cfg.rkt"
          "loops.rkt"
          "ch.rkt"
-         "dom.rkt")
+         "dom.rkt"
+         "copyprop.rkt"
+         "reassoc.rkt"
+         (only-in "../print.rkt" print-cond-rhs))
 
-(provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
+(provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? run-pass)
 (define pass-name car)
 (define pass-fn cadr)
 (define pass-prunes-locals? caddr)
+
+;; execute_one_pass for one function: the pass, then the SSA free list
+;; bookkeeping of execute_todo.  A pass that records its releases
+;; (ssa-queue-release, in release order) is taken as is; the versions that
+;; disappeared without being recorded are queued in descending order (the
+;; order of a bottom-up dead-code walk, which is what the passes that do
+;; not record do on the fixtures).  release_ssa empties the free list.
+(define (live-versions cfg)
+  (for/hasheqv ([n (in-pvector (ssa-names-in-version-order cfg))] #:unless (tree-attr n 'default-def #f))
+    (values (ssa-name-version n) #t)))
+(define (run-pass p st decl cfg)
+  (define before (live-versions cfg))
+  (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
+  (define st2 (gs-set-fndecl st1 decl))
+  (cond
+    [(eq? (pass-name p) 'release_ssa) (values cfg1 (ssa-clear-free st2))]
+    [else
+     (define after (live-versions cfg1))
+     (define queued (ssa-free-queue st2))
+     (define unrecorded
+       (sort (for/list ([v (in-hash-keys before)] #:unless (or (hash-ref after v #f) (memv v queued))) v) >))
+     (define st3 (for/fold ([st st2]) ([v (in-list unrecorded)]) (ssa-queue-release st v)))
+     (values cfg1 (ssa-flush-free st3))]))
 
 ;; a pass without effect: a fresh dump_file, nothing else
 (define (identity-pass st fndecl cfg) (values (cfg-clear-messages cfg) st))
@@ -95,11 +122,27 @@
          (p 'dse2 dse) (p 'dce2 dce (>= major 15))
          (p 'stdarg identity-pass #t) (p 'cdce identity-pass)   ; stdarg: TODO_remove_unused_locals at start
          ;; pass_cselim: loop_optimizer_init (LOOPS_NORMAL) re-creates the simple latches
-         (p 'cselim loops-normal-pass) (p 'copyprop1 identity-pass) (p 'ifcombine identity-pass) (p 'mergephi3 identity-pass)
+         (p 'cselim loops-normal-pass) (p 'copyprop1 copyprop) (p 'ifcombine identity-pass) (p 'mergephi3 identity-pass)
          (p 'phiopt2 identity-pass)
          (p 'ch2 ch-pass) (p 'cplxlower1 identity-pass))
    (if (>= major 14) (list (p 'bitintlower1 identity-pass)) '())
-   (list (p 'sra identity-pass) (p 'dom2 dom-pass))))
+   (list (p 'sra identity-pass) (p 'dom2 dom-pass)
+         (p 'copyprop2 copyprop) (p 'reassoc1 (reassoc-pass #t)) (p 'dce3 dce) (p 'forwprop3 forwprop)
+         (p 'phiopt3 identity-pass) (p 'ccp3 ccp2)
+         ;; pass_cse_pow (GCC 15) / pass_cse_sincos (before): no pow / sincos calls on the fixtures
+         (p (if (>= major 15) 'pow 'sincos) identity-pass) (p 'laddress identity-pass)
+         ;; pass_lim: loop_optimizer_init (LOOPS_NORMAL); no invariant is moved on the fixtures
+         (p 'lim2 loops-normal-pass) (p 'walloca2 identity-pass)
+         (p 'sink1 (sink-pass #f)) (p 'dse3 dse) (p 'dce4 dce) (p 'fix_loops identity-pass))))
+
+;; pass_sink_code: loop_optimizer_init (LOOPS_NORMAL), split_edges_for_insertion,
+;; the statement sinking (not ported: nothing is sunk on the fixtures);
+;; UNSPLIT? asks for TODO_cleanup_cfg
+(define ((sink-pass unsplit?) st0 fndecl cfg)
+  (define st (gs-set-fndecl st0 fndecl))
+  (define cfg1 (normalize-loops st (cfg-clear-messages cfg)))
+  (define-values (cfg2 st2) (split-edges-for-insertion st cfg1))
+  (if unsplit? (cleanup-tree-cfg st2 cfg2 print-cond-rhs) (values cfg2 st2)))
 
 ;; a pass whose only visible effect on the fixtures is loop_optimizer_init (LOOPS_NORMAL)
 (define (loops-normal-pass st fndecl cfg)
