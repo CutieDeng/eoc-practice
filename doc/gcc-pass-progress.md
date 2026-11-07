@@ -9,21 +9,25 @@
 - **优化开关**：`gcc-15 -O{0,1,2,3} -Q --help=optimizers`：275 个开关；-O0 启用 54，-O1 新增 43（共 96），-O2 再增 46（共 142），-O3 再增 14（共 156），135 个在 -O0 到 -O3 下都不默认启用。另有 316 个 `--param`，不在本表。
 - **对齐判据**：`src/component/gimple/o1-test.rkt`，4 夹具（basic.c、calls.c、struct.c、ccp.c）× 2 版本逐函数比较归一化 dump。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。
 
+- **执行与否**：`-fdump-passes` 在编译任何函数之前对每个 gate 求值一次，所以看函数的 gate（循环 pass、postreload）打印 OFF，而关闭分组里的子 pass 可能打印 ON。GIMPLE pass 改用夹具的 dump 文件判定：4 个夹具中任一个有该 pass 的 dump 文件即为执行；两者不一致时 gcc-15 列写成 `ON（实际未执行）` / `OFF（实际执行）`。IPA、RTL 与无 dump 名的 pass 仍按 `-fdump-passes`。统计表的“执行 / 不执行”按此口径。
+
 ## 1. 统计（gcc-15 pass 树实例，-O1）
 
-| 类别 | ON | OFF | 完成 | 恒等 | 未移植（ON） |
+| 类别 | 执行 | 不执行 | 完成 | 恒等 | 未移植（执行） |
 |---|---|---|---|---|---|
-| GIMPLE（tree-） | 141 | 85 | 22 | 25 | 82 |
+| GIMPLE（tree-） | 110 | 116 | 22 | 25 | 51 |
 | IPA（ipa-） | 19 | 17 | 4 | 0 | 0 |
 | RTL（rtl-） | 49 | 45 | 0 | 0 | 0 |
 | 无 dump 名（*） | 20 | 12 | 1 | 0 | 0 |
-| 合计 | 229 | 159 | 27 | 25 | 82 |
+| 合计 | 198 | 190 | 27 | 25 | 51 |
 
-完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 fixup_cfg3 到 dce2；之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
+完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 ccp2 到 sra（其间每个 -O1 执行的 pass 都是完成或恒等）；下一个未移植的是 `tree-dom2`，之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
 
-## 2. 夹具上真正改变代码的晚期 pass（gcc-15，release_ssa 之后）
+## 2. 夹具上真正改变代码的晚期 pass（release_ssa 之后）
 
-按 dump 两两比较函数体得到；没有列出的晚期 pass 在该夹具上是恒等的（对齐时只需输出与前一 pass 相同的 dump）。这是晚期序列的移植优先级依据。
+按 dump 两两比较函数体得到（`;;` 行与函数之间的消息不计）；没有列出的晚期 pass 在该夹具上是恒等的（对齐时只需输出与前一 pass 相同的 dump）。这是晚期序列的移植优先级依据。gcc-12 的 dump 编号与 gcc-15 不同，两表分列。
+
+**gcc-15**
 
 | 夹具 | 改变代码的 pass |
 |---|---|
@@ -32,7 +36,20 @@
 | struct.c | `109t.ccp2`, `129t.cselim`, `140t.dom2`, `143t.reassoc1`, `151t.lim2`, `154t.sink1`, `162t.loopinit`, `191t.ivopts`, `193t.loopdone`, `198t.switchlower1`, `207t.dom3`, `208t.strlen1`, `211t.ccp4`, `215t.forwprop4`, `224t.crited1`, `270t.optimized` |
 | ccp.c | `135t.ch2`, `151t.lim2`, `154t.sink1`, `161t.loop`, `162t.loopinit`, `165t.sccp`, `168t.cddce2`, `191t.ivopts`, `193t.loopdone`, `194t.no_loop`, `197t.veclower21`, `207t.dom3`, `208t.strlen1`, `215t.forwprop4`, `216t.sink2`, `224t.crited1`, `270t.optimized` |
 
-合并去重后需要移植的晚期 pass（按出现次数）：`lim2`×3, `loopinit`×3, `veclower21`×3, `dom3`×3, `sink1`×3, `crited1`×3, `optimized`×3, `ch2`×2, `dom2`×2, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `copyprop2`×1, `ivcanon`×1, `cunroll`×1, `reassoc2`×1, `dce7`×1, `fixup_cfg3`×1, `forwprop2`×1, `dce2`×1, `ccp2`×1, `cselim`×1, `reassoc1`×1, `switchlower1`×1, `sink2`×1。`optimized` 的变化来自 pass_cleanup_cfg_post_optimizing 与 out-of-SSA 前的整理。
+**gcc-12**
+
+| 夹具 | 改变代码的 pass |
+|---|---|
+| basic.c | `126t.ch2`, `130t.dom2`, `131t.copyprop2`, `141t.lim2`, `151t.loop`, `152t.loopinit`, `154t.sccp`, `158t.cddce2`, `159t.ivcanon`, `162t.copyprop3`, `175t.cunroll`, `183t.no_loop`, `186t.veclower21`, `189t.reassoc2`, `195t.dom3`, `199t.ccp4`, `252t.optimized` |
+| calls.c | `094t.fixup_cfg3`, `109t.forwprop2`, `118t.stdarg`, `144t.sink1`, `186t.veclower21`, `211t.crited1`, `252t.optimized` |
+| struct.c | `102t.ccp2`, `120t.cselim`, `130t.dom2`, `133t.reassoc1`, `141t.lim2`, `144t.sink1`, `152t.loopinit`, `180t.ivopts`, `182t.loopdone`, `187t.switchlower1`, `195t.dom3`, `196t.strlen1`, `199t.ccp4`, `201t.dse5`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
+| ccp.c | `126t.ch2`, `141t.lim2`, `144t.sink1`, `151t.loop`, `152t.loopinit`, `154t.sccp`, `158t.cddce2`, `180t.ivopts`, `182t.loopdone`, `183t.no_loop`, `186t.veclower21`, `195t.dom3`, `196t.strlen1`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
+
+gcc-15 合并去重：已对齐 6 个（`ch2`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`）；仍需移植 25 个（按出现次数）：`lim2`×3, `loopinit`×3, `veclower21`×3, `dom3`×3, `sink1`×3, `crited1`×3, `optimized`×3, `dom2`×2, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `copyprop2`×1, `ivcanon`×1, `cunroll`×1, `reassoc2`×1, `dce7`×1, `reassoc1`×1, `switchlower1`×1, `sink2`×1。
+
+gcc-12 合并去重：已对齐 6 个（`ch2`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`）；仍需移植 26 个（按出现次数）：`optimized`×4, `lim2`×3, `loopinit`×3, `veclower21`×3, `dom3`×3, `sink1`×3, `crited1`×3, `dom2`×2, `loop`×2, `sccp`×2, `cddce2`×2, `no_loop`×2, `ccp4`×2, `ivopts`×2, `loopdone`×2, `strlen1`×2, `forwprop4`×2, `sink2`×2, `copyprop2`×1, `ivcanon`×1, `copyprop3`×1, `cunroll`×1, `reassoc2`×1, `reassoc1`×1, `switchlower1`×1, `dse5`×1。
+
+`optimized` 的变化来自 pass_cleanup_cfg_post_optimizing 与 out-of-SSA 前的整理。
 
 ## 3. 完整 pass 树（gcc-15 顺序；缩进 = 嵌套层级；gcc-12 列 = 该 pass 在 gcc-12 的 gate 状态，`无` = gcc-12 没有该 pass）
 
@@ -107,13 +124,13 @@
 | 67 | 　　`ipa-pta1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 68 | 　　`ipa-ipa_oacc_kernels` | ON | ON | 范围外（IPA） |
 | 69 | 　　　`tree-oacc_kernels` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 70 | 　　　　`tree-ch1` | ON | ON | 未移植 |
-| 71 | 　　　　`tree-fre2` | ON | ON | 未移植（可复用已实现的 fre） |
-| 72 | 　　　　`tree-lim1` | ON | ON | 未移植 |
-| 73 | 　　　　`tree-dom1` | ON | ON | 未移植 |
-| 74 | 　　　　`tree-dce1` | ON | ON | 未移植（可复用已实现的 dce） |
+| 70 | 　　　　`tree-ch1` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 71 | 　　　　`tree-fre2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 72 | 　　　　`tree-lim1` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 73 | 　　　　`tree-dom1` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 74 | 　　　　`tree-dce1` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 75 | 　　　　`tree-parloops1` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 76 | 　　　　`tree-ompexpssa1` | ON | ON | 未移植 |
+| 76 | 　　　　`tree-ompexpssa1` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 77 | 　　　　`*rebuild_cgraph_edges` | ON | ON | 范围外 / 不比较 |
 | 78 | 　`ipa-targetclone` | ON | ON | 范围外（IPA） |
 | 79 | 　`ipa-afdo` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -148,7 +165,7 @@
 | 108 | 　`tree-oaccloops` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 109 | 　`tree-omp_oacc_neuter_broadcast` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 110 | 　`tree-oaccdevlow` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 111 | 　`tree-ompdevlow` | ON | ON | 未移植 |
+| 111 | 　`tree-ompdevlow` | ON（实际未执行） | ON | 不比较（无 OpenMP） |
 | 112 | 　`tree-omptargetlink` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 113 | 　`tree-adjust_alignment` | ON | ON | 恒等 |
 | 114 | 　`tree-hardcfr` | OFF | 无 | gate 关闭（-O1 不执行） |
@@ -222,26 +239,26 @@
 | 182 | 　　　`tree-copyprop3` | ON | ON | 未移植 |
 | 183 | 　　　`tree-graphite0` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 184 | 　　　　`tree-graphite` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 185 | 　　　　`tree-lim3` | ON | ON | 未移植 |
-| 186 | 　　　　`tree-copyprop4` | ON | ON | 未移植 |
-| 187 | 　　　　`tree-dce5` | ON | ON | 未移植（可复用已实现的 dce） |
+| 185 | 　　　　`tree-lim3` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 186 | 　　　　`tree-copyprop4` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 187 | 　　　　`tree-dce5` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 188 | 　　　`tree-parloops2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 189 | 　　　`tree-ompexpssa2` | ON | ON | 未移植 |
+| 189 | 　　　`tree-ompexpssa2` | ON（实际未执行） | ON | 不比较（无 OpenMP） |
 | 190 | 　　　`tree-ch_vect` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 191 | 　　　`tree-ifcvt` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 192 | 　　　`tree-vect` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 193 | 　　　　`tree-dce6` | ON | ON | 未移植（可复用已实现的 dce） |
+| 193 | 　　　　`tree-dce6` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 194 | 　　　`tree-pcom` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 195 | 　　　`tree-cunroll` | ON | ON | 未移植 |
 | 196 | 　　　`*pre_slp_scalar_cleanup` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 197 | 　　　　`tree-fre4` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 198 | 　　　　`tree-dse4` | ON | ON | 未移植（可复用已实现的 dse） |
+| 198 | 　　　　`tree-dse4` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 199 | 　　　`tree-slp1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 200 | 　　　`tree-aprefetch` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 201 | 　　　`tree-ivopts` | ON | ON | 未移植 |
 | 202 | 　　　`tree-lim4` | ON | ON | 未移植 |
 | 203 | 　　　`tree-loopdone` | ON | ON | 未移植 |
-| 204 | 　　`tree-no_loop` | OFF | OFF | gate 关闭（-O1 不执行） |
+| 204 | 　　`tree-no_loop` | OFF（实际执行） | OFF | 未移植 |
 | 205 | 　　　`tree-slp2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 206 | 　　`tree-simduid1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 207 | 　　`tree-veclower21` | ON | ON | 未移植 |
@@ -279,35 +296,35 @@
 | 239 | 　`*all_optimizations_g` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 240 | 　　`*remove_cgraph_callee_edges` | ON | ON | 范围外 / 不比较 |
 | 241 | 　　`*strip_predict_hints` | ON | ON | 范围外 / 不比较 |
-| 242 | 　　`tree-cplxlower2` | ON | ON | 未移植 |
-| 243 | 　　`tree-bitintlower2` | ON | 无 | 未移植 |
-| 244 | 　　`tree-veclower22` | ON | ON | 未移植 |
-| 245 | 　　`tree-switchlower2` | ON | ON | 未移植 |
-| 246 | 　　`tree-ccp5` | ON | ON | 未移植（可复用已实现的 ccp） |
+| 242 | 　　`tree-cplxlower2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 243 | 　　`tree-bitintlower2` | ON（实际未执行） | 无 | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 244 | 　　`tree-veclower22` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 245 | 　　`tree-switchlower2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 246 | 　　`tree-ccp5` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 247 | 　　`tree-post_ipa_warn2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 248 | 　　`tree-objsz2` | ON | ON | 未移植 |
-| 249 | 　　`tree-fab2` | ON | ON | 未移植 |
-| 250 | 　　`tree-strlen2` | ON | ON | 未移植 |
-| 251 | 　　`tree-copyprop5` | ON | ON | 未移植 |
-| 252 | 　　`tree-dce8` | ON | ON | 未移植（可复用已实现的 dce） |
-| 253 | 　　`tree-rebuild_frequencies2` | ON | 无 | 未移植 |
+| 248 | 　　`tree-objsz2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 249 | 　　`tree-fab2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 250 | 　　`tree-strlen2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 251 | 　　`tree-copyprop5` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 252 | 　　`tree-dce8` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 253 | 　　`tree-rebuild_frequencies2` | ON（实际未执行） | 无 | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 254 | 　　`tree-sancov2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 255 | 　　`tree-asan2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 256 | 　　`tree-tsan2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 257 | 　　`tree-crited2` | ON | ON | 未移植 |
+| 257 | 　　`tree-crited2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 258 | 　　`tree-uninit2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 259 | 　　`tree-uncprop2` | ON | ON | 未移植 |
+| 259 | 　　`tree-uncprop2` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 260 | 　`tree-assumptions` | OFF | 无 | gate 关闭（-O1 不执行） |
 | 261 | 　`*tminit` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 262 | 　　`tree-tmmark` | ON | ON | 未移植 |
+| 262 | 　　`tree-tmmark` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 263 | 　　`tree-tmmemopt` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 264 | 　　`tree-tmedge` | ON | ON | 未移植 |
+| 264 | 　　`tree-tmedge` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 265 | 　`tree-simduid2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 266 | 　`tree-vtable-verify` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 267 | 　`tree-lower_vaarg` | ON | ON | 未移植 |
-| 268 | 　`tree-veclower` | ON | ON | 未移植 |
-| 269 | 　`tree-cplxlower0` | ON | ON | 未移植 |
-| 270 | 　`tree-bitintlower0` | ON | 无 | 未移植 |
+| 267 | 　`tree-lower_vaarg` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 268 | 　`tree-veclower` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 269 | 　`tree-cplxlower0` | ON（实际未执行） | ON | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
+| 270 | 　`tree-bitintlower0` | ON（实际未执行） | 无 | 未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 271 | 　`tree-sancov_O0` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 272 | 　`tree-switchlower_O0` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 273 | 　`tree-asan0` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -640,7 +657,7 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 | `-fstack-protector-explicit` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
 | `-fstack-protector-strong` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
 | `-fstack-reuse=[all|named_vars|none]` | all | all | all | all | 不在 -O1 范围（默认关闭） |
-| `-fstdarg-opt` | ● | ● | ● | ● | 未移植 |
+| `-fstdarg-opt` | ● | ● | ● | ● | 恒等（stdarg） |
 | `-fstore-merging` | ○ | ○ | ● | ● | 不在 -O1 范围（-O2） |
 | `-fstrict-aliasing` | ○ | ○ | ● | ● | 不在 -O1 范围（-O2） |
 | `-fstrict-enums` | available in C++, ObjC++ | available in C++, ObjC++ | available in C++, ObjC++ | available in C++, ObjC++ | 不在 -O1 范围（默认关闭） |
@@ -651,13 +668,13 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 | `-ftrapping-math` | ● | ● | ● | ● | 部分 |
 | `-ftrapv` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
 | `-ftree-bit-ccp` | ○ | ● | ● | ● | 完成（ccp1） |
-| `-ftree-builtin-call-dce` | ○ | ● | ● | ● | 未移植（cdce） |
+| `-ftree-builtin-call-dce` | ○ | ● | ● | ● | 恒等（cdce） |
 | `-ftree-ccp` | ○ | ● | ● | ● | 完成（ccp1） |
-| `-ftree-ch` | ○ | ● | ● | ● | 未移植 |
+| `-ftree-ch` | ○ | ● | ● | ● | 完成（ch2） |
 | `-ftree-coalesce-vars` | ○ | ● | ● | ● | 未移植（out-of-SSA） |
 | `-ftree-copy-prop` | ○ | ● | ● | ● | 未移植 |
 | `-ftree-cselim` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
-| `-ftree-dce` | ○ | ● | ● | ● | 完成（cddce1；dce2+ 未） |
+| `-ftree-dce` | ○ | ● | ● | ● | 完成（cddce1、dce2；后续实例未） |
 | `-ftree-dominator-opts` | ○ | ● | ● | ● | 未移植 |
 | `-ftree-dse` | ○ | ● | ● | ● | 完成（dse1） |
 | `-ftree-forwprop` | ● | ● | ● | ● | 完成（forwprop1） |
@@ -717,5 +734,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- `o1-test.rkt` 276 项（4 夹具 × 2 版本 × 阶段），全套通过（aarch64 scribble 文档模块因缺 scribble collection 加载失败，与本工作无关）。
+- 最近一次实测：`o1-test.rkt` 360 项（4 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 713/714 通过（失败的 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。
