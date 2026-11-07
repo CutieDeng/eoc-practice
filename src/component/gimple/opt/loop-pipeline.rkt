@@ -19,6 +19,8 @@
 ;;   (function-has-loops? cfg)            gate_loop: number_of_loops > 1
 ;;   (in-loop-pipeline? st decl cfg)      gate of the sub-passes
 ;;   (not-in-loop-pipeline? st decl cfg)  gate of pass_tree_no_loop
+;;   (no-loop-pass st decl cfg)           pass_tree_no_loop (provides PROP_loop_opts_done)
+;;   (loop-opts-done? st decl)            PROP_loop_opts_done (set by loopdone / no_loop)
 ;;   (loop-pass st decl cfg)              pass_tree_loop (no execute)
 ;;   (loop-init-pass st decl cfg)         pass_tree_loop_init:
 ;;     loop_optimizer_init (LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS),
@@ -46,7 +48,7 @@
          "update-ssa.rkt"
          (only-in "../print.rkt" print-cond-rhs))
 
-(provide function-has-loops? in-loop-pipeline? not-in-loop-pipeline? loop-pass loop-init-pass loop-done-pass
+(provide function-has-loops? in-loop-pipeline? not-in-loop-pipeline? no-loop-pass loop-opts-done? loop-pass loop-init-pass loop-done-pass
          rewrite-into-loop-closed-ssa loops-state set-loops-state)
 
 (define (loops-state st decl) (decl-flag st decl 'loops-state '()))
@@ -57,6 +59,8 @@
   (pair? loops))
 (define (in-loop-pipeline? st decl cfg) (decl-flag st decl 'loop-pipeline #f))
 (define (not-in-loop-pipeline? st decl cfg) (not (in-loop-pipeline? st decl cfg)))
+(define (loop-opts-done? st decl) (decl-flag st decl 'loop-opts-done #f))
+(define (no-loop-pass st decl cfg) (values cfg (set-decl-flag st decl 'loop-opts-done #t)))
 
 (define (loop-pass st decl cfg)
   (values (cfg-clear-messages cfg) (set-decl-flag st decl 'loop-pipeline #t)))
@@ -187,7 +191,7 @@
     (if (and (memq 'lcssa state) (memq 'recorded-exits state))
         (clean-up-loop-closed-phi st cfg)
         (values cfg st)))
-  (define st2 (set-loops-state st1 decl '()))
+  (define st2 (set-decl-flag (set-loops-state st1 decl '()) decl 'loop-opts-done #t))
   (cleanup-tree-cfg st2 cfg1 print-cond-rhs))
 
 ;; get_loop_exit_edges with LOOPS_HAVE_RECORDED_EXITS: record_loop_exits

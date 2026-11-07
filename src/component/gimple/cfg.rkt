@@ -46,7 +46,8 @@
          bb-next bb-prev
          redirect-edge-succ find-edge edge-flag? single-succ-p single-pred-p single-succ last-basic-block block-set-preds
          split-edge/st split-edges-for-insertion
-         cfg-dom (struct-out Loop) find-loops loop-inside? loop-of replace-uses-by bb-set-last-stmt delete-basic-block replace-uses-folder)
+         cfg-dom (struct-out Loop) find-loops loop-inside? loop-of replace-uses-by bb-set-last-stmt delete-basic-block replace-uses-folder
+         cleanup-dead-labels redirect-edge-and-branch bb-remove-last-stmt)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -1283,9 +1284,12 @@
   (GCfg blocks edges l->bb (GCfg-next-label-uid c) (GCfg-messages c) intbits-empty intbits-empty prof #f))
 
 ;; cleanup_tree_cfg_noloop: (values cfg st)
-(define (cleanup-tree-cfg st c cond->string)
+;; AFTER-PRE: the SSA update of the TODO flags, run once the control
+;; flow is cleaned (cleanup_tree_cfg_noloop's update_ssa): (st cfg) -> (values cfg st)
+(define (cleanup-tree-cfg st0 c cond->string #:after-pre [after-pre #f])
   (define c0 (cfg-set-altered c intbits-empty))
-  (define-values (_changed c1) (cleanup-control-flow-pre st c0 cond->string))
+  (define-values (_changed c1a) (cleanup-control-flow-pre st0 c0 cond->string))
+  (define-values (c1 st) (if after-pre (after-pre st0 c1a) (values c1a st0)))
   (define-values (c2 st2)
     (for/fold ([c c1] [st st] #:result (values c st)) ([i (in-range 2 (last-basic-block c1))])
       (cond

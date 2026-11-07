@@ -42,7 +42,7 @@
          "fold.rkt"
          "mfn.rkt")
 
-(provide follow-ssa-edges? fold-stmt simplify-assign-rhs simplify-cond canonicalize-mem-ref-addr gimple-fold-stmt-to-constant
+(provide follow-ssa-edges? simplify-state-box fold-stmt simplify-assign-rhs simplify-cond canonicalize-mem-ref-addr gimple-fold-stmt-to-constant
          commutative-code? swap-tree-comparison invert-tree-comparison
          get-addr-base-and-unit-offset mem-ref-offset build-fold-addr-expr
          negate-expr-p may-propagate-copy)
@@ -54,6 +54,13 @@
 ;; their definitions: #t = follow_all_ssa_edges, #f = no_follow_ssa_edges
 ;; (fold_stmt's default, gimple_fold_stmt_to_constant_1 in the threader)
 (define follow-ssa-edges? (make-parameter #t))
+
+;; a box holding the GIMPLE state when a result may need new statements
+;; (genmatch's gimple_build of a nested result operand, inserted before
+;; the folded statement); #f: such results are not applied
+(define simplify-state-box (make-parameter #f))
+;; set by fold-stmt: (code type op) -> the SSA name of a new statement
+(define materialize-hook (make-parameter #f))
 
 (define (may-propagate-copy st dest orig)
   (and (useless-type-conversion-p st (tree-type dest) (tree-type orig))
@@ -251,6 +258,8 @@
        ;; x == x, x != x
        [(and (memq code '(eq_expr ne_expr)) integral? (same-operand? a b) (integral-type-p st (tree-type a)))
         (val (build-int-cst st type (if (eq? code 'eq_expr) 1 0)))]
+       ;; (A +- CST1) +- CST2 -> A + CST3, through a nop conversion
+       [(and (memq code '(plus_expr minus_expr)) (icst? b) (assoc-constants st type code a b defr))]
        ;; -1 - A -> ~A
        [(and (eq? code 'minus_expr) (all-ones? st a) integral?) (un 'bit_not_expr b)]
        ;; A - CST -> A + -CST (negate_expr_p)
@@ -322,6 +331,57 @@
              (not (and inside-ptr (not (= inter-prec final-prec))))
              (not (and final-ptr (not (= inside-prec inter-prec))))))))
 
+;; match.pd "(A +- CST1) +- CST2 -> A + CST3": (outer (nop_convert?
+;; (inner @0 @1)) @2) with constants @1 @2 and @0 not constant.  An
+;; outer type that wraps gives (outer (view_convert @0) (inner! @2
+;; (view_convert @1))) -- the view_convert is built as a statement
+;; (materialize) unless it is useless; equal non-wrapping types fold the
+;; constants when that does not overflow.  A step result or #f.
+(define (assoc-constants st type outer a b defr)
+  (define-values (ac a1 a2) (defr a))
+  ;; nop_convert?: a conversion between types of the same precision
+  (define-values (ic i0 i1)
+    (cond
+      [(memq ac '(plus_expr minus_expr)) (values ac a1 a2)]
+      [(and (memq ac '(nop_expr convert_expr))
+            (or (integral-type-p st (tree-type a1)) (pointer-type-p st (tree-type a1)))
+            (= (type-precision* st type) (type-precision* st (tree-type a1))))
+       (define-values (bc b1 b2) (defr a1))
+       (if (memq bc '(plus_expr minus_expr)) (values bc b1 b2) (values #f #f #f))]
+      [else (values #f #f #f)]))
+  (define (wraps? t) (or (not (integral-type-p st t)) (type-unsigned?* st t)))
+  (define neg-ic (and ic (if (eq? ic 'plus_expr) 'minus_expr 'plus_expr)))
+  (cond
+    [(not (and ic (icst? i1) (not (constant-class-p st i0)))) #f]
+    [(wraps? type)
+     ;; inner! / neg_inner!: C2 op (T) C1 must fold to a constant
+     (define c1 (fold-const-unop st 'nop_expr type i1))
+     (define c3 (and c1 (fold-const-binop st (if (eq? outer 'plus_expr) ic neg-ic) type b c1)))
+     (define x (and c3 (view-convert-operand st type i0)))
+     (and x (list outer x c3 #f))]
+    [(and (not (wraps? (tree-type i0))) (equal? (type-main-variant st type) (type-main-variant st (tree-type i0))))
+     (define v (+ (integer-cst-value i1) (if (eq? outer ic) (integer-cst-value b) (- (integer-cst-value b)))))
+     (define prec (type-precision* st type))
+     (define lo (- (arithmetic-shift 1 (sub1 prec)))) (define hi (sub1 (arithmetic-shift 1 (sub1 prec))))
+     (cond
+       [(<= lo v hi) (list ic i0 (build-int-cst st type v) #f)]
+       [(= v (+ hi 1)) (list neg-ic i0 (build-int-cst st type lo) #f)]
+       [else #f])]
+    [else #f]))
+
+;; (view_convert:TYPE X) as an operand: X when the conversion is useless,
+;; else (convert X) (integral / pointer, same precision) as a new
+;; statement; #f when no statement can be made
+(define (view-convert-operand st type x)
+  (cond
+    [(useless-type-conversion-p st type (tree-type x)) x]
+    [(and (or (integral-type-p st type) (pointer-type-p st type))
+          (or (integral-type-p st (tree-type x)) (pointer-type-p st (tree-type x)))
+          (= (type-precision* st type) (type-precision* st (tree-type x)))
+          (materialize-hook))
+     ((materialize-hook) 'nop_expr type x)]
+    [else #f]))
+
 ;; canonical operand order for a binary rhs: (values code a b changed?)
 (define (canonicalize-binary st code a b)
   (cond
@@ -365,6 +425,19 @@
 ;; ------------------------------------------------------------
 
 (define (fold-stmt st m id valueize)
+  (parameterize ([materialize-hook (and (simplify-state-box) (lambda (code type x) (materialize! m id code type x)))])
+    (fold-stmt* st m id valueize)))
+
+;; gimple_build + maybe_push_res_to_seq: a new SSA name for CODE (X) in
+;; TYPE, defined right before statement ID
+(define (materialize! m id code type x)
+  (define b (simplify-state-box))
+  (define-values (name st1) (make-ssa-name (unbox b) type))
+  (set-box! b st1)
+  (mfn-insert-before! m id (gassign #f (hasheq) name code x #f #f))
+  name)
+
+(define (fold-stmt* st m id valueize)
   (define g0 (mfn-stmt m id))
   (define changed #f)
   (define (note! g) (set! changed #t) g)

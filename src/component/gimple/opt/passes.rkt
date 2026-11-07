@@ -42,7 +42,9 @@
          "ivopts.rkt"
          "switchlower.rkt"
          (only-in "../print.rkt" print-cond-rhs)
-         (only-in "simplify.rkt" simplify-assign-rhs simplify-cond follow-ssa-edges?))
+         (only-in "simplify.rkt" simplify-assign-rhs simplify-cond follow-ssa-edges?)
+         (only-in "ssa-ops.rkt" stmt-real-uses stmt-has-side-effects?)
+         "../../../driver/dominance/dom.rkt")
 
 (provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? pass-enabled? run-pass)
 (define pass-name car)
@@ -186,7 +188,7 @@
          ;; pass_lim (lim4): nothing is invariant in the remaining loops
          (lp 'ivopts ivopts-pass) (lp 'lim4 identity-pass) (lp 'loopdone loop-done-pass)
          ;; pass_tree_no_loop: the functions that never had a loop
-         (p 'no_loop identity-pass #:gate not-in-loop-pipeline?)
+         (p 'no_loop no-loop-pass #:gate not-in-loop-pipeline?)
          ;; pass_lower_vector_ssa: TODO_cleanup_cfg
          (p 'veclower21 cleanup-pass) (p 'switchlower1 switchlower-pass))
    (if (>= major 15) (list (p 'sincos identity-pass)) '())
@@ -214,24 +216,65 @@
                   "  max_depth:          0"))
   (values (for/fold ([c (cfg-clear-messages cfg)]) ([l (in-list lines)]) (cfg-add-message c l)) st))
 
-;; execute_cleanup_cfg_post_optimizing: execute_fixup_cfg, cleanup_tree_cfg
-;; (cleanup_dead_labels / group_case_labels change nothing on the fixtures)
+;; execute_cleanup_cfg_post_optimizing: execute_fixup_cfg, cleanup_tree_cfg,
+;; cleanup_dead_labels (group_case_labels changes nothing on the fixtures)
 (define (cleanup-post-optimizing st fndecl cfg)
   (define-values (c1 s1) (fixup-cfg-pass st fndecl cfg))
-  (cleanup-tree-cfg (gs-set-fndecl s1 fndecl) c1 print-cond-rhs))
+  (define-values (c2 s2) (cleanup-tree-cfg (gs-set-fndecl s1 fndecl) c1 print-cond-rhs))
+  (values (cleanup-dead-labels s2 c2) s2))
 
 ;; a pass whose only effect is TODO_cleanup_cfg
 (define (cleanup-pass st fndecl cfg)
   (cleanup-tree-cfg (gs-set-fndecl st fndecl) (cfg-clear-messages cfg) print-cond-rhs))
 
 ;; pass_sink_code: loop_optimizer_init (LOOPS_NORMAL), split_edges_for_insertion,
-;; the statement sinking (not ported: nothing is sunk on the fixtures);
-;; UNSPLIT? asks for TODO_cleanup_cfg
+;; then sink_code_in_bb over the blocks (GCC <= 12: the post-dominator
+;; tree from EXIT, preorder; GCC >= 13: inverted reverse post order).  A
+;; block that dominates nothing is skipped; the statements are walked
+;; backwards and a dead one (an assignment whose single definition has no
+;; use, no VDEF) is removed.  The sinking itself (statement_sink_location
+;; finding a better block) is not ported: nothing is sunk on the fixtures.
+;; UNSPLIT? asks for TODO_cleanup_cfg.
 (define ((sink-pass unsplit?) st0 fndecl cfg)
   (define st (gs-set-fndecl st0 fndecl))
   (define cfg1 (normalize-loops st (cfg-clear-messages cfg)))
   (define-values (cfg2 st2) (split-edges-for-insertion st cfg1))
-  (if unsplit? (cleanup-tree-cfg st2 cfg2 print-cond-rhs) (values cfg2 st2)))
+  (define-values (cfg3 st3) (sink-remove-dead st2 cfg2))
+  (if unsplit? (cleanup-tree-cfg st3 cfg3 print-cond-rhs) (values cfg3 st3)))
+
+(define (sink-remove-dead st cfg)
+  (define nodes (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY))
+  (define dom (compute-dom nodes ENTRY (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
+  (define pdom (compute-dom nodes EXIT (lambda (i) (cfg-preds cfg i))))
+  (define order
+    (if (>= (gcc-major-version st) 13)
+        (for/list ([b (in-pvector (dom-rpo pdom))] #:unless (memv b (list ENTRY EXIT))) b)
+        (let walk ([i 0])
+          (define b (dom-node pdom i))
+          (append (if (memv b (list ENTRY EXIT)) '() (list b))
+                  (append* (for/list ([k (in-pvector (dom-children pdom i))]) (walk k)))))))
+  ;; the uses of each SSA version (real uses in statements and PHIs)
+  (define uses (make-hasheqv))
+  (define (count! t d) (when (and (Tree? t) (eq? (tree-code t) 'ssa_name)) (hash-update! uses (ssa-name-version t) (lambda (n) (+ n d)) 0)))
+  (for ([bb (in-pvector (cfg-bbs cfg))])
+    (define b (cfg-block cfg bb))
+    (for* ([ph (in-pvector (GBlock-phis b))] [a (in-pvector (gphi-args ph))]) (count! (cdr a) 1))
+    (for* ([g (in-pvector (GBlock-stmts b))] [u (in-list (stmt-real-uses g))]) (count! u 1)))
+  (for/fold ([cfg cfg] [st st]) ([bb (in-list order)]
+                                 #:when (let ([i (dom-index dom bb)]) (and i (not (pvector-empty? (dom-children dom i))))))
+    (define stmts (pvector->list (GBlock-stmts (cfg-block cfg bb))))
+    (define-values (kept released)
+      (for/fold ([kept '()] [released '()]) ([g (in-list (reverse stmts))])
+        (define lhs (and (gassign? g) (gassign-lhs g)))
+        (cond
+          [(and lhs (eq? (tree-code lhs) 'ssa_name) (not (stmt-flag g 'vdef #f))
+                (zero? (hash-ref uses (ssa-name-version lhs) 0))
+                (not (stmt-has-side-effects? st g)))
+           (for ([u (in-list (stmt-real-uses g))]) (count! u -1))
+           (values kept (cons (ssa-name-version lhs) released))]
+          [else (values (cons g kept) released)])))
+    (values (set-block cfg (block-set-stmts (cfg-block cfg bb) (list->pvector kept)))
+            (for/fold ([st st]) ([v (in-list (reverse released))]) (ssa-queue-release st v)))))
 
 ;; a pass whose only visible effect on the fixtures is loop_optimizer_init (LOOPS_NORMAL)
 (define (loops-normal-pass st fndecl cfg)

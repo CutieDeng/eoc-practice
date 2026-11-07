@@ -15,13 +15,13 @@
 
 | 类别 | 执行 | 不执行 | 完成 | 恒等 | 未移植（执行） |
 |---|---|---|---|---|---|
-| GIMPLE（tree-） | 110 | 116 | 56 | 40 | 0 |
+| GIMPLE（tree-） | 110 | 116 | 58 | 40 | 0 |
 | IPA（ipa-） | 19 | 17 | 4 | 0 | 0 |
 | RTL（rtl-） | 49 | 45 | 0 | 0 | 0 |
 | 无 dump 名（*） | 20 | 12 | 1 | 0 | 0 |
-| 合计 | 198 | 190 | 61 | 40 | 0 |
+| 合计 | 198 | 190 | 63 | 40 | 0 |
 
-完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 ccp2 到 slsr（其间每个 -O1 执行的 pass 都是完成或恒等）；下一个未完成的是 `tree-dom3`（部分（复用 dom；gcc 15 struct.c 的跳转线程化需要线程路径的 CFG 更新（块复制、SSA 替换表、profile），未移植）），之后的阶段在依赖它的夹具上尚未对齐。 gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
+完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 ccp2 到 optimized（其间每个 -O1 执行的 pass 都是完成或恒等）；晚期 GIMPLE 序列全部完成或恒等。 gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
 
 ## 2. 夹具上真正改变代码的晚期 pass（release_ssa 之后）
 
@@ -45,9 +45,9 @@
 | struct.c | `102t.ccp2`, `120t.cselim`, `130t.dom2`, `133t.reassoc1`, `141t.lim2`, `144t.sink1`, `152t.loopinit`, `180t.ivopts`, `182t.loopdone`, `187t.switchlower1`, `195t.dom3`, `196t.strlen1`, `199t.ccp4`, `201t.dse5`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
 | ccp.c | `126t.ch2`, `141t.lim2`, `144t.sink1`, `151t.loop`, `152t.loopinit`, `154t.sccp`, `158t.cddce2`, `180t.ivopts`, `182t.loopdone`, `183t.no_loop`, `186t.veclower21`, `195t.dom3`, `196t.strlen1`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
 
-gcc-15 合并去重：已对齐 29 个（`lim2`, `loopinit`, `veclower21`, `sink1`, `crited1`, `optimized`, `ch2`, `dom2`, `loop`, `sccp`, `cddce2`, `no_loop`, `ccp4`, `ivopts`, `loopdone`, `strlen1`, `copyprop2`, `ivcanon`, `cunroll`, `reassoc2`, `dce7`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`, `reassoc1`, `switchlower1`, `sink2`）；仍需移植 2 个（按出现次数）：`dom3`×3, `forwprop4`×2。
+gcc-15 合并去重：已对齐 31 个（`lim2`, `loopinit`, `veclower21`, `dom3`, `sink1`, `crited1`, `optimized`, `ch2`, `dom2`, `loop`, `sccp`, `cddce2`, `no_loop`, `ccp4`, `ivopts`, `loopdone`, `strlen1`, `forwprop4`, `copyprop2`, `ivcanon`, `cunroll`, `reassoc2`, `dce7`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`, `reassoc1`, `switchlower1`, `sink2`）；仍需移植 0 个（按出现次数）：。
 
-gcc-12 合并去重：已对齐 30 个（`optimized`, `lim2`, `loopinit`, `veclower21`, `sink1`, `crited1`, `ch2`, `dom2`, `loop`, `sccp`, `cddce2`, `no_loop`, `ccp4`, `ivopts`, `loopdone`, `strlen1`, `sink2`, `copyprop2`, `ivcanon`, `copyprop3`, `cunroll`, `reassoc2`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`, `reassoc1`, `switchlower1`, `dse5`）；仍需移植 2 个（按出现次数）：`dom3`×3, `forwprop4`×2。
+gcc-12 合并去重：已对齐 32 个（`optimized`, `lim2`, `loopinit`, `veclower21`, `dom3`, `sink1`, `crited1`, `ch2`, `dom2`, `loop`, `sccp`, `cddce2`, `no_loop`, `ccp4`, `ivopts`, `loopdone`, `strlen1`, `forwprop4`, `sink2`, `copyprop2`, `ivcanon`, `copyprop3`, `cunroll`, `reassoc2`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`, `reassoc1`, `switchlower1`, `dse5`）；仍需移植 0 个（按出现次数）：。
 
 `optimized` 的变化来自 pass_cleanup_cfg_post_optimizing 与 out-of-SSA 前的整理。
 
@@ -203,7 +203,7 @@ gcc-12 合并去重：已对齐 30 个（`optimized`, `lim2`, `loopinit`, `veclo
 | 146 | 　　`tree-bitintlower1` | ON | 无 | 恒等（gcc ≥ 14） |
 | 147 | 　　`tree-sra` | ON | ON | 恒等 |
 | 148 | 　　`tree-thread1` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 149 | 　　`tree-dom2` | ON | ON | 完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle） |
+| 149 | 　　`tree-dom2` | ON | ON | 完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做关系 oracle；path ranger 与线程化 CFG 更新见 dom3） |
 | 150 | 　　`tree-copyprop2` | ON | ON | 完成（同 copyprop1；basic.c 删掉 dom2 留下的单参数 PHI） |
 | 151 | 　　`tree-isolate-paths` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 152 | 　　`tree-reassoc1` | ON | ON | 完成（`opt/reassoc.rkt`：rank、linearize、按 rank 排序、常量合并、串行 rewrite_expr_tree；新名字取 SSA 空闲表；range test / undistribute / 并行重写未移植） |
@@ -271,7 +271,7 @@ gcc-12 合并去重：已对齐 30 个（`optimized`, `lim2`, `loopinit`, `veclo
 | 214 | 　　`tree-tracer` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 215 | 　　`tree-fre5` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 216 | 　　`tree-thread2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 217 | 　　`tree-dom3` | ON | ON | 部分（复用 dom；gcc 15 struct.c 的跳转线程化需要线程路径的 CFG 更新（块复制、SSA 替换表、profile），未移植） |
+| 217 | 　　`tree-dom3` | ON | ON | 完成（复用 dom；PROP_loop_opts_done 下 cancel_invalid_paths 只做出口检查；gcc 15 struct.c 的线程 (4,5)(5,6)(6,9)：path ranger 判定条件、`opt/threadupdate.rkt` 复制块 / 重定向边 / update_profile、cleanup 中的 update_ssa 替换表） |
 | 218 | 　　`tree-strlen1` | ON | ON | 完成（只有 loop_optimizer_init (LOOPS_NORMAL)；无字符串函数） |
 | 219 | 　　`tree-threadfull2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 220 | 　　`tree-vrp2` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -279,7 +279,7 @@ gcc-12 合并去重：已对齐 30 个（`optimized`, `lim2`, `loopinit`, `veclo
 | 222 | 　　`tree-wrestrict` | ON | ON | 恒等 |
 | 223 | 　　`tree-dse5` | ON | ON | 完成（复用 dse） |
 | 224 | 　　`tree-dce7` | ON | ON | 完成（复用 dce） |
-| 225 | 　　`tree-forwprop4` | ON | ON | 部分（复用 forwprop；gcc 12 struct.c 的 (int)((unsigned)(n + -1) + 1) 化简与 A - CST 规范化未覆盖） |
+| 225 | 　　`tree-forwprop4` | ON | ON | 完成（复用 forwprop；match.pd 的连续转换合并与 (A±C1)±C2 穿过 nop_convert 的结合，genmatch 物化中间结果为新语句） |
 | 226 | 　　`tree-sink2` | ON | ON | 完成（复用 sink，unsplit） |
 | 227 | 　　`tree-phiopt4` | ON | ON | 恒等 |
 | 228 | 　　`tree-fab1` | ON | ON | 恒等 |
@@ -662,7 +662,7 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 | `-fstrict-aliasing` | ○ | ○ | ● | ● | 不在 -O1 范围（-O2） |
 | `-fstrict-enums` | available in C++, ObjC++ | available in C++, ObjC++ | available in C++, ObjC++ | available in C++, ObjC++ | 不在 -O1 范围（默认关闭） |
 | `-fstrict-volatile-bitfields` | ● | ● | ● | ● | -O0 即启用（语义 / 后端开关） |
-| `-fthread-jumps` | ○ | ● | ● | ● | 部分（dom 的前向线程化：分析与取消规则；CFG 更新未移植） |
+| `-fthread-jumps` | ○ | ● | ● | ● | 部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（单一路径 / 块；模板块复制与循环头线程化未移植）；后向线程器 ethread / thread 未移植） |
 | `-ftoplevel-reorder` | ○ | ● | ● | ● | 简化模型 |
 | `-ftracer` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
 | `-ftrapping-math` | ● | ● | ● | ● | 部分 |
@@ -734,5 +734,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- 最近一次实测：`o1-test.rkt` 705/738 项通过（4 夹具 × 2 版本 × 阶段；未通过的见第 2 节的未完成 pass）；全套 `raco test -x -j 4 src test` 1058/1092 通过（其余失败中有 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
+- 最近一次实测：`o1-test.rkt` 738 项（4 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1091/1092 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。

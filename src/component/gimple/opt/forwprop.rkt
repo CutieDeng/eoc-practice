@@ -340,6 +340,12 @@
 ;; ------------------------------------------------------------
 
 (define (forwprop st fndecl cfg0)
+  ;; fold_stmt may build new statements (gimple_build): their SSA names
+  ;; come from the state in this box
+  (parameterize ([simplify-state-box (box (gs-set-fndecl st fndecl))])
+    (forwprop* st fndecl cfg0)))
+
+(define (forwprop* st fndecl cfg0)
   (define st0 (gs-set-fndecl st fndecl))
   (define major (gcc-major-version st0))
   (define cfg (cfg-clear-messages cfg0))
@@ -500,7 +506,8 @@
     (define id (mfn-def-of-version m v))
     (when id (mfn-remove! m id)))
   (define cfg1 (mfn->gcfg m))
-  (if (F-cfg-changed f) (cleanup-tree-cfg st0 cfg1 print-cond-rhs) (values cfg1 st0)))
+  (define st-out (unbox (simplify-state-box)))
+  (if (F-cfg-changed f) (cleanup-tree-cfg st-out cfg1 print-cond-rhs) (values cfg1 st-out)))
 
 ;; the CFG with block BB's statements as they are in the working copy
 (define (block-view m cfg bb)

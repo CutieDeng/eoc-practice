@@ -92,11 +92,11 @@ status={
  'tree-switchlower1':'完成（`opt/switchlower.rkt`：simple cluster、balance_case_nodes（≤2 节点）、emit_case_nodes 的 do_jump_if_equal（GCC ≥13 缩放 false 块计数）、函数中途 dump、PHI 参数修补、.MEM 符号重命名的 update_ssa 消息；bit-test / jump-table 未移植）',
  'tree-sincos':'恒等','tree-slsr':'恒等','tree-wrestrict':'恒等','tree-fab1':'恒等','tree-sccopy2':'恒等','tree-phiopt4':'恒等',
  'tree-reassoc2':'完成（复用 reassoc，early_p = false）',
- 'tree-dom3':'部分（复用 dom；gcc 15 struct.c 的跳转线程化需要线程路径的 CFG 更新（块复制、SSA 替换表、profile），未移植）',
+ 'tree-dom3':'完成（复用 dom；PROP_loop_opts_done 下 cancel_invalid_paths 只做出口检查；gcc 15 struct.c 的线程 (4,5)(5,6)(6,9)：path ranger 判定条件、`opt/threadupdate.rkt` 复制块 / 重定向边 / update_profile、cleanup 中的 update_ssa 替换表）',
  'tree-strlen1':'完成（只有 loop_optimizer_init (LOOPS_NORMAL)；无字符串函数）',
  'tree-ccp4':'完成（复用 ccp，nonzero_p；ccp_fold 改为 gimple_simplify + valueize_op_1 跟随 SSA 定义）',
  'tree-dse5':'完成（复用 dse）','tree-dce7':'完成（复用 dce）','tree-cddce3':'完成（复用 dce）',
- 'tree-forwprop4':'部分（复用 forwprop；gcc 12 struct.c 的 (int)((unsigned)(n + -1) + 1) 化简与 A - CST 规范化未覆盖）',
+ 'tree-forwprop4':'完成（复用 forwprop；match.pd 的连续转换合并与 (A±C1)±C2 穿过 nop_convert 的结合，genmatch 物化中间结果为新语句）',
  'tree-sink2':'完成（复用 sink，unsplit）',
  'tree-crited1':'完成（split_critical_edges）',
  'tree-local-pure-const2':'完成（复用 pure-const；finite_p 按循环号保存）',
@@ -104,7 +104,7 @@ status={
  'tree-uncprop1':'恒等','tree-nrv':'恒等','tree-isel':'恒等',
  'tree-waccess3':'完成（警告未移植；后期实例在夹具上不做 pointer query，计数为 0）',
  'tree-optimized':'完成（execute_fixup_cfg + cleanup_tree_cfg，TODO_remove_unused_locals）',
- 'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle）',
+ 'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做关系 oracle；path ranger 与线程化 CFG 更新见 dom3）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
 # -fdump-passes evaluates each gate once, before any function is compiled, so
@@ -145,7 +145,7 @@ flag_status={
  '-ftree-ccp':'完成（ccp1）','-ftree-bit-ccp':'完成（ccp1）','-ftree-forwprop':'完成（forwprop1）','-ftree-fre':'完成（fre1）','-ftree-dse':'完成（dse1）',
  '-ftree-dce':'完成（cddce1、dce2；后续实例未）','-ftree-builtin-call-dce':'恒等（cdce）','-fguess-branch-probability':'完成（profile_estimate）',
  '-fipa-pure-const':'完成（local 实例）；IPA 传播未','-fipa-modref':'完成（local 实例）；IPA 传播未','-fipa-strict-aliasing':'-O1 无 strict aliasing，alias set 恒 0',
- '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析与取消规则；CFG 更新未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
+ '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（单一路径 / 块；模板块复制与循环头线程化未移植）；后向线程器 ethread / thread 未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
  '-fearly-inlining':'恒等（不内联）','-finline':'未移植','-finline-functions-called-once':'未移植','-finline-atomics':'未移植','-fno-inline-stringops':'未移植',
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
  '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'完成（loop 到 loopdone、no_loop）','-ftree-loop-im':'未移植',
@@ -264,7 +264,11 @@ L.append("## 6. 测试\n")
 if O1_TESTS or SUITE:
     o1=O1_TESTS or '未记录'
     o1s=("%s 项通过（4 夹具 × 2 版本 × 阶段；未通过的见第 2 节的未完成 pass）" % o1) if '/' in o1 else ("%s 项（4 夹具 × 2 版本 × 阶段）全部通过" % o1)
-    L.append("- 最近一次实测：`o1-test.rkt` %s；全套 `raco test -x -j 4 src test` %s 通过（其余失败中有 1 项是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。" % (o1s, SUITE or '未记录'))
+    nfail=None
+    if SUITE and '/' in SUITE:
+        a,b=SUITE.split('/'); nfail=int(b)-int(a)
+    why='唯一的失败是' if nfail==1 else '失败中有 1 项是'
+    L.append("- 最近一次实测：`o1-test.rkt` %s；全套 `raco test -x -j 4 src test` %s 通过（%s aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。" % (o1s, SUITE or '未记录', why))
 else:
     L.append("- 测试数未随本次生成记录（运行时加 `--o1-tests N --suite P/T`）。")
 L.append("- 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。")

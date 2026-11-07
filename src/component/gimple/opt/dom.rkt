@@ -29,11 +29,12 @@
 ;; / thread_around_empty_blocks with the statement counting that
 ;; prints "threading bb N kills K stmts" / "threading bb N up to M
 ;; stmts"; conditions are simplified by folding through SSA_NAME_VALUE
-;; and the available-expression table.  Not ported: the path ranger of
-;; hybrid_jt_simplifier (a condition that only a path range resolves is
-;; left alone), the CFG update of a thread that survives
-;; cancel_invalid_paths (an error: no fixture registers one),
-;; test_for_singularity, the alias walk of lookup_avail_expr (a load
+;; and the available-expression table, then (GCC >= 13) by
+;; hybrid_jt_simplifier's path range query over the jt_state blocks
+;; (ranger.rkt rg-path-range-of-cond; switches are not resolved that
+;; way).  cancel_invalid_paths stops after the loop exit check once
+;; PROP_loop_opts_done is set (dom3).  The surviving threads go to
+;; threadupdate.rkt.  Not ported: test_for_singularity, the alias walk of lookup_avail_expr (a load
 ;; with a different VUSE is a miss), EH and noreturn fixups.
 ;; ============================================================
 
@@ -57,7 +58,9 @@
          (only-in "ipa.rkt" estimate-num-insns)
          "irange.rkt"
          "range-info.rkt"
-         "ranger.rkt")
+         "ranger.rkt"
+         "threadupdate.rkt"
+         (only-in "update-ssa.rkt" update-ssa))
 
 (provide dom-pass)
 
@@ -73,6 +76,7 @@
 (define (dom-pass st0 fndecl cfg0)
   (define major (gcc-major-version st0))
   (define st (gs-set-fndecl st0 fndecl))
+  (define loop-opts-done (decl-flag st0 fndecl 'loop-opts-done #f))   ; PROP_loop_opts_done
   ;; loop_optimizer_init (LOOPS_HAVE_PREHEADERS | LOOPS_HAVE_SIMPLE_LATCHES)
   (define cfg (normalize-loops st (cfg-clear-messages cfg0)))
   (define messages '())
@@ -753,7 +757,15 @@
         [else #f]))
     (if (and res (is-gimple-min-invariant st res))
         res
-        (lookup-avail-expr (gcond #f (hasheq) code a b #f #f) #f)))
+        (or (lookup-avail-expr (gcond #f (hasheq) code a b #f #f) #f)
+            (path-simplify code a b))))
+  ;; hybrid_jt_simplifier (GCC >= 13): the comparison's range along the
+  ;; jt_state path
+  (define (path-simplify code a b)
+    (define path (filter (lambda (x) (not (eq? x 'marker))) jt-blocks))
+    (and (>= major 13) (> (length path) 1)
+         (let ([v (rg-path-range-of-cond R path code a b)])
+           (and v (bool-cst v)))))
 
   (define (taken-edge-for d cond-val)
     (define g (last-stmt d))
@@ -875,6 +887,7 @@
         (values sl1 cl1 lc1 ch1 cur1)))
     (cond
       [(and (= loops-crossed 1) (not crossed-latch) (nested? (loop-father (cadr exit)) (loop-father (car exit)))) #f]
+      [loop-opts-done #f]
       [(and seen-latch latch (null? (mfn-phis m latch))
             (for/and ([id (in-list (mfn-stmts m latch))]) (glabel? (mfn-stmt m id))))
        #t]
@@ -977,8 +990,14 @@
     (msg! "============================")
     (for ([l (in-list lines)]) (msg! "~a" l))
     (msg! "========= Done ============="))
-  (unless (null? paths)
-    (error 'dom-pass "a jump thread survived cancel_invalid_paths; the threader's CFG update is not ported: ~a" paths))
   (define cfg1 (for/fold ([c (mfn->gcfg m)]) ([l (in-list (reverse messages))]) (cfg-add-message c l)))
-  ;; TODO_cleanup_cfg (loop_optimizer_finalize dropped the simple-latch / preheader protection)
-  (cleanup-tree-cfg st1 cfg1 print-cond-rhs))
+  ;; thread_through_all_blocks, then TODO_cleanup_cfg | TODO_update_ssa
+  ;; (loop_optimizer_finalize dropped the simple-latch / preheader
+  ;; protection); the duplicates' names are rewritten by the update_ssa
+  ;; that cleanup_tree_cfg runs after cleanup_control_flow_pre
+  (cond
+    [(null? paths) (cleanup-tree-cfg st1 cfg1 print-cond-rhs)]
+    [else
+     (define-values (cfg2 st2 table _threaded?) (thread-through-all-blocks st1 fndecl cfg1 (reverse paths) loops))
+     (cleanup-tree-cfg st2 cfg2 print-cond-rhs
+                       #:after-pre (lambda (st c) (if (null? table) (values c st) (update-ssa st fndecl c table))))]))

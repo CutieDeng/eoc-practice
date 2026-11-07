@@ -11,6 +11,10 @@
 ;;   (rg-range-of-expr R name sid)     range_of_expr at statement SID
 ;;   (rg-range-of-stmt R sid [name])   range_of_stmt
 ;;   (rg-range-on-edge R src dest name)
+;;   (rg-path-range-of-cond R path code a b) -> integer or #f
+;;       hybrid_jt_simplifier's path_range_query (resolve mode) over
+;;       PATH (blocks, entry first): the value of the comparison
+;;       A CODE B at the path's exit when its range is a singleton
 ;;   (rg-export-global-ranges R st)    -> (values st lines)
 ;;       export_global_ranges: every name with a cached global range
 ;;       that is not VARYING goes through set_range_info; LINES are the
@@ -28,6 +32,13 @@
 ;; the logical && / || combination; fold_using_range for range-op
 ;; statements, PHIs, calls, addresses, the nonnegative fallback for a
 ;; VARYING integral result.
+;;
+;; The path query (gimple-range-path.cc) computes the exit dependencies
+;; (imports of the exit block and the SSA operands of the comparison)
+;; block by block: PHIs from the incoming path edge, other definitions
+;; folded with the path's ranges, names exported on each path edge
+;; through GORI; names defined outside the path take the ranger's range
+;; on entry to the path.  The path relation oracle is not ported.
 ;;
 ;; Not ported: the relation oracle (every relation is VARYING), the
 ;; inferred-range oracle (non-null pointers after a dereference,
@@ -55,6 +66,7 @@
 
 (provide make-ranger rg-range-of-expr rg-range-of-stmt rg-range-on-edge rg-range-on-entry
          rg-export-global-ranges range-ssa? stmt-range-type rg-gori-exports rg-gori-imports
+         rg-path-range-of-cond
          (struct-out R))
 
 (define ENTRY-BB 0)
@@ -990,3 +1002,92 @@
        (define-values (st1 line) (set-range-info st (R-fndecl r) name x))
        (values st1 (if line (cons line lines) lines))]
       [else (values st lines)])))
+
+;; ------------------------------------------------------------
+;; path_range_query (resolve mode, without the path relation oracle)
+;; ------------------------------------------------------------
+
+(define (rg-path-range-of-cond r path code a b)
+  (define st (st-of r))
+  (define m (R-m r))
+  (define blocks (list->vector path))
+  (define n (vector-length blocks))
+  (define on-path (for/hasheqv ([bb (in-list path)]) (values bb #t)))
+  (define entry (vector-ref blocks 0))
+  (define cache (make-hasheqv))
+  (define pos 0)
+  (define (at-entry?) (= pos 0))
+  (define (meet x y) (if (and x y) (let-values ([(z _c) (ir-intersect x y)]) z) (or x y)))
+  (define (get-cache x)
+    (if (range-ssa? st x) (hash-ref cache (ver x) #f) (global-range-of r x)))
+  (define (outside? x) (let ([db (def-bb r x)]) (or (not db) (not (hash-ref on-path db #f)))))
+  (define (range-on-path-entry x) (rg-range-on-entry r entry x))
+  (define q (vector (lambda (x sid) (expr x sid)) (lambda (s d x) (expr x #f))))
+  ;; internal_range_of_expr
+  (define (expr x sid)
+    (cond
+      [(not (supported-type? st (tree-type x))) #f]
+      [(get-cache x) => values]
+      [(outside? x) (define y (range-on-path-entry x)) (hash-set! cache (ver x) y) y]
+      [(and sid (defined-in-block x (bb-of r sid)))
+       => (lambda (y)
+            (define z (meet y (gimple-range-global st (R-fndecl r) x)))
+            (hash-set! cache (ver x) z)
+            z)]
+      [else (gimple-range-global st (R-fndecl r) x)]))
+  ;; range_defined_in_block
+  (define (defined-in-block x bb)
+    (define did (def-id r x))
+    (cond
+      [(not (and did (eqv? (bb-of r did) bb))) #f]
+      [(hash-ref cache (ver x) #f) => values]
+      [(mfn-phi? m did) (range-in-phi x did)]
+      [else (or (fold-stmt r did (stmt-src r did q) x) (ir-varying (tinfo st (tree-type x))))]))
+  ;; ssa_range_in_phi
+  (define (range-in-phi x did)
+    (define g (stmt r did))
+    (cond
+      [(at-entry?) (rg-range-of-expr r x did)]
+      [else
+       (define bb (bb-of r did))
+       (define prev (vector-ref blocks (sub1 pos)))
+       (define arg (for/first ([pa (in-pvector (gphi-args g))] #:when (= (car pa) prev)) (cdr pa)))
+       (define cached (and (not (and (ssa-name? arg) (eqv? (def-bb r arg) bb))) (get-cache arg)))
+       (or cached
+           (meet (if (and (ssa-name? arg) (outside? arg))
+                     (range-on-path-entry arg)
+                     (ir-varying (tinfo st (tree-type x))))
+                 (rg-range-on-edge r prev bb arg)))]))
+  ;; compute_exit_dependencies
+  (define deps
+    (sort (append (hash-keys (rg-gori-imports r (vector-ref blocks (sub1 n))))
+                  (for/list ([x (list a b)] #:when (and (ssa-name? x) (supported-type? st (tree-type x)))) (ver x)))
+          <))
+  (define dep-names (for/list ([v (in-list (remove-duplicates deps))]) (name-of r v)))
+  ;; compute_ranges
+  (for ([i (in-range n)])
+    (set! pos i)
+    (define bb (vector-ref blocks i))
+    (for ([x (in-list dep-names)] #:when (eqv? (def-bb r x) bb)) (hash-remove! cache (ver x)))
+    (for ([pid (in-list (mfn-phis m bb))])
+      (define x (gphi-result (stmt r pid)))
+      (when (memf (lambda (d) (ssa-name=? d x)) dep-names)
+        (define y (defined-in-block x bb))
+        (when y (hash-set! cache (ver x) y))))
+    (for ([x (in-list dep-names)])
+      (define did (def-id r x))
+      (unless (and did (mfn-phi? m did))
+        (define y (defined-in-block x bb))
+        (when y (hash-set! cache (ver x) y))))
+    (unless (= i (sub1 n))
+      (define next (vector-ref blocks (add1 i)))
+      (define ex (exports r bb))
+      (for ([x (in-list dep-names)] #:when (hash-ref ex (ver x) #f))
+        (define y (gori-edge-range r bb next x q))
+        (when y (hash-set! cache (ver x) (meet y (get-cache x)))))))
+  ;; range_of_stmt of the comparison
+  (define ra (expr a #f))
+  (define rb (expr b #f))
+  (and ra rb (ro-supported? code)
+       (let ([res (ro-fold st code (boolean-type st) ra rb)])
+         (and res (not (ir-undefined? res)) (ir-singleton res)))))
