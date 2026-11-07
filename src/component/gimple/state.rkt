@@ -32,6 +32,7 @@
          make-gs optimize? gs-set-fndecl gs-set-loc gs-set-ctx gs-reset-ssa gs-set-ssa-version gs-set-globals
          gcc-major-version
          fresh-uid fresh-tmp-var-id fresh-ssa-version ssa-free-queue ssa-queue-release ssa-flush-free ssa-clear-free
+         ssa-pass-log log-ssa-release!
          decl-flag set-decl-flag decl-initial
          type-ref type-code type-attr add-type type-type type-main-variant
          global-type void-type boolean-type size-type sizetype ptr-type
@@ -100,6 +101,15 @@
   (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (add1 n)
                 (GS-ssa-version st) (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st))))
 
+;; the SSA versions a pass allocates and the ones the CFG cleanup releases
+;; (merge_blocks' PHIs, removed blocks), in order: a box of
+;; (hash 'allocated list 'released list), newest first, set by run-pass
+(define ssa-pass-log (make-parameter #f))
+(define (log-ssa! key v)
+  (define b (ssa-pass-log))
+  (when b (set-box! b (hash-update (unbox b) key (lambda (l) (cons v l)) '()))))
+(define (log-ssa-release! v) (log-ssa! 'released v))
+
 ;; SSA versions start at 1 (0 is reserved).  make_ssa_name_fn takes the
 ;; last released version of the current function first (FREE_SSANAMES is a
 ;; LIFO), else a new one.
@@ -107,9 +117,10 @@
   (define fn (GS-fndecl st))
   (define free (if fn (decl-flag st fn 'ssa-free '()) '()))
   (cond
-    [(pair? free) (values (car free) (set-decl-flag st fn 'ssa-free (cdr free)))]
+    [(pair? free) (log-ssa! 'allocated (car free)) (values (car free) (set-decl-flag st fn 'ssa-free (cdr free)))]
     [else
      (define n (add1 (GS-ssa-version st)))
+     (log-ssa! 'allocated n)
      (values n (GS (GS-version st) (GS-fndecl st) (GS-types st) (GS-decl-flags st) (GS-next-uid st) (GS-tmp-var-id st)
                    n (GS-globals st) (GS-loc st) (GS-ctx st) (GS-optimize st)))]))
 

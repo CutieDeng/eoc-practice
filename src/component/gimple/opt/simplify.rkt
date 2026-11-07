@@ -251,6 +251,10 @@
         (val (build-int-cst st type (if (eq? code 'eq_expr) 1 0)))]
        ;; -1 - A -> ~A
        [(and (eq? code 'minus_expr) (all-ones? st a) integral?) (un 'bit_not_expr b)]
+       ;; A - CST -> A + -CST (negate_expr_p)
+       [(and (eq? code 'minus_expr) (icst? b) (negate-expr-p st b) integral?)
+        (define nb (fold-const-unop st 'negate_expr type b))
+        (and nb (bin 'plus_expr a nb))]
        ;; (cmp a b) != 0 / == 0 / == 1 / != 1 with a boolean comparison result
        [(and (memq code '(eq_expr ne_expr)) (icst? b) (or (integer-zerop b) (integer-onep b))
              ac (comparison-code? st ac) (boolean-type-p st (tree-type a)) (integral-type-p st (tree-type a1)))

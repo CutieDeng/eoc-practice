@@ -264,7 +264,7 @@
 ;; an edge is identified by (src, dest) and stored once, in `edges`.
 ;; GBlock phis is the pvector of gphi (empty until pass_build_ssa).
 
-(struct GCfg (blocks edges label->bb next-label-uid messages altered touched profile) #:prefab)
+(struct GCfg (blocks edges label->bb next-label-uid messages altered touched profile last-bb) #:prefab)   ; last-bb: last_basic_block (never decreases before compact_blocks); #f = max index + 1
 (struct GProf (counts probs) #:prefab)
 (struct GBlock (index phis stmts prev next preds) #:prefab)
 (struct GEdge (dest flags goto-locus) #:prefab)

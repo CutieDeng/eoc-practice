@@ -46,7 +46,7 @@
          bb-next bb-prev
          redirect-edge-succ find-edge edge-flag? single-succ-p single-pred-p single-succ last-basic-block block-set-preds
          split-edge/st split-edges-for-insertion
-         cfg-dom (struct-out Loop) find-loops loop-inside? loop-of replace-uses-by bb-set-last-stmt)
+         cfg-dom (struct-out Loop) find-loops loop-inside? loop-of replace-uses-by bb-set-last-stmt delete-basic-block replace-uses-folder)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -66,19 +66,19 @@
 ;; GCfg field updates
 ;; ------------------------------------------------------------
 
-(define (cfg-set-blocks c v) (GCfg v (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
-(define (cfg-set-edges c v) (GCfg (GCfg-blocks c) v (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
-(define (cfg-set-label->bb c v) (GCfg (GCfg-blocks c) (GCfg-edges c) v (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
-(define (cfg-set-next-label-uid c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) v (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
-(define (cfg-set-altered c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) v (GCfg-touched c) (GCfg-profile c)))
-(define (cfg-set-touched c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) v (GCfg-profile c)))
+(define (cfg-set-blocks c v) (GCfg v (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
+(define (cfg-set-edges c v) (GCfg (GCfg-blocks c) v (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
+(define (cfg-set-label->bb c v) (GCfg (GCfg-blocks c) (GCfg-edges c) v (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
+(define (cfg-set-next-label-uid c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) v (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
+(define (cfg-set-altered c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) v (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
+(define (cfg-set-touched c v) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) v (GCfg-profile c) (GCfg-last-bb c)))
 (define (dump c fmt . args)
   (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c)
-        (pvector-cons-right (GCfg-messages c) (apply format fmt args)) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
+        (pvector-cons-right (GCfg-messages c) (apply format fmt args)) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
 
 (define (altered c i) (cfg-set-altered c (intbits-set (GCfg-altered c) i)))
 (define (cfg-add-message c m) (dump c "~a" m))
-(define (cfg-set-profile c pf) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) pf))
+(define (cfg-set-profile c pf) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) pf (GCfg-last-bb c)))
 (define (prof-count c bb) (let ([pf (GCfg-profile c)]) (and pf (intmap-ref (GProf-counts pf) bb #f))))
 (define (prof-prob c src dest) (let ([pf (GCfg-profile c)]) (and pf (hash-ref (GProf-probs pf) (cons src dest) #f))))
 ;; edge probabilities follow their edge
@@ -93,7 +93,7 @@
     [else c]))
 ;; a pass starts with an empty dump_file: the messages belong to one pass
 (define (cfg-clear-messages c)
-  (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (pvector-empty) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c)))
+  (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (pvector-empty) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) (GCfg-last-bb c)))
 
 ;; ------------------------------------------------------------
 ;; Blocks and the chain
@@ -110,9 +110,11 @@
 (define (stmts c i) (GBlock-stmts (cfg-block c i)))
 (define (bb-next c i) (GBlock-next (cfg-block c i)))
 (define (bb-prev c i) (GBlock-prev (cfg-block c i)))
-;; last_basic_block: never decreases before compact_blocks (no block is
-;; created after the first deletion), so the maximum index + 1 serves
-(define (last-basic-block c) (add1 (car (intmap-max-entry (GCfg-blocks c)))))
+;; last_basic_block: never decreases before compact_blocks; the watermark
+;; is kept once a block is created after a deletion (#f: maximum index + 1)
+(define (last-basic-block c) (max (add1 (car (intmap-max-entry (GCfg-blocks c)))) (or (GCfg-last-bb c) 0)))
+(define (cfg-set-last-bb c v)
+  (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) (GCfg-profile c) v))
 
 ;; FOR_EACH_BB_FN: the chain between ENTRY and EXIT, as indices
 (define (cfg-bbs c)
@@ -136,7 +138,7 @@
 ;; create_bb: a new index, linked after AFTER: (values index cfg)
 (define (create-bb c stmts after)
   (define i (last-basic-block c))
-  (define c1 (cfg-set-blocks c (intmap-set (GCfg-blocks c) i (GBlock i (pvector-empty) stmts #f #f (pvector-empty)))))
+  (define c1 (cfg-set-last-bb (cfg-set-blocks c (intmap-set (GCfg-blocks c) i (GBlock i (pvector-empty) stmts #f #f (pvector-empty)))) (add1 i)))
   (values i (link-block c1 i after)))
 
 ;; expunge_block
@@ -568,6 +570,9 @@
 
 ;; remove_bb + delete_basic_block
 (define (delete-basic-block c i)
+  ;; remove_bb: the PHI results, then the definitions of the statements, are released
+  (for ([ph (in-pvector (GBlock-phis (cfg-block c i)))]) (log-ssa-release! (ssa-name-version (gphi-result ph))))
+  (for* ([g (in-pvector (stmts c i))] [d (in-list (stmt-defs-for-release g))]) (log-ssa-release! (ssa-name-version d)))
   (let* ([c (dump c "Removing basic block ~a" i)]
          [c (set-stmts c i (pvector-empty))]
          [c (for/fold ([c c]) ([src (in-pvector (cfg-preds c i))]) (remove-edge c src i))]
@@ -670,7 +675,15 @@
               (cond
                 [(>= k (pvector-length succs)) (values c removed)]
                 [(= (GEdge-dest (pvector-ref succs k)) (GEdge-dest te)) (loop c (add1 k) removed)]
-                [else (loop (remove-edge c i (GEdge-dest (pvector-ref succs k))) k #t)])))
+                [else
+                 ;; taken_edge->probability += e->probability
+                 (define d (GEdge-dest (pvector-ref succs k)))
+                 (define pf (GCfg-profile c))
+                 (define pt (prof-prob c i (GEdge-dest te))) (define pe (prof-prob c i d))
+                 (define c* (if (and pf pt pe)
+                                (cfg-set-profile c (GProf (GProf-counts pf) (hash-set (GProf-probs pf) (cons i (GEdge-dest te)) (min (+ pt pe) 134217728))))
+                                c))
+                 (loop (remove-edge c* i d) k #t)])))
           (values te removed c3)])]
       [else (values (single-succ-edge c i) #f c)]))
   (cond
@@ -820,15 +833,39 @@
     (define-values (stmts* n2)
       (for/fold ([acc (pvector-empty)] [n n1] #:result (values acc n)) ([g (in-pvector (GBlock-stmts b))])
         (define g1 (fs g))
-        (define-values (g* n*) (restamp g (fv (if (equal? (stmt-core g1) (stmt-core g)) g1 (canonicalize g1))) n))
+        (define-values (g* n*) (restamp g (fv (if (equal? (stmt-core g1) (stmt-core g)) g1 (fold-replaced st g1 canonicalize))) n))
         (values (pvector-cons-right acc g*) n*)))
     (values (set-block c (block-set-stmts (block-set-phis b phis*) stmts*)) n2)))
 
+;; fold_stmt (no SSA edges followed) on a statement whose uses were
+;; replaced: the folder installed by the pass driver
+;; (replace-uses-folder: st g -> g), else the operand-order
+;; canonicalization alone
+(define replace-uses-folder (make-parameter #f))
+(define (fold-replaced st g canonicalize)
+  (define f (replace-uses-folder))
+  (if (and f (or (gassign? g) (gcond? g))) (f st g) (canonicalize g)))
+
 ;; gimple_merge_blocks + cfghooks merge_blocks
-(define (merge-blocks st c a b)
-  ;; V_i = PHI <V_j> in B: V_j replaces V_i everywhere (A is B's only pred)
+(define (merge-blocks st c00 a b)
+  ;; gimple_merge_blocks: with the same loop father the larger count is kept
+  ;; (profile_count::merge; all counts here have the same quality)
+  (define c
+    (let ([pf (GCfg-profile c00)])
+      (cond
+        [(not pf) c00]
+        [else
+         (define-values (loops _b) (find-loops c00 (cfg-dom c00)))
+         (define la (loop-of loops a)) (define lb (loop-of loops b))
+         (define ca (prof-count c00 a)) (define cb (prof-count c00 b))
+         (if (and (eqv? (and la (Loop-num la)) (and lb (Loop-num lb))) ca cb (> cb ca))
+             (cfg-set-profile c00 (GProf (intmap-set (GProf-counts pf) a cb) (GProf-probs pf)))
+             c00)])))
+  ;; V_i = PHI <V_j> in B: V_j replaces V_i everywhere (A is B's only pred);
+  ;; remove_phi_node (.., true) releases V_i
   (define c0
     (for/fold ([c (dump c "Merging blocks ~a and ~a" a b)]) ([ph (in-pvector (GBlock-phis (cfg-block c b)))])
+      (log-ssa-release! (ssa-name-version (gphi-result ph)))
       (replace-uses-by st c (gphi-result ph) (cdr (pvector-first (gphi-args ph))))))
   (define c1 (link-block (unlink-block (set-block c0 (block-set-phis (cfg-block c0 b) (pvector-empty))) b) b a))
   ;; B's labels are dropped (a FORCED_LABEL moves to the start of A)
@@ -1101,6 +1138,13 @@
             [else #t]))]
     [else #f]))
 
+;; release_defs: the SSA definitions of a statement (VDEF first, then the lhs)
+(define (stmt-defs-for-release g)
+  (define vd (stmt-flag g 'vdef #f))
+  (define lhs (cond [(gassign? g) (gassign-lhs g)] [(gcall? g) (gcall-lhs g)] [else #f]))
+  (append (if (and vd (eq? (tree-code vd) 'ssa_name)) (list vd) '())
+          (if (and lhs (eq? (tree-code lhs) 'ssa_name)) (list lhs) '())))
+
 ;; ---- forwarder blocks -------------------------------------------------------
 
 ;; maybe_remove_forwarder_block (no PHIs, no loops, no abnormal edges):
@@ -1226,7 +1270,7 @@
                   (for/fold ([h (hash)]) ([(k v) (in-hash (GProf-probs pf))])
                     (define a (intmap-ref remap (car k) #f)) (define b (intmap-ref remap (cdr k) #f))
                     (if (and a b) (hash-set h (cons a b) v) h))))))
-  (GCfg blocks edges l->bb (GCfg-next-label-uid c) (GCfg-messages c) intbits-empty intbits-empty prof))
+  (GCfg blocks edges l->bb (GCfg-next-label-uid c) (GCfg-messages c) intbits-empty intbits-empty prof #f))
 
 ;; cleanup_tree_cfg_noloop: (values cfg st)
 (define (cleanup-tree-cfg st c cond->string)
@@ -1268,7 +1312,7 @@
   (define st0 (gs-set-fndecl st fndecl))
   (define blocks (intmap-set (intmap-set intmap-empty ENTRY (GBlock ENTRY (pvector-empty) (pvector-empty) #f EXIT (pvector-empty)))
                              EXIT (GBlock EXIT (pvector-empty) (pvector-empty) ENTRY #f (pvector-empty))))
-  (define c0 (GCfg blocks intmap-empty intmap-empty 0 (pvector-empty) intbits-empty intbits-empty #f))
+  (define c0 (GCfg blocks intmap-empty intmap-empty 0 (pvector-empty) intbits-empty intbits-empty #f #f))
   (define-values (c1 st1) (make-blocks st0 c0 body))
   (define c2 (if (= (bb-next c1 ENTRY) EXIT) (let-values ([(_i c) (create-bb c1 (pvector-empty) ENTRY)]) c) c1))
   (let* ([c (cleanup-dead-labels st1 c2)]

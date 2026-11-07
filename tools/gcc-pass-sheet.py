@@ -83,6 +83,7 @@ status={
  'tree-cddce2':'完成（复用 dce；释放顺序按 GCC 的支配树 BFS 逆序）',
  'tree-ivcanon':'完成（`opt/ivcanon.rkt` create_canonical_iv；try_unroll 的 UL_SINGLE_ITER 只对不迭代的循环生效，未移植）',
  'tree-copyprop3':'完成（复用 copyprop；LCSSA 下不跨循环出口边传播）',
+ 'tree-cunroll':'完成（`opt/cunroll.rkt`：UL_NO_GROWTH 的 try_unroll_loop_completely（tree_estimate_loop_size / estimated_unrolled_size 12、15 两版）、scale_loop_profile（≥13）、duplicate_loop_body_to_header_edge 的复制与 DLTHE 计数缩放、force_edge_cold、unloop + remove_path、update_ssa；basic.c g 完全展开）',
  'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
@@ -128,7 +129,7 @@ flag_status={
  '-fearly-inlining':'恒等（不内联）','-finline':'未移植','-finline-functions-called-once':'未移植','-finline-atomics':'未移植','-fno-inline-stringops':'未移植',
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
  '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'部分（loop / loopinit / no_loop 的 gate）','-ftree-loop-im':'未移植',
- '-ftree-loop-ivcanon':'完成（ivcanon）','-ftree-scev-cprop':'完成（sccp）','-fivopts':'未移植','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植',
+ '-ftree-loop-ivcanon':'完成（ivcanon）','-ftree-scev-cprop':'完成（sccp）','-fivopts':'未移植','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植（-O1 的 cunroll 不用）',
  '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'部分（sink1 的边拆分；下沉未移植）','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
  '-fbit-tests':'未移植（switchlower）','-fjump-tables':'未移植（switchlower）','-fallocation-dce':'未移植','-fmalloc-dce':'未移植','-flifetime-dse':'未移植',
  '-fprintf-return-value':'部分（折叠子集）','-fmath-errno':'部分（折叠子集）','-ffp-int-builtin-inexact':'部分','-fsigned-zeros':'部分','-ftrapping-math':'部分',

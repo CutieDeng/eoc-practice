@@ -1182,9 +1182,64 @@
        [else
         (define-values (below up) (bound-difference l (affine-iv-base iv1) (affine-iv-base iv0)))
         (case code
+          [(ne_expr) (and (number-of-iterations-ne l type iv0 (affine-iv-base iv1) d exit-must-be-taken below up) d)]
           [(lt_expr) (and (number-of-iterations-lt l type iv0 iv1 d exit-must-be-taken below up) d)]
           [(le_expr) (and (number-of-iterations-le l type iv0 iv1 d exit-must-be-taken below up) d)]
-          [else #f])])]))                                       ; ne: not ported
+          [else #f])])]))
+
+;; number_of_iterations_ne: IV != FINAL
+(define (number-of-iterations-ne l type iv final d exit-must-be-taken below0 up0)
+  (define niter-type (utype-for type))
+  (set-niter-desc-control! d iv) (set-niter-desc-bound! d final) (set-niter-desc-cmp! d 'ne_expr)
+  (define step (affine-iv-step iv))
+  (define neg? (and (icst? step) (bitwise-bit-set? (bitwise-and (icst-val step) (sub1 (arithmetic-shift 1 (ty-prec (tree-type step))))) (sub1 (ty-prec (tree-type step))))))
+  ;; rearrange to S * i <> C with S positive, in the unsigned type
+  (define s (if neg?
+                (gf-build1 'negate_expr niter-type (gf-convert niter-type step))
+                (gf-convert niter-type step)))
+  (define c (if neg?
+                (gf-build2 'minus_expr niter-type (gf-convert niter-type (affine-iv-base iv)) (gf-convert niter-type final))
+                (gf-build2 'minus_expr niter-type (gf-convert niter-type final) (gf-convert niter-type (affine-iv-base iv)))))
+  (define-values (below up) (if neg? (values (- up0) (- below0)) (values below0 up0)))
+  ;; number_of_iterations_ne_max: for a constant C the count itself
+  (set-niter-desc-max! d (if (and (icst? c) (icst? s) (= 1 (icst-val s))) (icst-val c) (ty-max niter-type)))
+  (define (simple-cond?)
+    ;; the no-overflow proof of the control IV: BASE evaluates toward FINAL
+    ;; (or BASE - STEP does, after loop header copying)
+    (cond
+      [(affine-iv-no-overflow iv) #f]
+      [(not (integer-onep s)) #f]                              ; multiple_of_p: not ported
+      [else
+       (define cnd (gf-build2 (if neg? 'ge_expr 'le_expr) (boolean-type (gs)) (affine-iv-base iv) final))
+       (define t (simplify-using-initial-conditions l cnd))
+       (and (icst? t) (= 1 (icst-val t)))]))
+  (cond
+    [(simple-cond?)
+     (set-affine-iv-no-overflow! (niter-desc-control d) #t)
+     (set-niter-desc-niter! d (gf-build2 'exact_div_expr niter-type c s))
+     #t]
+    [(and (icst? s))
+     ;; nsd (step, size of mode): the count is inverse (s/d) * (c/d) mod 2^(prec - bits)
+     (define sv (icst-val s))
+     (define bits (let loop ([k 0]) (if (or (= k (ty-prec niter-type)) (bitwise-bit-set? sv k)) k (loop (add1 k)))))
+     (define prec (ty-prec niter-type))
+     (define bound (sub1 (arithmetic-shift 1 (- prec bits))))
+     (define dv (arithmetic-shift 1 bits))
+     (define s2 (arithmetic-shift sv (- bits)))
+     (unless exit-must-be-taken
+       (define assumption (gf-build2 'eq_expr (boolean-type (gs)) (gf-build2 'floor_mod_expr niter-type c (icst niter-type dv)) (icst niter-type 0)))
+       (unless (integer-nonzerop* assumption)
+         (set-niter-desc-assumptions! d (gf-build2 'truth_and_expr (boolean-type (gs)) (niter-desc-assumptions d) assumption))))
+     (define c2 (gf-build2 'exact_div_expr niter-type c (icst niter-type dv)))
+     (set-niter-desc-niter! d
+       (if (= s2 1)
+           c2
+           (gf-build2 'bit_and_expr niter-type (gf-build2 'mult_expr niter-type c2 (icst niter-type (modular-inverse s2 (add1 bound)))) (icst niter-type bound))))
+     #t]
+    [else #f]))
+(define (modular-inverse a m)
+  (let loop ([t 0] [nt 1] [r m] [nr (modulo a m)])
+    (if (zero? nr) (modulo t m) (let ([q (quotient r nr)]) (loop nt (- t (* q nt)) nr (- r (* q nr)))))))
 
 (define (number-of-iterations-lt l type iv0 iv1 d exit-must-be-taken below up)
   (define niter-type (utype-for type))
@@ -1470,7 +1525,13 @@
 (define (simplify-using-initial-conditions l e)
   (cond
     [(icst? e) e]
-    [else e]))
+    [else
+     (define folded (gf-binary* e))
+     (if (and folded (icst? folded)) folded e)]))
+;; fold of a comparison tree (constant operands)
+(define (gf-binary* e)
+  (and (Tree? e) (comparison-code? (tree-code e))
+       (gf-binary (tree-code e) (tree-type e) (tree-operand e 0) (tree-operand e 1))))
 
 ;; ------------------------------------------------------------
 ;; expression_expensive_p: (values expensive? cond-overflow?)

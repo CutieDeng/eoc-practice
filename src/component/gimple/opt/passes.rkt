@@ -13,9 +13,11 @@
 ;; the roadmap table says which ones.
 ;; ============================================================
 
-(require "../../../kernel/data/data.rkt"
+(require racket/list
+         "../../../kernel/data/data.rkt"
          "../../../kernel/ir/gimple/types.rkt"
          "../state.rkt"
+         "../tree.rkt"
          "../cfg.rkt"
          (only-in "../ssa.rkt" ssa-names-in-version-order)
          "ccp.rkt"
@@ -36,7 +38,9 @@
          "loop-pipeline.rkt"
          "sccp.rkt"
          "ivcanon.rkt"
-         (only-in "../print.rkt" print-cond-rhs))
+         "cunroll.rkt"
+         (only-in "../print.rkt" print-cond-rhs)
+         (only-in "simplify.rkt" simplify-assign-rhs simplify-cond follow-ssa-edges?))
 
 (provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? pass-enabled? run-pass)
 (define pass-name car)
@@ -58,17 +62,47 @@
     (values (ssa-name-version n) #t)))
 (define (run-pass p st decl cfg)
   (define before (live-versions cfg))
-  (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
+  (define log (box (hash)))
+  (define-values (cfg1 st1) (parameterize ([ssa-pass-log log] [replace-uses-folder fold-stmt-no-follow]) ((pass-fn p) st decl cfg)))
   (define st2 (gs-set-fndecl st1 decl))
   (cond
     [(eq? (pass-name p) 'release_ssa) (values cfg1 (ssa-clear-free st2))]
     [else
      (define after (live-versions cfg1))
      (define queued (ssa-free-queue st2))
+     ;; the CFG cleanup's releases (merged PHIs, removed blocks) follow the
+     ;; pass's own; a version is released once
+     (define cleanup-released
+       (for/fold ([acc '()] #:result (reverse acc)) ([v (in-list (reverse (hash-ref (unbox log) 'released '())))])
+         (if (or (memv v queued) (memv v acc) (hash-ref after v #f)) acc (cons v acc))))
+     (define st2b (for/fold ([st st2]) ([v (in-list cleanup-released)]) (ssa-queue-release st v)))
+     (define queued2 (ssa-free-queue st2b))
+     ;; names that disappeared without being recorded, the ones this pass
+     ;; created included, in descending order
+     (define candidates (remove-duplicates (append (hash-keys before) (hash-ref (unbox log) 'allocated '()))))
      (define unrecorded
-       (sort (for/list ([v (in-hash-keys before)] #:unless (or (hash-ref after v #f) (memv v queued))) v) >))
-     (define st3 (for/fold ([st st2]) ([v (in-list unrecorded)]) (ssa-queue-release st v)))
+       (sort (for/list ([v (in-list candidates)] #:unless (or (hash-ref after v #f) (memv v queued2))) v) >))
+     (define st3 (for/fold ([st st2b]) ([v (in-list unrecorded)]) (ssa-queue-release st v)))
      (values cfg1 (ssa-flush-free st3))]))
+
+;; fold_stmt with no_follow_ssa_edges (replace_uses_by): gimple_simplify
+;; of an assignment's right-hand side or a condition, operands as they are
+(define (fold-stmt-no-follow st g)
+  (parameterize ([follow-ssa-edges? #f])
+    (cond
+      [(gassign? g)
+       (define r (and (not (eq? (gimple-rhs-class st (gassign-code g)) 'single))
+                      (simplify-assign-rhs st #f values (tree-type (gassign-lhs g)) (gassign-code g)
+                                           (gassign-rhs1 g) (gassign-rhs2 g) (gassign-rhs3 g))))
+       (if r
+           (gassign (gassign-loc g) (gassign-flags g) (gassign-lhs g) (car r) (cadr r) (caddr r) (cadddr r))
+           g)]
+      [(gcond? g)
+       (define r (simplify-cond st #f values (gcond-code g) (gcond-lhs g) (gcond-rhs g)))
+       (if r
+           (gcond (gcond-loc g) (gcond-flags g) (car r) (cadr r) (caddr r) (gcond-true-label g) (gcond-false-label g))
+           g)]
+      [else g])))
 
 ;; a pass without effect: a fresh dump_file, nothing else
 (define (identity-pass st fndecl cfg) (values (cfg-clear-messages cfg) st))
@@ -146,7 +180,7 @@
          (p 'sink1 (sink-pass #f)) (p 'dse3 dse) (p 'dce4 dce) (p 'fix_loops identity-pass)
          ;; pass_tree_loop: gate_loop (the function has a loop)
          (p 'loop loop-pass #:gate has-loops?)
-         (lp 'loopinit loop-init-pass) (lp 'sccp sccp-pass) (lp 'cddce2 dce) (lp 'ivcanon ivcanon-pass) (lp 'copyprop3 copyprop))))
+         (lp 'loopinit loop-init-pass) (lp 'sccp sccp-pass) (lp 'cddce2 dce) (lp 'ivcanon ivcanon-pass) (lp 'copyprop3 copyprop) (lp 'cunroll cunroll-pass))))
 
 ;; pass_sink_code: loop_optimizer_init (LOOPS_NORMAL), split_edges_for_insertion,
 ;; the statement sinking (not ported: nothing is sunk on the fixtures);

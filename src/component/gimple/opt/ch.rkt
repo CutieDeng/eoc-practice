@@ -22,7 +22,8 @@
 ;; the latch is not simple.  GCC 12: do-while loops are skipped, the
 ;; header chain is copied while should_duplicate_loop_header_p holds
 ;; (insn limit, no calls), the preheader and the latch edge are both
-;; split, block counts are only copied.
+;; split, the counts are scaled as gimple_duplicate_sese_region does
+;; (the copy gets entry / total, the region the rest).
 ;;
 ;; Not ported: the ";;" loop dumps of loop_optimizer_init (the harness
 ;; drops ";;" lines), unlooping loops that never loop, the iteration
@@ -474,6 +475,17 @@
                (set-prob! bb e-d prob-always) (set-prob! bb exit-d prob-never)
                (set-last-stmt! bb (cond-make (bb-last-stmt cfg bb) (true-edge? bb e-d))))
              (loop (cdr bbs) (edge-count cp e-dc))]))))
+    ;; GCC 12 gimple_duplicate_sese_region: the region keeps (total - entry)
+    ;; / total of its counts, the copy entry / total
+    ;; (scale_bbs_frequencies_profile_count, profile_count::apply_scale)
+    (when (< major 15)
+      (define total (prof-count cfg header))
+      (when (and total entry-count (> total 0))
+        (define ent (min entry-count total))
+        (define (apply-scale c num den) (cond [(or (not c) (zero? c)) c] [(zero? num) 0] [(= num den) c] [else (rdiv (* c num) den)]))
+        (for ([bb (in-list bbs)])
+          (set-count! bb (apply-scale (prof-count cfg bb) (- total ent) total))
+          (set-count! (hash-ref copies bb) (apply-scale (prof-count cfg (hash-ref copies bb)) ent total)))))
     ;; simple latch (and, in GCC 12, preheader)
     (when (< major 15)
       (let-values ([(_nb c) (split-edge cfg (hash-ref copies last-bb) new-header)]) (set! cfg c)))
@@ -505,7 +517,10 @@
       [else g]))
   ;; do_rpo_vn (entry, exit_bbs): the blocks reachable from the copied
   ;; header without entering the loop's exit blocks or the new header
+  ;; eliminate's to_remove: the copied PHIs, released last-pushed first
+  (define vn-removed '())
   (define (vn-region! spec)
+    (set! vn-removed '())
     (define entry (car spec)) (define new-header (cadr spec)) (define l (caddr spec))
     (define exit-bbs (cons new-header (for/list ([e (in-list (loop-exits cfg l))]) (cdr e))))
     (define region
@@ -520,6 +535,8 @@
     (for ([bb (in-list region)])
       (for ([ph (in-pvector (block-phis bb))] #:when (= 1 (pvector-length (gphi-args ph))))
         (hash-set! subst (ssa-name-version (gphi-result ph)) (value (cdr (pvector-ref (gphi-args ph) 0)))))
+      (for ([ph (in-pvector (block-phis bb))] #:when (hash-ref subst (ssa-name-version (gphi-result ph)) #f))
+        (set! vn-removed (cons (ssa-name-version (gphi-result ph)) vn-removed)))
       (set-phis! bb (for/pvector ([ph (in-pvector (block-phis bb))] #:unless (hash-ref subst (ssa-name-version (gphi-result ph)) #f)) ph))
       (set-stmts! bb (for/pvector ([g (in-pvector (block-stmts bb))])
                        (define changed #f)
@@ -544,7 +561,9 @@
     [(not changed?) (values cfg st)]
     [else
      (update-ssa!)
-     (for ([region (in-list (reverse copied-regions))]) (vn-region! region))
+     (for ([region (in-list (reverse copied-regions))])
+       (vn-region! region)
+       (set! st (for/fold ([st st]) ([v (in-list vn-removed)]) (ssa-queue-release st v))))
      (define-values (cfg1 st1) (cleanup-tree-cfg st cfg print-cond-rhs))
 
      (values cfg1 st1)]))
