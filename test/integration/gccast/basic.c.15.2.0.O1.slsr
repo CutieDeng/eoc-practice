@@ -1,0 +1,76 @@
+
+;; Function f (f, funcdef_no=0, decl_uid=4462, cgraph_uid=1, symbol_order=0)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5
+;; 2 succs { 3 4 }
+;; 3 succs { 5 }
+;; 4 succs { 5 }
+;; 5 succs { 1 }
+int f (int a)
+{
+  int _1;
+  int _3;
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_2(D) > 0)
+    goto <bb 3>; [59.00%]
+  else
+    goto <bb 4>; [41.00%]
+
+  <bb 3> [local count: 633507680]:
+  _4 = a_2(D) + 1;
+  goto <bb 5>; [100.00%]
+
+  <bb 4> [local count: 440234144]:
+  _3 = -a_2(D);
+
+  <bb 5> [local count: 1073741824]:
+  # _1 = PHI <_4(3), _3(4)>
+  return _1;
+
+}
+
+
+
+;; Function g (g, funcdef_no=1, decl_uid=4465, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+int g ()
+{
+  int i;
+  int s;
+  unsigned int ivtmp_4;
+  unsigned int ivtmp_6;
+  unsigned int ivtmp_41;
+
+  <bb 2> [local count: 97603129]:
+  i_1 = 1;
+  ivtmp_6 = 9;
+  i_12 = i_1 + 1;
+  i_16 = i_12 + 1;
+  i_20 = i_16 + 1;
+  i_24 = i_20 + 1;
+  i_28 = i_24 + 1;
+  i_32 = i_28 + 1;
+  i_36 = i_32 + 1;
+  i_40 = i_36 + 1;
+  ivtmp_41 = ivtmp_6 + 4294967288;
+  i_5 = i_40 + 1;
+  ivtmp_4 = ivtmp_41 + 4294967295;
+  return 45;
+
+}
+
+

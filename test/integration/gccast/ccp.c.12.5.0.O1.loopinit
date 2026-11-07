@@ -1,0 +1,70 @@
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=3612, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 5 3 8 6 7 4
+;;
+;; Loop 1
+;;  header 3, latch 6
+;;  depth 1, outer 0
+;;  nodes: 3 6
+;; 2 succs { 5 7 }
+;; 5 succs { 3 }
+;; 3 succs { 6 8 }
+;; 8 succs { 4 }
+;; 6 succs { 3 }
+;; 7 succs { 4 }
+;; 4 succs { 1 }
+
+SSA replacement table
+N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j
+
+s_2 -> { s_5 }
+Incremental SSA update started at block: 2
+Number of blocks in CFG: 9
+Number of blocks to update: 4 ( 44%)
+
+
+int k2 (int n)
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 118111600]:
+  if (n_3(D) > 0)
+    goto <bb 5>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 5> [local count: 105119324]:
+
+  <bb 3> [local count: 955630225]:
+  # s_9 = PHI <s_5(6), 0(5)>
+  # i_11 = PHI <i_6(6), 0(5)>
+  s_5 = s_9 + 2;
+  i_6 = i_11 + 1;
+  if (n_3(D) > i_6)
+    goto <bb 6>; [89.00%]
+  else
+    goto <bb 8>; [11.00%]
+
+  <bb 8> [local count: 105119324]:
+  # s_2 = PHI <s_5(3)>
+  goto <bb 4>; [100.00%]
+
+  <bb 6> [local count: 850510901]:
+  goto <bb 3>; [100.00%]
+
+  <bb 7> [local count: 12992276]:
+
+  <bb 4> [local count: 118111600]:
+  # s_10 = PHI <s_2(8), 0(7)>
+  return s_10;
+
+}
+
+

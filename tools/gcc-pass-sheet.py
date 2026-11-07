@@ -50,6 +50,13 @@ status={
  'tree-mergephi1':'恒等','tree-dse1':'完成','tree-cddce1':'完成','tree-phiopt1':'恒等','tree-iftoswitch':'恒等','tree-sccopy1':'恒等',
  'tree-profile_estimate':'完成','tree-local-pure-const1':'完成','tree-modref1':'完成','*strip_predict_hints':'完成（early 实例）','tree-release_ssa':'完成','tree-local-fnsummary2':'范围外（IPA 摘要）',
  '*warn_unused_result':'不比较（诊断）','*warn_function_return':'不比较（诊断）',
+ 'ipa-remove_symbols':'完成（子集：被完全内联的 static 函数移出单元）','ipa-inline':'完成（子集：inline into all callers；小函数路径 -O1 下对非 inline 声明关闭）',
+ 'ipa-static-var':'完成（子集：ipa_discover_variable_flags 的 readonly 发现）','ipa-pure-const':'范围外（IPA 传播未移植）','ipa-modref':'范围外（IPA 传播未移植）',
+ 'ipa-fnsummary':'完成（子集：无谓词的 size 模型）',
+ 'tree-fixup_cfg3':'完成（含 inline transform 的 TODO：cleanup、update_ssa、remove_unused_locals）','tree-adjust_alignment':'恒等','tree-ccp2':'完成（nonzero_p：≥15 输出 Global Exported 范围）',
+ 'tree-objsz1':'恒等','tree-waccess2':'不比较（pointer_query 计数器随 GCC 内部缓存变化）','tree-rebuild_frequencies1':'完成（只有 "Profile is consistent"）',
+ 'tree-backprop':'恒等','tree-phiprop2':'恒等','tree-phiprop':'恒等','tree-forwprop2':'完成（复用 forwprop）','tree-alias':'恒等（PTA 未移植；≥13 求解器进度行；12 排除）',
+ 'tree-retslot':'恒等','tree-fre3':'完成（复用 fre）','tree-mergephi2':'恒等','tree-dse2':'完成（复用 dse）','tree-dce2':'完成（复用 dce；remove_unused_locals 仅 ≥15）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
 def our_status(n,st,seen):
@@ -139,7 +146,7 @@ for k,label in [('tree','GIMPLE（tree-）'),('ipa','IPA（ipa-）'),('rtl','RTL
     u=sum(1 for r in rows if r[2]=='ON' and r[4].startswith('未移植') and kind(r,k))
     L.append("| %s | %d | %d | %d | %d | %d |"%(label,cnt[(k,'ON')],cnt[(k,'OFF')],d,i,u))
 L.append("| 合计 | %d | %d | %d | %d | %d |"%(sum(v for (k,s),v in cnt.items() if s=='ON'),sum(v for (k,s),v in cnt.items() if s=='OFF'),len(done),len(ident),sum(1 for r in rows if r[2]=='ON' and r[4].startswith('未移植'))))
-L.append("\n完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`；其后的 IPA 阶段与 `all_optimizations` 晚期序列（含循环优化、向量化降级、out-of-SSA）全部未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。\n")
+L.append("\n完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 fixup_cfg3 到 dce2；之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。\n")
 L.append("## 2. 夹具上真正改变代码的晚期 pass（gcc-15，release_ssa 之后）\n")
 L.append("按 dump 两两比较函数体得到；没有列出的晚期 pass 在该夹具上是恒等的（对齐时只需输出与前一 pass 相同的 dump）。这是晚期序列的移植优先级依据。\n")
 L.append("| 夹具 | 改变代码的 pass |\n|---|---|")
@@ -165,7 +172,7 @@ for n in sorted(levels):
     L.append("| `%s` | %s | %s | %s | %s | %s |"%(n,mark(v,'0'),mark(v,'1'),mark(v,'2'),mark(v,'3'),fstat(n,v)))
 L.append("\n● 启用，○ 关闭，其他为开关的非布尔取值。\n")
 L.append("## 6. 测试\n")
-L.append("- `o1-test.rkt` 172 项（4 夹具 × 2 版本 × 阶段），全套 525 项通过（aarch64 scribble 文档模块因缺 scribble collection 加载失败，与本工作无关）。")
+L.append("- `o1-test.rkt` 276 项（4 夹具 × 2 版本 × 阶段），全套通过（aarch64 scribble 文档模块因缺 scribble collection 加载失败，与本工作无关）。")
 L.append("- 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。")
 open(os.path.join(REPO,'doc','gcc-pass-progress.md'),'w').write('\n'.join(L)+'\n')
 print(len(rows),'pass rows;',len(levels),'flag rows; done',len(done),'ident',len(ident))

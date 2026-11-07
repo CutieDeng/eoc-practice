@@ -302,7 +302,7 @@
             (cond
               [(ssa-name? rhs) (valueize rhs)]
               [(eq? (tree-code rhs) 'constructor) #f]
-              [(eq? (tree-code-class st (tree-code rhs)) 'tcc_reference) #f]     ; fold_const_aggregate_ref_1
+              [(eq? (tree-code-class st (tree-code rhs)) 'tcc_reference) (fold-const-aggregate-ref st rhs valueize)]
               [(decl-p st rhs) (get-symbol-constant-value st rhs)]
               [else rhs])]
            [(binary)
@@ -996,7 +996,66 @@
 ;; do_ssa_ccp
 ;; ------------------------------------------------------------
 
-(define (ccp st fndecl cfg)
+;; ccp_finalize (nonzero_p): the partially constant integral names export
+;; their known bits as a global range; GCC >= 15 dumps them as
+;; "Global Exported: NAME = [irange] TYPE RANGES MASK 0x.. VALUE 0x.."
+;; (irange::set_range_from_bitmask: the mask's trailing zeros cut the
+;; values incompatible with the known low bits out of the varying range)
+(define (export-nonzero-bits! c cfg)
+  (define st (C-st c))
+  (when (>= (gcc-major-version st) 15)
+    (for ([name (in-pvector (ssa-names-in-version-order cfg))])
+      (define ty (tree-type name))
+      (define v (let ([ver (ssa-ver name)]) (and (< ver (vector-length (C-vals c))) (vector-ref (C-vals c) ver))))
+      (when (and v (lat? v 'constant) (lv-value v) (eq? (tree-code (lv-value v)) 'integer_cst) (not (zero? (lv-mask v)))
+                 (not (pointer-type-p st ty)) (integral-type-p st ty))
+        (define prec (type-precision* st ty))
+        (define unsigned? (type-unsigned?* st ty))
+        (define all (sub1 (arithmetic-shift 1 prec)))
+        (define mask (bitwise-and (lv-mask v) all))
+        (define value (bitwise-and (integer-cst-value (lv-value v)) all (bitwise-not mask)))
+        (define tmin (if unsigned? 0 (- (arithmetic-shift 1 (sub1 prec)))))
+        (define tmax (if unsigned? all (sub1 (arithmetic-shift 1 (sub1 prec)))))
+        ;; signed interpretation of a precision-wide pattern
+        (define (sv x) (if (and (not unsigned?) (bitwise-bit-set? x (sub1 prec))) (- x (arithmetic-shift 1 prec)) x))
+        (define nonzero-bits (bitwise-ior value mask))
+        (define (popcount x) (let loop ([x x] [n 0]) (if (zero? x) n (loop (arithmetic-shift x -1) (+ n (bitwise-and x 1))))))
+        (define ranges
+          (cond
+            [(= 1 (popcount nonzero-bits))
+             (define nz (sv nonzero-bits))
+             (if (< nz 0) (list (cons nz nz) (cons 0 0)) (list (cons 0 0) (cons nz nz)))]
+            [(zero? (popcount nonzero-bits)) (list (cons 0 0))]
+            [else
+             (define z (let loop ([m mask] [n 0]) (if (bitwise-bit-set? m 0) n (loop (arithmetic-shift m -1) (add1 n)))))
+             (cond
+               [(zero? z) (list (cons tmin tmax))]
+               [else
+                ;; [0, 2^z - 1] minus the known low bits, inverted, intersected with the type range
+                (define ub (sub1 (arithmetic-shift 1 z)))
+                (define low (bitwise-and value ub))
+                (define excluded (for/list ([x (in-range 0 (add1 ub))] #:unless (= x low)) x))
+                ;; the complement of [0, ub] \ {low} within [tmin, tmax]: ranges around the excluded block
+                (define (merge-adjacent ps)
+                  (let loop ([ps ps] [acc '()])
+                    (cond [(null? ps) (reverse acc)]
+                          [(and (pair? acc) (= (add1 (cdr (car acc))) (car (car ps)))) (loop (cdr ps) (cons (cons (car (car acc)) (cdr (car ps))) (cdr acc)))]
+                          [else (loop (cdr ps) (cons (car ps) acc))])))
+                (define kept (sort (cons low (append (if (< tmin 0) (list tmin) '()) (if (> tmax ub) (list (add1 ub)) '()))) <))
+                ;; valid values: tmin..-1 (signed), low, ub+1..tmax
+                (define parts (append (if (< tmin 0) (list (cons tmin -1)) '())
+                                      (list (cons low low))
+                                      (if (> tmax ub) (list (cons (add1 ub) tmax)) '())))
+                (merge-adjacent (sort parts < #:key car))])]))
+        (define (bound x) (cond [(and (not unsigned?) (= x tmin) (> prec 1)) "-INF"] [(and (= x tmax) (> prec 1)) "+INF"] [else (number->string x)]))
+        (define (hex x) (format "0x~a" (number->string (bitwise-and x all) 16)))
+        (set-C-messages! c (cons (format "Global Exported: ~a = [irange] ~a ~a MASK ~a VALUE ~a"
+                                         (print-expr st name) (print-type st ty)
+                                         (apply string-append (for/list ([r (in-list ranges)]) (format "[~a, ~a]" (bound (car r)) (bound (cdr r)))))
+                                         (hex mask) (hex value))
+                                 (C-messages c)))))))
+
+(define (ccp st fndecl cfg #:nonzero? [nonzero? #f])
   (define st0 (gs-set-fndecl st fndecl))
   (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
                            (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
@@ -1006,6 +1065,7 @@
                  #:init (lambda (e) (set-C-eng! c e) (ccp-initialize! c e))
                  #:visit-stmt (lambda (e uid g) (visit-stmt c (eng-uid-bb e uid) g))
                  #:visit-phi (lambda (e uid ph) (visit-phi c (eng-uid-bb e uid) ph)))
+  (when nonzero? (export-nonzero-bits! c cfg))
   (define-values (cfg1 changed?) (ccp-finalize c))
   (define cfg2 (for/fold ([cfg cfg1]) ([m (in-list (reverse (C-messages c)))]) (cfg-add-message cfg m)))
   (if changed? (cleanup-tree-cfg st0 cfg2 print-cond-rhs) (values cfg2 st0)))

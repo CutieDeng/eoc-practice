@@ -12,7 +12,10 @@
          "../../frontend/gccast/reader.rkt"
          (only-in "gimplify-test.rkt" normalize-gimple-text first-diff)
          "state.rkt" "import.rkt" "genericize.rkt" "gimplify.rkt" "lower.rkt" "cfg.rkt" "ssa.rkt" "print.rkt"
-         "opt/passes.rkt")
+         "opt/passes.rkt"
+         "opt/ipa.rkt"
+         "opt/inline.rkt"
+         "opt/fixup-cfg.rkt")
 
 (provide split-functions o1-stage-texts)
 
@@ -66,10 +69,34 @@
       (define locals-ssa (remove-unused-locals st6 cfg* locals))
       (print-ssa-function st6 decl locals-ssa cfg* (out 'ssa))
       (values st6 (cons (vector decl cfg* locals-ssa (GS-ssa-version st6)) acc))))
-  (for/fold ([st st-ssa]) ([f (in-list fns)])
+  (define-values (st-early fns-early)
+    (for/fold ([st st-ssa] [acc '()] #:result (values st (reverse acc))) ([f (in-list fns)])
+      (define decl (vector-ref f 0))
+      (define st0 (gs-set-ssa-version (gs-set-fndecl st decl) (vector-ref f 3)))
+      (define-values (cfg* st* locals*)
+        (for/fold ([cfg (vector-ref f 1)] [st st0] [locals (vector-ref f 2)]) ([p (in-list (o1-passes st0))])
+          (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
+          (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
+          (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
+          (values cfg1 st1 locals1)))
+      (values st* (cons (vector decl cfg* locals* (GS-ssa-version st*)) acc))))
+  ;; the IPA stage, then all_optimizations per remaining function: the
+  ;; inline transform (with its fixup / cleanup / remove_unused_locals
+  ;; TODOs) precedes the first late pass
+  (define-values (st-ipa fns-late plan) (ipa-stage st-early fns-early))
+  (for/fold ([st st-ipa]) ([f (in-list fns-late)])
     (define decl (vector-ref f 0))
     (define st0 (gs-set-ssa-version (gs-set-fndecl st decl) (vector-ref f 3)))
-    (for/fold ([cfg (vector-ref f 1)] [st st0] [locals (vector-ref f 2)] #:result st) ([p (in-list (o1-passes st0))])
+    (define my-plan (hash-ref plan (decl-uid decl) #f))
+    (define-values (cfg-i locals-i st-i)
+      (cond
+        [my-plan
+         (define-values (c l s) (inline-calls st0 decl (vector-ref f 1) (vector-ref f 2) my-plan))
+         (print-ssa-function s decl l c (out 'inline))      ; not a GCC dump: the transform's result for debugging
+         (define-values (c2 s2) (fixup-cfg-pass s decl c))
+         (values c2 (remove-unused-locals s2 c2 l) s2)]
+        [else (values (vector-ref f 1) (vector-ref f 2) st0)]))
+    (for/fold ([cfg cfg-i] [st st-i] [locals locals-i] #:result st) ([p (in-list (late-passes st-i))])
       (define-values (cfg1 st1) ((pass-fn p) st decl cfg))
       (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
       (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
@@ -80,14 +107,18 @@
 ;; for that version (a pass GCC does not run there) is skipped
 (define lowering-stages '(gimple lower cfg ssa))
 ;; ealias at GCC 12 dumps the points-to constraints and sets, which are not reproduced
-(define (stage-excluded? ver stage) (and (eq? stage 'ealias) (string=? ver "12.5.0")))
+;; waccess2 dumps pointer_query cache counters that depend on GCC internals
+(define (stage-excluded? ver stage)
+  (or (and (memq stage '(ealias alias)) (string=? ver "12.5.0"))
+      (eq? stage 'waccess2)))
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
          [name '("basic.c" "calls.c" "struct.c" "ccp.c")])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))
     (define texts (o1-stage-texts tu))
-    (define stages (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))))
+    (define stages (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))
+                           (map pass-name (late-passes (import-tu tu #:optimize 1)))))
     (for ([stage stages]
           #:unless (stage-excluded? ver stage)
           #:when (file-exists? (build-path fixtures (format "~a.~a.O1.~a" name ver stage))))

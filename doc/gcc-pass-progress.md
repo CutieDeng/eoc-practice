@@ -13,13 +13,13 @@
 
 | 类别 | ON | OFF | 完成 | 恒等 | 未移植（ON） |
 |---|---|---|---|---|---|
-| GIMPLE（tree-） | 141 | 85 | 13 | 9 | 108 |
-| IPA（ipa-） | 19 | 17 | 0 | 0 | 0 |
+| GIMPLE（tree-） | 141 | 85 | 20 | 16 | 93 |
+| IPA（ipa-） | 19 | 17 | 4 | 0 | 0 |
 | RTL（rtl-） | 49 | 45 | 0 | 0 | 0 |
 | 无 dump 名（*） | 20 | 12 | 1 | 0 | 0 |
-| 合计 | 229 | 159 | 14 | 9 | 108 |
+| 合计 | 229 | 159 | 25 | 16 | 93 |
 
-完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`；其后的 IPA 阶段与 `all_optimizations` 晚期序列（含循环优化、向量化降级、out-of-SSA）全部未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
+完成的 pass 覆盖 early 序列（`ipa-build_ssa_passes` + `ipa-opt_local_passes`）到 `tree-release_ssa`，IPA 阶段的子集（inline into all callers、static 变量 readonly 发现、符号移除；见 `opt/ipa.rkt`、`opt/inline.rkt`），以及 `all_optimizations` 从 fixup_cfg3 到 dce2；之后的晚期序列（含循环优化、向量化降级、out-of-SSA）未移植。gimplify（`-fdump-tree-gimple`，不是 pass）与 genericize 已完成并对齐。
 
 ## 2. 夹具上真正改变代码的晚期 pass（gcc-15，release_ssa 之后）
 
@@ -101,7 +101,7 @@
 | 61 | 　　`tree-release_ssa` | ON | ON | 完成 |
 | 62 | 　　`*rebuild_cgraph_edges` | ON | ON | 范围外 / 不比较 |
 | 63 | 　　`tree-local-fnsummary2` | ON | ON | 范围外（IPA 摘要） |
-| 64 | 　`ipa-remove_symbols` | ON | ON | 范围外（IPA） |
+| 64 | 　`ipa-remove_symbols` | ON | ON | 完成（子集：被完全内联的 static 函数移出单元） |
 | 65 | 　`ipa-strub` | OFF | 无 | gate 关闭（-O1 不执行） |
 | 66 | 　`ipa-ipa_oacc` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 67 | 　　`ipa-pta1` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -132,47 +132,47 @@
 | 92 | 　`ipa-cdtor` | ON | ON | 范围外（IPA） |
 | 93 | 　`ipa-cp` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 94 | 　`ipa-sra` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 95 | 　`ipa-fnsummary` | ON | ON | 范围外（IPA） |
-| 96 | 　`ipa-inline` | ON | ON | 范围外（IPA） |
+| 95 | 　`ipa-fnsummary` | ON | ON | 完成（子集：无谓词的 size 模型） |
+| 96 | 　`ipa-inline` | ON | ON | 完成（子集：inline into all callers；小函数路径 -O1 下对非 inline 声明关闭） |
 | 97 | 　`ipa-locality-clone` | OFF | 无 | gate 关闭（-O1 不执行） |
-| 98 | 　`ipa-pure-const` | ON | ON | 范围外（IPA） |
-| 99 | 　`ipa-modref` | ON | ON | 范围外（IPA） |
+| 98 | 　`ipa-pure-const` | ON | ON | 范围外（IPA 传播未移植） |
+| 99 | 　`ipa-modref` | ON | ON | 范围外（IPA 传播未移植） |
 | 100 | 　`ipa-free-fnsummary2` | ON | ON | 范围外（IPA） |
-| 101 | 　`ipa-static-var` | ON | ON | 范围外（IPA） |
+| 101 | 　`ipa-static-var` | ON | ON | 完成（子集：ipa_discover_variable_flags 的 readonly 发现） |
 | 102 | 　`ipa-single-use` | ON | ON | 范围外（IPA） |
 | 103 | 　`ipa-comdats` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 104 | 　`ipa-pta2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 105 | 　`ipa-simdclone` | ON | ON | 范围外（IPA） |
-| 106 | 　`tree-fixup_cfg3` | ON | ON | 未移植（可复用已实现的 fixup_cfg） |
+| 106 | 　`tree-fixup_cfg3` | ON | ON | 完成（含 inline transform 的 TODO：cleanup、update_ssa、remove_unused_locals） |
 | 107 | 　`tree-ehdisp` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 108 | 　`tree-oaccloops` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 109 | 　`tree-omp_oacc_neuter_broadcast` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 110 | 　`tree-oaccdevlow` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 111 | 　`tree-ompdevlow` | ON | ON | 未移植 |
 | 112 | 　`tree-omptargetlink` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 113 | 　`tree-adjust_alignment` | ON | ON | 未移植 |
+| 113 | 　`tree-adjust_alignment` | ON | ON | 恒等 |
 | 114 | 　`tree-hardcfr` | OFF | 无 | gate 关闭（-O1 不执行） |
 | 115 | 　`*all_optimizations` | ON | ON | 范围外 / 不比较 |
 | 116 | 　　`*remove_cgraph_callee_edges` | ON | ON | 范围外 / 不比较 |
 | 117 | 　　`*strip_predict_hints` | ON | ON | 范围外 / 不比较 |
-| 118 | 　　`tree-ccp2` | ON | ON | 未移植（可复用已实现的 ccp） |
-| 119 | 　　`tree-objsz1` | ON | ON | 未移植 |
+| 118 | 　　`tree-ccp2` | ON | ON | 完成（nonzero_p：≥15 输出 Global Exported 范围） |
+| 119 | 　　`tree-objsz1` | ON | ON | 恒等 |
 | 120 | 　　`tree-post_ipa_warn1` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 121 | 　　`tree-waccess2` | ON | ON | 未移植 |
-| 122 | 　　`tree-rebuild_frequencies1` | ON | 无 | 未移植 |
+| 121 | 　　`tree-waccess2` | ON | ON | 不比较（pointer_query 计数器随 GCC 内部缓存变化） |
+| 122 | 　　`tree-rebuild_frequencies1` | ON | 无 | 完成（只有 "Profile is consistent"） |
 | 123 | 　　`tree-cunrolli` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 124 | 　　`tree-backprop` | ON | ON | 未移植 |
-| 125 | 　　`tree-phiprop2` | ON | 无 | 未移植（可复用已实现的 phiprop） |
-| 126 | 　　`tree-forwprop2` | ON | ON | 未移植（可复用已实现的 forwprop） |
-| 127 | 　　`tree-alias` | ON | ON | 未移植 |
-| 128 | 　　`tree-retslot` | ON | ON | 未移植 |
-| 129 | 　　`tree-fre3` | ON | ON | 未移植（可复用已实现的 fre） |
-| 130 | 　　`tree-mergephi2` | ON | ON | 未移植（可复用已实现的 mergephi） |
+| 124 | 　　`tree-backprop` | ON | ON | 恒等 |
+| 125 | 　　`tree-phiprop2` | ON | 无 | 恒等 |
+| 126 | 　　`tree-forwprop2` | ON | ON | 完成（复用 forwprop） |
+| 127 | 　　`tree-alias` | ON | ON | 恒等（PTA 未移植；≥13 求解器进度行；12 排除） |
+| 128 | 　　`tree-retslot` | ON | ON | 恒等 |
+| 129 | 　　`tree-fre3` | ON | ON | 完成（复用 fre） |
+| 130 | 　　`tree-mergephi2` | ON | ON | 恒等 |
 | 131 | 　　`tree-threadfull1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 132 | 　　`tree-vrp1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 133 | 　　`tree-bounds` | OFF | 无 | gate 关闭（-O1 不执行） |
-| 134 | 　　`tree-dse2` | ON | ON | 未移植（可复用已实现的 dse） |
-| 135 | 　　`tree-dce2` | ON | ON | 未移植（可复用已实现的 dce） |
+| 134 | 　　`tree-dse2` | ON | ON | 完成（复用 dse） |
+| 135 | 　　`tree-dce2` | ON | ON | 完成（复用 dce；remove_unused_locals 仅 ≥15） |
 | 136 | 　　`tree-stdarg` | ON | ON | 未移植 |
 | 137 | 　　`tree-cdce` | ON | ON | 未移植 |
 | 138 | 　　`tree-cselim` | ON | ON | 未移植 |
@@ -717,5 +717,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- `o1-test.rkt` 172 项（4 夹具 × 2 版本 × 阶段），全套 525 项通过（aarch64 scribble 文档模块因缺 scribble collection 加载失败，与本工作无关）。
+- `o1-test.rkt` 276 项（4 夹具 × 2 版本 × 阶段），全套通过（aarch64 scribble 文档模块因缺 scribble collection 加载失败，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。

@@ -1,0 +1,173 @@
+
+;; Function use (use, funcdef_no=1, decl_uid=3613, cgraph_uid=2, symbol_order=1)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+a = &NONLOCAL
+b = &NONLOCAL
+p = &NONLOCAL
+_3 = _1
+_3 = _2
+callescape(15) = NONLOCAL
+CALLUSED(16) = callescape(15)
+callarg(18) = a
+callarg(18) = callarg(18) + UNKNOWN
+callarg(18) = *callarg(18) + UNKNOWN
+CALLUSED(16) = callarg(18)
+*callarg(18) = callescape(15)
+CALLCLOBBERED(17) = callarg(18)
+callescape(15) = callarg(18)
+ESCAPED = a
+callarg(19) = b
+callarg(19) = callarg(19) + UNKNOWN
+callarg(19) = *callarg(19) + UNKNOWN
+CALLUSED(16) = callarg(19)
+*callarg(19) = callescape(15)
+CALLCLOBBERED(17) = callarg(19)
+callescape(15) = callarg(19)
+ESCAPED = b
+r_18 = NONLOCAL
+r_18 = callarg(18)
+r_18 = callarg(19)
+_6 = _4
+_6 = _5
+_24 = b
+_24 = &NONLOCAL
+r_10 = r_18
+r_10 = &NULL
+r_10 = _24
+_7 = a
+_7 = b
+r_19 = _7
+r_19 = r_10
+r_20 = r_19
+r_20 = &NONLOCAL
+*p = r_19
+_8 = r_19
+*p = _8
+_25 = r_19
+_25 = &NONLOCAL
+_23 = r_20
+_23 = _25
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { NULL ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+a = { NONLOCAL }
+b = { NONLOCAL } same as a
+p = { NONLOCAL } same as a
+_1 = { }
+_2 = { }
+_3 = { }
+ext = { }
+callescape(15) = { ESCAPED NONLOCAL }
+CALLUSED(16) = { ESCAPED NONLOCAL } same as callescape(15)
+CALLCLOBBERED(17) = { ESCAPED NONLOCAL }
+callarg(18) = { ESCAPED NONLOCAL }
+callarg(19) = { ESCAPED NONLOCAL }
+r_18 = { ESCAPED NONLOCAL } same as callescape(15)
+_4 = { }
+_5 = { }
+_6 = { }
+_24 = { NONLOCAL } same as a
+r_10 = { NULL ESCAPED NONLOCAL }
+_7 = { NONLOCAL } same as a
+r_19 = { NULL ESCAPED NONLOCAL } same as r_10
+r_20 = { NULL ESCAPED NONLOCAL } same as r_10
+_8 = { NULL ESCAPED NONLOCAL } same as r_10
+_25 = { NULL ESCAPED NONLOCAL } same as r_10
+_23 = { NULL ESCAPED NONLOCAL } same as r_10
+use = { }
+
+
+Alias information for use
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to NULL, points-to vars: { }
+
+Flow-insensitive points-to information
+
+p_14(D), points-to non-local, points-to NULL, points-to vars: { }
+
+int use (int a, int b, int * p)
+{
+  int D.3633;
+  int D.3631;
+  int r;
+  _Bool _1;
+  _Bool _2;
+  _Bool _3;
+  _Bool _4;
+  _Bool _5;
+  _Bool _6;
+  int _7;
+  int _8;
+  int _23;
+  int _24;
+  int _25;
+
+  <bb 2> [local count: 1073741824]:
+  _1 = a_12(D) > 0;
+  _2 = b_13(D) <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  r_18 = ext (a_12(D), b_13(D));
+  goto <bb 6>; [100.00%]
+
+  <bb 4> [local count: 719407025]:
+  _4 = a_12(D) == 0;
+  _5 = p_14(D) == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0)
+    goto <bb 5>; [50.00%]
+  else
+    goto <bb 6>; [50.00%]
+
+  <bb 5> [local count: 359703512]:
+  _24 = b_13(D) * 2;
+
+  <bb 6> [local count: 1073741824]:
+  # r_10 = PHI <r_18(3), 0(4), _24(5)>
+  _7 = MAX_EXPR <a_12(D), b_13(D)>;
+  r_19 = _7 + r_10;
+  r_20 = r_19 + 1;
+  *p_14(D) = r_19;
+  _8 = ~r_19;
+  MEM[(int *)p_14(D) + 4B] = _8;
+  _25 = r_19 * 2;
+  _23 = r_20 + _25;
+  return _23;
+
+}
+
+

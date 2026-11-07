@@ -1,0 +1,37 @@
+
+;; Function g (g, funcdef_no=1, decl_uid=3608, cgraph_uid=2, symbol_order=1)
+
+
+final value replacement:
+  s_9 = PHI <s_4(3)>
+ with expr: 45
+ final stmt:
+  s_9 = 45;
+
+int g ()
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 97603128]:
+
+  <bb 3> [local count: 976138697]:
+  # s_8 = PHI <s_4(5), 0(2)>
+  # i_10 = PHI <i_5(5), 0(2)>
+  s_4 = s_8 + i_10;
+  i_5 = i_10 + 1;
+  if (i_5 <= 9)
+    goto <bb 5>; [90.91%]
+  else
+    goto <bb 4>; [9.09%]
+
+  <bb 5> [local count: 887407693]:
+  goto <bb 3>; [100.00%]
+
+  <bb 4> [local count: 97603128]:
+  s_9 = 45;
+  return s_9;
+
+}
+
+

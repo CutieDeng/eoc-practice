@@ -1,0 +1,48 @@
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=3612, cgraph_uid=2, symbol_order=1)
+
+
+final value replacement:
+  s_2 = PHI <s_5(3)>
+ with expr: n_3(D) * 2
+ final stmt:
+  s_2 = n_3(D) * 2;
+
+Removing basic block 7
+int k2 (int n)
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 118111600]:
+  if (n_3(D) > 0)
+    goto <bb 5>; [89.00%]
+  else
+    goto <bb 4>; [11.00%]
+
+  <bb 5> [local count: 105119324]:
+
+  <bb 3> [local count: 955630225]:
+  # s_9 = PHI <s_5(6), 0(5)>
+  # i_11 = PHI <i_6(6), 0(5)>
+  s_5 = s_9 + 2;
+  i_6 = i_11 + 1;
+  if (n_3(D) > i_6)
+    goto <bb 6>; [89.00%]
+  else
+    goto <bb 8>; [11.00%]
+
+  <bb 8> [local count: 105119324]:
+  s_2 = n_3(D) * 2;
+  goto <bb 4>; [100.00%]
+
+  <bb 6> [local count: 850510901]:
+  goto <bb 3>; [100.00%]
+
+  <bb 4> [local count: 118111600]:
+  # s_10 = PHI <s_2(8), 0(2)>
+  return s_10;
+
+}
+
+

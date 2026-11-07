@@ -1,0 +1,137 @@
+
+;; Function use (use, funcdef_no=1, decl_uid=3613, cgraph_uid=2, symbol_order=1)
+
+
+
+modref analyzing 'use/1' (ipa=0)
+Past summary:
+  loads:
+    Every base
+  stores:
+    Every base
+  Side effects
+  Nondeterministic
+  Global memory read
+  Global memory written
+  parm 2 flags: no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+Analyzing flags of ssa name: a_12(D)
+  Analyzing stmt: _7 = MAX_EXPR <a_12(D), b_13(D)>;
+    Analyzing flags of ssa name: _7
+      Analyzing stmt: r_19 = _7 + r_10;
+        Analyzing flags of ssa name: r_19
+          Analyzing stmt: _25 = r_19 * 2;
+            Analyzing flags of ssa name: _25
+              Analyzing stmt: _23 = r_20 + _25;
+                Analyzing flags of ssa name: _23
+                  Analyzing stmt: return _23;
+                  current flags of _23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                flags of ssa name _23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+              current flags of _25 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+            flags of ssa name _25 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          current flags of r_19 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          Analyzing stmt: _8 = ~r_19;
+            Analyzing flags of ssa name: _8
+              Analyzing stmt: MEM[(int *)p_14(D) + 4B] = _8;
+              ssa name saved to memory
+              current flags of _8
+            flags of ssa name _8
+          current flags of r_19
+        flags of ssa name r_19
+      current flags of _7
+    flags of ssa name _7
+  current flags of a_12(D)
+flags of ssa name a_12(D)
+Analyzing flags of ssa name: b_13(D)
+  Analyzing stmt: _24 = b_13(D) * 2;
+    Analyzing flags of ssa name: _24
+      Analyzing stmt: r_10 = PHI <r_18(3), 0(7), _24(5)>
+        Analyzing flags of ssa name: r_10
+          Analyzing stmt: r_19 = _7 + r_10;
+          current flags of r_10
+        flags of ssa name r_10
+      current flags of _24
+    flags of ssa name _24
+  current flags of b_13(D)
+flags of ssa name b_13(D)
+Analyzing flags of ssa name: p_14(D)
+  Analyzing stmt: MEM[(int *)p_14(D) + 4B] = _8;
+  current flags of p_14(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: *p_14(D) = r_19;
+  current flags of p_14(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: _5 = p_14(D) == 0B;
+  current flags of p_14(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name p_14(D) no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+ - Analyzing call:r_18 = ext (a_12(D), b_13(D));
+ - Function availability <= AVAIL_INTERPOSABLE.
+ - Analyzing store: *p_14(D)
+   - Recording base_set=0 ref_set=0  Parm 2 param offset:0 offset:0 size:32 max_size:32
+ - Analyzing store: MEM[(int *)p_14(D) + 4B]
+   - Recording base_set=0 ref_set=0  Parm 2 param offset:4 offset:0 size:32 max_size:32
+ - modref done with result: tracked.
+  loads:
+    Every base
+  stores:
+    Every base
+  Side effects
+  Nondeterministic
+  Global memory read
+  Global memory written
+  parm 2 flags: no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+int use (int a, int b, int * p)
+{
+  int r;
+  _Bool _1;
+  _Bool _2;
+  _Bool _3;
+  _Bool _4;
+  _Bool _5;
+  _Bool _6;
+  int _7;
+  int _8;
+  int _23;
+  int _24;
+  int _25;
+
+  <bb 2> [local count: 1073741824]:
+  _1 = a_12(D) > 0;
+  _2 = b_13(D) <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  r_18 = ext (a_12(D), b_13(D));
+  goto <bb 6>; [100.00%]
+
+  <bb 4> [local count: 719407025]:
+  _4 = a_12(D) == 0;
+  _5 = p_14(D) == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0)
+    goto <bb 5>; [50.00%]
+  else
+    goto <bb 7>; [50.00%]
+
+  <bb 7> [local count: 359703513]:
+  goto <bb 6>; [100.00%]
+
+  <bb 5> [local count: 359703512]:
+  _24 = b_13(D) * 2;
+
+  <bb 6> [local count: 1073741824]:
+  # r_10 = PHI <r_18(3), 0(7), _24(5)>
+  _7 = MAX_EXPR <a_12(D), b_13(D)>;
+  r_19 = _7 + r_10;
+  r_20 = r_19 + 1;
+  *p_14(D) = r_19;
+  _8 = ~r_19;
+  MEM[(int *)p_14(D) + 4B] = _8;
+  _25 = r_19 * 2;
+  _23 = r_20 + _25;
+  return _23;
+
+}
+
+

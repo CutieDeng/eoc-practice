@@ -1,0 +1,367 @@
+
+;; Function sum (sum, funcdef_no=0, decl_uid=3612, cgraph_uid=1, symbol_order=2)
+
+
+
+modref analyzing 'sum/2' (ipa=0) (pure)
+Past summary:
+  loads:
+    Every base
+  stores:
+  Global memory read
+  Try dse
+  parm 0 flags: not_returned_directly no_indirect_read
+Analyzing flags of ssa name: ps_24(D)
+  Analyzing stmt: _39 = ps_24(D) + _38;
+    Analyzing flags of ssa name: _39
+      Analyzing stmt: ivtmp.11_35 = (unsigned long) _39;
+        Analyzing flags of ssa name: ivtmp.11_35
+          Analyzing stmt: ivtmp.11_33 = PHI <ivtmp.11_35(2), ivtmp.11_34(12)>
+            Analyzing flags of ssa name: ivtmp.11_33
+              Analyzing stmt: ivtmp.11_34 = ivtmp.11_33 + 18446744073709551604;
+                Analyzing flags of ssa name: ivtmp.11_34
+                  Analyzing stmt: ivtmp.11_33 = PHI <ivtmp.11_35(2), ivtmp.11_34(12)>
+                    Cycle in SSA graph
+                    Will propgate from ssa_name 33 to 34
+                  current flags of ivtmp.11_34 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+                  Analyzing stmt: _45 = (void *) ivtmp.11_34;
+                    Analyzing flags of ssa name: _45
+                      Analyzing stmt: _9 = MEM[(char *)_45 + 20B];
+                        Analyzing flags of ssa name: _9
+                          Analyzing stmt: if (_9 == 122)
+                          current flags of _9 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+                        flags of ssa name _9 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+                      current flags of _45 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_indirect_read
+                    flags of ssa name _45 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_indirect_read
+                  current flags of ivtmp.11_34 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_indirect_read
+                flags of ssa name ivtmp.11_34 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_indirect_read
+                Will propgate from ssa_name 34 to 33
+              current flags of ivtmp.11_33 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_indirect_read
+              Analyzing stmt: _43 = (void *) ivtmp.11_33;
+                Analyzing flags of ssa name: _43
+                  Analyzing stmt: _6 = MEM[(int *)_43 + 4B];
+                    Analyzing flags of ssa name: _6
+                      Analyzing stmt: _7 = _5 + _6;
+                        Analyzing flags of ssa name: _7
+                          Analyzing stmt: _8 = (long unsigned int) _7;
+                            Analyzing flags of ssa name: _8
+                              Analyzing stmt: acc_26 = _8 + acc_18;
+                                Analyzing flags of ssa name: acc_26
+                                  Analyzing stmt: acc_19 = PHI <acc_26(11), acc_18(13)>
+                                    Analyzing flags of ssa name: acc_19
+                                      Analyzing stmt: acc_20 = PHI <acc_19(14), acc_27(8)>
+                                        Analyzing flags of ssa name: acc_20
+                                          Analyzing stmt: acc_29 = acc_20 + 3;
+                                            Analyzing flags of ssa name: acc_29
+                                              Analyzing stmt: acc_21 = PHI <acc_28(7), acc_29(9)>
+                                                Analyzing flags of ssa name: acc_21
+                                                  Analyzing stmt: _30 = _10 + acc_21;
+                                                    Analyzing flags of ssa name: _30
+                                                      Analyzing stmt: return _30;
+                                                      current flags of _30 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                                    flags of ssa name _30 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                                  current flags of acc_21 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                                flags of ssa name acc_21 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                              current flags of acc_29 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                            flags of ssa name acc_29 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                          current flags of acc_20 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                        flags of ssa name acc_20 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                      current flags of acc_19 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                      Analyzing stmt: acc_28 = acc_19 + 1;
+                                        Analyzing flags of ssa name: acc_28
+                                          Analyzing stmt: acc_21 = PHI <acc_28(7), acc_29(9)>
+                                          current flags of acc_28 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                        flags of ssa name acc_28 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                      current flags of acc_19 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                      Analyzing stmt: acc_27 = acc_19 + 2;
+                                        Analyzing flags of ssa name: acc_27
+                                          Analyzing stmt: acc_20 = PHI <acc_19(14), acc_27(8)>
+                                          current flags of acc_27 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                        flags of ssa name acc_27 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                      current flags of acc_19 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                    flags of ssa name acc_19 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                  current flags of acc_26 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                  Analyzing stmt: acc_18 = PHI <0(2), acc_26(12)>
+                                    Analyzing flags of ssa name: acc_18
+                                      Analyzing stmt: acc_19 = PHI <acc_26(11), acc_18(13)>
+                                      current flags of acc_18 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                      Analyzing stmt: acc_26 = _8 + acc_18;
+                                        Cycle in SSA graph
+                                        Will propgate from ssa_name 26 to 18
+                                      current flags of acc_18 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                    flags of ssa name acc_18 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                    Will propgate from ssa_name 18 to 26
+                                  current flags of acc_26 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                flags of ssa name acc_26 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                                Will propgate from ssa_name 26 to 8
+                              current flags of _8 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                            flags of ssa name _8 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                            Will propgate from ssa_name 8 to 7
+                          current flags of _7 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                        flags of ssa name _7 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                        Will propgate from ssa_name 7 to 6
+                      current flags of _6 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                    flags of ssa name _6 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                    Will propgate from ssa_name 6 to 43 (deref)
+                  current flags of _43 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+                  Analyzing stmt: _4 = MEM[(int *)_43];
+                    Analyzing flags of ssa name: _4
+                      Analyzing stmt: _5 = _4 * 2;
+                        Analyzing flags of ssa name: _5
+                          Analyzing stmt: _7 = _5 + _6;
+                            Will propgate from ssa_name 7 to 5
+                          current flags of _5 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                        flags of ssa name _5 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                        Will propgate from ssa_name 5 to 4
+                      current flags of _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                    flags of ssa name _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                    Will propgate from ssa_name 4 to 43 (deref)
+                  current flags of _43 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+                flags of ssa name _43 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+                Will propgate from ssa_name 43 to 33
+              current flags of ivtmp.11_33 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+            flags of ssa name ivtmp.11_33 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+            Will propgate from ssa_name 33 to 35
+          current flags of ivtmp.11_35 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+        flags of ssa name ivtmp.11_35 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+        Will propgate from ssa_name 35 to 39
+      current flags of _39 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+    flags of ssa name _39 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+    Will propgate from ssa_name 39 to 24
+  current flags of ps_24(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+flags of ssa name ps_24(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+Analyzing flags of ssa name: n_22(D)
+  Analyzing stmt: _36 = (sizetype) n_22(D);
+    Analyzing flags of ssa name: _36
+      Analyzing stmt: _37 = _36 * 12;
+        Analyzing flags of ssa name: _37
+          Analyzing stmt: _38 = _37 + 18446744073709551604;
+            Analyzing flags of ssa name: _38
+              Analyzing stmt: _39 = ps_24(D) + _38;
+              current flags of _38 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+            flags of ssa name _38 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+          current flags of _37 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name _37 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+      current flags of _36 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name _36 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  current flags of n_22(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: n_17 = PHI <n_22(D)(2), n_23(12)>
+    Analyzing flags of ssa name: n_17
+      Analyzing stmt: if (n_17 > 0)
+      current flags of n_17 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+      Analyzing stmt: n_23 = n_17 + -1;
+        Analyzing flags of ssa name: n_23
+          Analyzing stmt: n_17 = PHI <n_22(D)(2), n_23(12)>
+            Cycle in SSA graph
+            Will propgate from ssa_name 17 to 23
+          current flags of n_23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+          Analyzing stmt: _14 = (double) n_23;
+            Analyzing flags of ssa name: _14
+              Analyzing stmt: _15 = _14 * 5.0e-1;
+                Analyzing flags of ssa name: _15
+                  Analyzing stmt: _16 = (long unsigned int) _15;
+                    Analyzing flags of ssa name: _16
+                      Analyzing stmt: _10 = _16 + 104;
+                        Analyzing flags of ssa name: _10
+                          Analyzing stmt: _30 = _10 + acc_21;
+                          current flags of _10 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                        flags of ssa name _10 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                      current flags of _16 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                    flags of ssa name _16 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                  current flags of _15 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+                flags of ssa name _15 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+              current flags of _14 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+            flags of ssa name _14 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          current flags of n_23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          Analyzing stmt: if (n_23 == 1)
+          current flags of n_23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          Analyzing stmt: if (n_23 == 0)
+          current flags of n_23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name n_23 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        Will propgate from ssa_name 23 to 17
+      current flags of n_17 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name n_17 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    Will propgate from ssa_name 17 to 22
+  current flags of n_22(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name n_22(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+Propagating EAF flags
+ iteration 1
+  Visiting ssa name 17
+   Propagating flags of ssa name 17 to 23
+   Propagating flags of ssa name 17 to 22
+  Visiting ssa name 23
+   Propagating flags of ssa name 23 to 17
+  Visiting ssa name 26
+   Propagating flags of ssa name 26 to 18
+   Propagating flags of ssa name 26 to 8
+  Visiting ssa name 8
+   Propagating flags of ssa name 8 to 7
+  Visiting ssa name 7
+   Propagating flags of ssa name 7 to 6
+   Propagating flags of ssa name 7 to 5
+  Visiting ssa name 5
+   Propagating flags of ssa name 5 to 4
+  Visiting ssa name 4
+   Propagating flags of ssa name 4 to 43 (deref)
+  Visiting ssa name 6
+   Propagating flags of ssa name 6 to 43 (deref)
+  Visiting ssa name 43
+   Propagating flags of ssa name 43 to 33
+  Visiting ssa name 18
+   Propagating flags of ssa name 18 to 26
+  Visiting ssa name 33
+   Propagating flags of ssa name 33 to 34
+   New lattice:  no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+   Propagating flags of ssa name 33 to 35
+  Visiting ssa name 35
+   Propagating flags of ssa name 35 to 39
+  Visiting ssa name 39
+   Propagating flags of ssa name 39 to 24
+  Visiting ssa name 34
+   Propagating flags of ssa name 34 to 33
+ iteration 2
+EAF flags propagated in 2 iterations
+ - Analyzing load: MEM[(int *)_43]
+   - Recording base_set=0 ref_set=0 
+ - Analyzing load: MEM[(int *)_43 + 4B]
+   - Recording base_set=0 ref_set=0 
+ - Analyzing load: MEM[(char *)_45 + 20B]
+   - Recording base_set=0 ref_set=0 
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 11 12 4 13 5 6 14 7 8 9 10
+;;
+;; Loop 1
+;;  header 4, latch 12
+;;  depth 1, outer 0
+;;  nodes: 4 12 3
+;; 2 succs { 4 }
+;; 3 succs { 11 12 }
+;; 11 succs { 5 }
+;; 12 succs { 4 }
+;; 4 succs { 3 13 }
+;; 13 succs { 5 }
+;; 5 succs { 6 7 }
+;; 6 succs { 14 8 }
+;; 14 succs { 9 }
+;; 7 succs { 10 }
+;; 8 succs { 9 }
+;; 9 succs { 10 }
+;; 10 succs { 1 }
+ - modref done with result: tracked.
+  loads:
+    Every base
+  stores:
+  Global memory read
+  Try dse
+  parm 0 flags: not_returned_directly no_indirect_read
+  parm 1 flags: not_returned_indirectly no_direct_read no_indirect_read
+  Flags for param 1 improved: ->  not_returned_indirectly no_direct_read no_indirect_read
+long unsigned int sum (const struct P * ps, int n)
+{
+  unsigned long ivtmp.11;
+  long unsigned int acc;
+  int _4;
+  int _5;
+  int _6;
+  int _7;
+  long unsigned int _8;
+  char _9;
+  long unsigned int _10;
+  double _14;
+  double _15;
+  long unsigned int _16;
+  long unsigned int _30;
+  sizetype _36;
+  sizetype _37;
+  sizetype _38;
+  const struct P * _39;
+  void * _43;
+  void * _45;
+
+  <bb 2> [local count: 114863530]:
+  _36 = (sizetype) n_22(D);
+  _37 = _36 * 12;
+  _38 = _37 + 18446744073709551604;
+  _39 = ps_24(D) + _38;
+  ivtmp.11_35 = (unsigned long) _39;
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 1014686026]:
+  _43 = (void *) ivtmp.11_33;
+  _4 = MEM[(int *)_43];
+  _5 = _4 * 2;
+  _6 = MEM[(int *)_43 + 4B];
+  _7 = _5 + _6;
+  _8 = (long unsigned int) _7;
+  acc_26 = _8 + acc_18;
+  ivtmp.11_34 = ivtmp.11_33 + 18446744073709551604;
+  _45 = (void *) ivtmp.11_34;
+  _9 = MEM[(char *)_45 + 20B];
+  if (_9 == 122)
+    goto <bb 11>; [5.50%]
+  else
+    goto <bb 12>; [94.50%]
+
+  <bb 11> [local count: 55807731]:
+  goto <bb 5>; [100.00%]
+
+  <bb 12> [local count: 958878295]:
+
+  <bb 4> [local count: 1073741824]:
+  # n_17 = PHI <n_22(D)(2), n_23(12)>
+  # acc_18 = PHI <0(2), acc_26(12)>
+  # ivtmp.11_33 = PHI <ivtmp.11_35(2), ivtmp.11_34(12)>
+  n_23 = n_17 + -1;
+  if (n_17 > 0)
+    goto <bb 3>; [94.50%]
+  else
+    goto <bb 13>; [5.50%]
+
+  <bb 13> [local count: 59055800]:
+
+  <bb 5> [local count: 114863531]:
+  # acc_19 = PHI <acc_26(11), acc_18(13)>
+  if (n_23 == 0)
+    goto <bb 7>; [33.33%]
+  else
+    goto <bb 6>; [66.67%]
+
+  <bb 6> [local count: 114863531]:
+  if (n_23 == 1)
+    goto <bb 8>; [50.00%]
+  else
+    goto <bb 14>; [50.00%]
+
+  <bb 14> [local count: 57431766]:
+  goto <bb 9>; [100.00%]
+
+  <bb 7> [local count: 38287844]:
+<L4>:
+  acc_28 = acc_19 + 1;
+  goto <bb 10>; [100.00%]
+
+  <bb 8> [local count: 38287844]:
+<L5>:
+  acc_27 = acc_19 + 2;
+
+  <bb 9> [local count: 76575688]:
+  # acc_20 = PHI <acc_19(14), acc_27(8)>
+<L6>:
+  acc_29 = acc_20 + 3;
+
+  <bb 10> [local count: 114863532]:
+  # acc_21 = PHI <acc_28(7), acc_29(9)>
+  _14 = (double) n_23;
+  _15 = _14 * 5.0e-1;
+  _16 = (long unsigned int) _15;
+  _10 = _16 + 104;
+  _30 = _10 + acc_21;
+  return _30;
+
+}
+
+

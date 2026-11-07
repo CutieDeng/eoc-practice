@@ -1,0 +1,53 @@
+
+;; Function k1 (k1, funcdef_no=0, decl_uid=3607, cgraph_uid=1, symbol_order=0)
+
+int k1 (int a)
+{
+  int _2;
+
+  <bb 2> [local count: 1073741824]:
+  _2 = a_1(D) + 7;
+  return _2;
+
+}
+
+
+
+;; Function k3 (k3, funcdef_no=2, decl_uid=3621, cgraph_uid=3, symbol_order=2)
+
+int k3 (int a)
+{
+  <bb 2> [local count: 1073741824]:
+  return a_1(D);
+
+}
+
+
+
+;; Function k4 (k4, funcdef_no=3, decl_uid=3626, cgraph_uid=4, symbol_order=3)
+
+int k4 (unsigned int a)
+{
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  _4 = ext (2);
+  return _4;
+
+}
+
+
+
+;; Function k5 (k5, funcdef_no=4, decl_uid=3631, cgraph_uid=5, symbol_order=4)
+
+int k5 (int a, int b)
+{
+  int _3;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = a_1(D) + 10;
+  return _3;
+
+}
+
+

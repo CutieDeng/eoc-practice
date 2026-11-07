@@ -1,0 +1,56 @@
+
+;; Function f (f, funcdef_no=0, decl_uid=3605, cgraph_uid=1, symbol_order=0)
+
+int f (int a)
+{
+  int _1;
+  int _3;
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_2(D) > 0)
+    goto <bb 3>; [59.00%]
+  else
+    goto <bb 4>; [41.00%]
+
+  <bb 3> [local count: 633507681]:
+  _4 = a_2(D) + 1;
+  goto <bb 5>; [100.00%]
+
+  <bb 4> [local count: 440234144]:
+  _3 = -a_2(D);
+
+  <bb 5> [local count: 1073741824]:
+  # _1 = PHI <_4(3), _3(4)>
+  return _1;
+
+}
+
+
+
+;; Function g (g, funcdef_no=1, decl_uid=3608, cgraph_uid=2, symbol_order=1)
+
+int g ()
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 97603128]:
+
+  <bb 3> [local count: 976138697]:
+  # s_8 = PHI <s_4(3), 0(2)>
+  # i_10 = PHI <i_5(3), 0(2)>
+  s_4 = s_8 + i_10;
+  i_5 = i_10 + 1;
+  if (i_5 <= 9)
+    goto <bb 3>; [90.91%]
+  else
+    goto <bb 4>; [9.09%]
+
+  <bb 4> [local count: 97603128]:
+  # s_9 = PHI <s_4(3)>
+  return s_9;
+
+}
+
+

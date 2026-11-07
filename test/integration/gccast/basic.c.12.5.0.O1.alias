@@ -1,0 +1,164 @@
+
+;; Function f (f, funcdef_no=0, decl_uid=3605, cgraph_uid=1, symbol_order=0)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+a = &NONLOCAL
+_4 = a
+_4 = &NONLOCAL
+_3 = a
+_1 = _4
+_1 = _3
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+a = { NONLOCAL }
+_4 = { NONLOCAL } same as a
+_3 = { NONLOCAL } same as a
+_1 = { NONLOCAL } same as a
+f = { }
+
+
+Alias information for f
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+
+int f (int a)
+{
+  int _1;
+  int _3;
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_2(D) > 0)
+    goto <bb 3>; [59.00%]
+  else
+    goto <bb 4>; [41.00%]
+
+  <bb 3> [local count: 633507681]:
+  _4 = a_2(D) + 1;
+  goto <bb 5>; [100.00%]
+
+  <bb 4> [local count: 440234144]:
+  _3 = -a_2(D);
+
+  <bb 5> [local count: 1073741824]:
+  # _1 = PHI <_4(3), _3(4)>
+  return _1;
+
+}
+
+
+
+;; Function g (g, funcdef_no=1, decl_uid=3608, cgraph_uid=2, symbol_order=1)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+s_4 = s_1
+s_4 = i_2
+i_5 = i_2
+i_5 = &NONLOCAL
+s_1 = &NULL
+s_1 = s_4
+i_2 = &NULL
+i_2 = i_5
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+s_4 = { NULL NONLOCAL }
+s_1 = { NULL NONLOCAL } same as s_4
+i_2 = { NULL NONLOCAL } same as s_4
+i_5 = { NULL NONLOCAL } same as s_4
+g = { }
+
+
+Alias information for g
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+
+int g ()
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 97603128]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 976138697]:
+  s_4 = s_1 + i_2;
+  i_5 = i_2 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # s_1 = PHI <0(2), s_4(3)>
+  # i_2 = PHI <0(2), i_5(3)>
+  if (i_2 <= 9)
+    goto <bb 3>; [90.91%]
+  else
+    goto <bb 5>; [9.09%]
+
+  <bb 5> [local count: 97603128]:
+  return s_1;
+
+}
+
+

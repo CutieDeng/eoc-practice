@@ -430,7 +430,7 @@
            (cond
              [(ssa-name? rhs) (v rhs)]
              [(eq? (tree-code rhs) 'constructor) #f]
-             [(eq? (tree-code-class st (tree-code rhs)) 'tcc_reference) #f]
+             [(eq? (tree-code-class st (tree-code rhs)) 'tcc_reference) (fold-const-aggregate-ref st rhs v)]
              [(decl-p st rhs) (get-symbol-constant-value st rhs)]
              [(is-gimple-min-invariant st rhs) rhs]
              [else #f])]

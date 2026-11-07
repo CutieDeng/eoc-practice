@@ -1,0 +1,120 @@
+
+;; Function g (g, funcdef_no=1, decl_uid=4465, cgraph_uid=2, symbol_order=1)
+
+Removing basic block 25
+Removing basic block 26
+Removing basic block 27
+Removing basic block 28
+Removing basic block 29
+Removing basic block 30
+Removing basic block 31
+Removing basic block 32
+Removing basic block 33
+
+SSA replacement table
+N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j
+
+i_1 -> { i_5 }
+ivtmp_2 -> { ivtmp_8 }
+ivtmp_6 -> { ivtmp_4 }
+i_7 -> { i_10 }
+i_9 -> { i_10 }
+ivtmp_11 -> { ivtmp_8 }
+i_12 -> { i_5 }
+ivtmp_13 -> { ivtmp_4 }
+i_14 -> { i_10 }
+ivtmp_15 -> { ivtmp_8 }
+i_16 -> { i_5 }
+ivtmp_17 -> { ivtmp_4 }
+i_18 -> { i_10 }
+ivtmp_19 -> { ivtmp_8 }
+i_20 -> { i_5 }
+ivtmp_21 -> { ivtmp_4 }
+i_22 -> { i_10 }
+ivtmp_23 -> { ivtmp_8 }
+i_24 -> { i_5 }
+ivtmp_25 -> { ivtmp_4 }
+i_26 -> { i_10 }
+ivtmp_27 -> { ivtmp_8 }
+i_28 -> { i_5 }
+ivtmp_29 -> { ivtmp_4 }
+i_30 -> { i_10 }
+ivtmp_31 -> { ivtmp_8 }
+i_32 -> { i_5 }
+ivtmp_33 -> { ivtmp_4 }
+i_34 -> { i_10 }
+ivtmp_35 -> { ivtmp_8 }
+i_36 -> { i_5 }
+ivtmp_37 -> { ivtmp_4 }
+i_38 -> { i_10 }
+ivtmp_39 -> { ivtmp_8 }
+i_40 -> { i_5 }
+ivtmp_41 -> { ivtmp_4 }
+Incremental SSA update started at block: 6
+Number of blocks in CFG: 34
+Number of blocks to update: 19 ( 56%)
+
+
+Removing basic block 5
+Removing basic block 24
+Merging blocks 2 and 6
+Removing basic block 7
+Removing basic block 9
+Removing basic block 11
+Removing basic block 13
+Removing basic block 15
+Removing basic block 17
+Removing basic block 19
+Removing basic block 21
+Removing basic block 23
+Merging blocks 2 and 8
+Merging blocks 2 and 10
+Merging blocks 2 and 12
+Merging blocks 2 and 14
+Merging blocks 2 and 16
+Merging blocks 2 and 18
+Merging blocks 2 and 20
+Merging blocks 2 and 22
+Merging blocks 2 and 3
+Merging blocks 2 and 4
+int g ()
+{
+  int i;
+  int s;
+  unsigned int ivtmp_4;
+  unsigned int ivtmp_6;
+  unsigned int ivtmp_13;
+  unsigned int ivtmp_17;
+  unsigned int ivtmp_21;
+  unsigned int ivtmp_25;
+  unsigned int ivtmp_29;
+  unsigned int ivtmp_33;
+  unsigned int ivtmp_37;
+  unsigned int ivtmp_41;
+
+  <bb 2> [local count: 97603129]:
+  i_1 = 1;
+  ivtmp_6 = 9;
+  i_12 = i_1 + 1;
+  ivtmp_13 = ivtmp_6 + 4294967295;
+  i_16 = i_12 + 1;
+  ivtmp_17 = ivtmp_13 + 4294967295;
+  i_20 = i_16 + 1;
+  ivtmp_21 = ivtmp_17 + 4294967295;
+  i_24 = i_20 + 1;
+  ivtmp_25 = ivtmp_21 + 4294967295;
+  i_28 = i_24 + 1;
+  ivtmp_29 = ivtmp_25 + 4294967295;
+  i_32 = i_28 + 1;
+  ivtmp_33 = ivtmp_29 + 4294967295;
+  i_36 = i_32 + 1;
+  ivtmp_37 = ivtmp_33 + 4294967295;
+  i_40 = i_36 + 1;
+  ivtmp_41 = ivtmp_37 + 4294967295;
+  i_5 = i_40 + 1;
+  ivtmp_4 = ivtmp_41 + 4294967295;
+  return 45;
+
+}
+
+

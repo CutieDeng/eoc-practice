@@ -1148,7 +1148,7 @@
 (define (get-symbol-constant-value st sym)
   (and (var-p sym) (decl-flag st sym 'readonly) (not (tree-this-volatile sym))
        (or (tree-static sym) (decl-external sym))
-       (let ([val (decl-initial st sym)])
+       (let ([val (let ([v (decl-initial st sym)]) (and v (strip-useless-type-conversion st v)))])   ; canonicalize_constructor_val
          (and val (is-gimple-min-invariant st val)
               (useless-type-conversion-p st (tree-type sym) (tree-type val))
               val))))

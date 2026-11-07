@@ -1,0 +1,84 @@
+
+;; Function k1 (k1, funcdef_no=0, decl_uid=4464, cgraph_uid=1, symbol_order=0)
+
+int k1 (int a)
+{
+  int _2;
+
+  <bb 2> [local count: 1073741824]:
+  _2 = a_1(D) + 7;
+  return _2;
+
+}
+
+
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=4469, cgraph_uid=2, symbol_order=1)
+
+int k2 (int n)
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 118111600]:
+  if (n_3(D) > 0)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 4>; [11.00%]
+
+  <bb 3> [local count: 955630224]:
+  # s_9 = PHI <s_5(3), 0(2)>
+  # i_11 = PHI <i_6(3), 0(2)>
+  s_5 = s_9 + 2;
+  i_6 = i_11 + 1;
+  if (n_3(D) > i_6)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 4>; [11.00%]
+
+  <bb 4> [local count: 118111600]:
+  # s_10 = PHI <s_5(3), 0(2)>
+  return s_10;
+
+}
+
+
+
+;; Function k3 (k3, funcdef_no=2, decl_uid=4478, cgraph_uid=3, symbol_order=2)
+
+int k3 (int a)
+{
+  <bb 2> [local count: 1073741824]:
+  return a_1(D);
+
+}
+
+
+
+;; Function k4 (k4, funcdef_no=3, decl_uid=4483, cgraph_uid=4, symbol_order=3)
+
+int k4 (unsigned int a)
+{
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  _4 = ext (2);
+  return _4;
+
+}
+
+
+
+;; Function k5 (k5, funcdef_no=4, decl_uid=4488, cgraph_uid=5, symbol_order=4)
+
+int k5 (int a, int b)
+{
+  int _3;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = a_1(D) + 10;
+  return _3;
+
+}
+
+

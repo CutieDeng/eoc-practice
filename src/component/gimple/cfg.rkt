@@ -39,7 +39,9 @@
          cfg-set-profile prof-count prof-prob split-edge label-to-block make-edge remove-edge create-bb
          EDGE-FALLTHRU EDGE-TRUE-VALUE EDGE-FALSE-VALUE
          cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges
-         set-block block-set-phis block-set-stmts ENTRY EXIT)
+         set-block block-set-phis block-set-stmts ENTRY EXIT
+         split-block set-succs set-preds prof-move-edge assign-label-uid register-label link-block unlink-block
+         bb-next bb-prev)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -226,6 +228,39 @@
   (for/fold ([acc (pvector-empty)] [n n0] #:result (values acc n)) ([old (in-pvector old-phis)] [new (in-pvector new-phis)])
     (define-values (g n1) (restamp old new n))
     (values (pvector-cons-right acc g) n1)))
+
+;; gimple_split_block: the statements from index K on move to a new
+;; block placed right after BB, which takes over BB's successor edges
+;; (their PHI arguments keep their slots), with a fallthru edge BB -> NEW.
+;; The new block starts with BB's count.
+(define (split-block c bb k)
+  (define b (cfg-block c bb))
+  (define all (GBlock-stmts b))
+  (define head (for/pvector ([g (in-pvector all)] [i (in-naturals)] #:when (< i k)) g))
+  (define tail (for/pvector ([g (in-pvector all)] [i (in-naturals)] #:when (>= i k)) g))
+  (define-values (nb c1) (create-bb (set-block c (block-set-stmts b head)) tail bb))
+  (define succs (cfg-succs c1 bb))
+  ;; move the successor edges
+  (define c2
+    (for/fold ([c (set-succs (set-succs c1 nb succs) bb (pvector-empty))]) ([e (in-pvector succs)])
+      (define d (GEdge-dest e))
+      (define db (cfg-block c d))
+      (define pk (pvector-index-of (GBlock-preds db) bb))
+      (let* ([c (prof-move-edge c bb d nb)]
+             [c (set-block c (block-set-preds (block-set-phis db (for/pvector ([ph (in-pvector (GBlock-phis db))])
+                                                                   (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                                                                         (for/pvector ([a (in-pvector (gphi-args ph))])
+                                                                           (if (= (car a) bb) (cons nb (cdr a)) a)))))
+                                               (pvector-set (GBlock-preds db) pk nb)))])
+        c)))
+  (define-values (_n c3) (make-edge c2 bb nb EDGE-FALLTHRU))
+  (define pf (GCfg-profile c3))
+  (define c4
+    (if pf
+        (cfg-set-profile c3 (GProf (intmap-set (GProf-counts pf) nb (or (intmap-ref (GProf-counts pf) bb #f) 0))
+                                   (hash-set (GProf-probs pf) (cons bb nb) 134217728)))
+        c3))
+  (values nb c4))
 
 ;; remove_edge (disconnect_src + disconnect_dest, both unordered_remove);
 ;; the PHI arguments of DEST for the edge go with it (remove_phi_args,
@@ -781,7 +816,13 @@
          [c (for/fold ([c c]) ([e (in-pvector (cfg-succs c a))]) (remove-edge c a (GEdge-dest e)))]
          [c (for/fold ([c c]) ([e (in-pvector (cfg-succs c b))])
               (define d (GEdge-dest e))
-              (set-preds c d (pvector-set (cfg-preds c d) (pvector-index-of (cfg-preds c d) b) a)))]
+              (define db (cfg-block c d))
+              ;; the PHI arguments of D keep their slots; only the predecessor index changes
+              (set-block c (block-set-preds (block-set-phis db (for/pvector ([ph (in-pvector (GBlock-phis db))])
+                                                                 (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                                                                       (for/pvector ([x (in-pvector (gphi-args ph))])
+                                                                         (if (= (car x) b) (cons a (cdr x)) x)))))
+                                            (pvector-set (GBlock-preds db) (pvector-index-of (GBlock-preds db) b) a))))]
          [c (set-succs c a (cfg-succs c b))]
          [c (set-succs c b (pvector-empty))]
          [c (set-preds c b (pvector-empty))])
@@ -977,7 +1018,11 @@
     (for/fold ([m intmap-empty]) ([p (in-list (intmap->literal-datum (GCfg-blocks c)))])
       (define b (cdr p))
       (intmap-set m (r (GBlock-index b))
-                  (GBlock (r (GBlock-index b)) (GBlock-phis b) (GBlock-stmts b) (r (GBlock-prev b)) (r (GBlock-next b))
+                  (GBlock (r (GBlock-index b))
+                          (for/pvector ([ph (in-pvector (GBlock-phis b))])
+                            (gphi (gphi-loc ph) (gphi-flags ph) (gphi-var ph) (gphi-result ph)
+                                  (for/pvector ([x (in-pvector (gphi-args ph))]) (cons (r (car x)) (cdr x)))))
+                          (GBlock-stmts b) (r (GBlock-prev b)) (r (GBlock-next b))
                           (for/pvector ([s (in-pvector (GBlock-preds b))]) (r s))))))
   (define edges
     (for/fold ([m intmap-empty]) ([p (in-list (intmap->literal-datum (GCfg-edges c)))])

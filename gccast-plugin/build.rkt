@@ -139,7 +139,17 @@
         (copy-file dat-o1 (build-path fixtures (string-append name "." ver ".O1.dat")) #t)
         (define keep '("original" "gimple" "lower" "cfg" "ssa" "fixup_cfg2" "einline" "ccp1" "forwprop1" "ethread" "esra" "ealias" "phiprop1"
                        "fre1" "mergephi1" "dse1" "cddce1" "phiopt1" "iftoswitch" "sccopy1" "profile_estimate"
-                       "local-pure-const1" "modref1" "release_ssa" "optimized"))
+                       "local-pure-const1" "modref1" "release_ssa"
+                       ;; all_optimizations
+                       "fixup_cfg3" "adjust_alignment" "ccp2" "objsz1" "waccess2" "rebuild_frequencies1" "backprop"
+                       "phiprop2" "phiprop" "forwprop2" "alias" "retslot" "fre3" "mergephi2" "dse2" "dce2" "stdarg" "cdce"
+                       "cselim" "copyprop1" "ifcombine" "mergephi3" "phiopt2" "ch2" "cplxlower1" "bitintlower1" "sra"
+                       "dom2" "copyprop2" "reassoc1" "dce3" "forwprop3" "phiopt3" "ccp3" "pow" "laddress" "lim2"
+                       "walloca2" "sink1" "dse3" "dce4" "fix_loops" "loop" "loopinit" "sccp" "cddce2" "ivcanon"
+                       "copyprop3" "cunroll" "ivopts" "lim4" "loopdone" "no_loop" "veclower21" "switchlower1" "sincos"
+                       "reassoc2" "slsr" "dom3" "strlen1" "ccp4" "wrestrict" "dse5" "dce7" "forwprop4" "sink2"
+                       "phiopt4" "fab1" "cddce3" "sccopy2" "crited1" "local-pure-const2" "modref2" "uncprop1" "nrv"
+                       "isel" "waccess3" "optimized"))
         (for ([f (in-list (directory-list o1-dir))])
           (define m (regexp-match (pregexp (string-append "^" (regexp-quote name) "[.][0-9]+t[.](.+)$")) (path->string f)))
           (when (and m (member (cadr m) keep))

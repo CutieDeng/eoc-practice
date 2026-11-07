@@ -1,0 +1,55 @@
+
+;; Function h (_Z1hRK1S, funcdef_no=1, decl_uid=3987, cgraph_uid=2, symbol_order=1)
+
+
+
+modref analyzing 'int h(const S&)/1' (ipa=0) (pure)
+Past summary:
+  loads:
+      Base 0: alias set 0
+        Ref 0: alias set 0
+          access: Parm 0 param offset:0 offset:0 size:32 max_size:32
+  stores:
+  Try dse
+  parm 0 flags: not_returned_directly no_indirect_read
+Analyzing flags of ssa name: s_2(D)
+  Analyzing stmt: _3 = s_2(D)->x;
+    Analyzing flags of ssa name: _3
+      Analyzing stmt: _5 = _3 * 2;
+        Analyzing flags of ssa name: _5
+          Analyzing stmt: _4 = _5 + 1;
+            Analyzing flags of ssa name: _4
+              Analyzing stmt: return _4;
+              current flags of _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+            flags of ssa name _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+          current flags of _5 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name _5 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+      current flags of _3 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+    flags of ssa name _3 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+  current flags of s_2(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+flags of ssa name s_2(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly no_indirect_read
+ - Analyzing load: s_2(D)->x
+   - Recording base_set=0 ref_set=0  Parm 0 param offset:0 offset:0 size:32 max_size:32
+ - modref done with result: tracked.
+  loads:
+      Base 0: alias set 0
+        Ref 0: alias set 0
+          access: Parm 0 param offset:0 offset:0 size:32 max_size:32
+  stores:
+  Try dse
+  parm 0 flags: not_returned_directly no_indirect_read
+int h (const struct S & s)
+{
+  int _3;
+  int _4;
+  int _5;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = s_2(D)->x;
+  _5 = _3 * 2;
+  _4 = _5 + 1;
+  return _4;
+
+}
+
+

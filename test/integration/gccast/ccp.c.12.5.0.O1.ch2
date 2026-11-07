@@ -1,0 +1,145 @@
+
+;; Function k1 (k1, funcdef_no=0, decl_uid=3607, cgraph_uid=1, symbol_order=0)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+int k1 (int a)
+{
+  int _2;
+
+  <bb 2> [local count: 1073741824]:
+  _2 = a_1(D) + 7;
+  return _2;
+
+}
+
+
+
+;; Function k2 (k2, funcdef_no=1, decl_uid=3612, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5
+;;
+;; Loop 1
+;;  header 4, latch 3
+;;  depth 1, outer 0
+;;  nodes: 4 3
+;; 2 succs { 4 }
+;; 3 succs { 4 }
+;; 4 succs { 3 5 }
+;; 5 succs { 1 }
+
+SSA replacement table
+N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j
+
+s_7 -> { s_1 }
+i_8 -> { i_2 }
+s_9 -> { s_1 }
+s_10 -> { s_1 }
+i_11 -> { i_2 }
+Incremental SSA update started at block: 6
+Number of blocks in CFG: 9
+Number of blocks to update: 6 ( 67%)
+
+
+Merging blocks 2 and 6
+Merging blocks 3 and 4
+Removing basic block 7
+Removing basic block 8
+int k2 (int n)
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 118111600]:
+  if (n_3(D) > 0)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 4>; [11.00%]
+
+  <bb 3> [local count: 955630225]:
+  # s_9 = PHI <s_5(3), 0(2)>
+  # i_11 = PHI <i_6(3), 0(2)>
+  s_5 = s_9 + 2;
+  i_6 = i_11 + 1;
+  if (n_3(D) > i_6)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 4>; [11.00%]
+
+  <bb 4> [local count: 118111600]:
+  # s_10 = PHI <s_5(3), 0(2)>
+  return s_10;
+
+}
+
+
+
+;; Function k3 (k3, funcdef_no=2, decl_uid=3621, cgraph_uid=3, symbol_order=2)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+int k3 (int a)
+{
+  <bb 2> [local count: 1073741824]:
+  return a_1(D);
+
+}
+
+
+
+;; Function k4 (k4, funcdef_no=3, decl_uid=3626, cgraph_uid=4, symbol_order=3)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+int k4 (unsigned int a)
+{
+  int _4;
+
+  <bb 2> [local count: 1073741824]:
+  _4 = ext (2);
+  return _4;
+
+}
+
+
+
+;; Function k5 (k5, funcdef_no=4, decl_uid=3631, cgraph_uid=5, symbol_order=4)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+int k5 (int a, int b)
+{
+  int _3;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = a_1(D) + 10;
+  return _3;
+
+}
+
+

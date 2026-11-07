@@ -1,0 +1,59 @@
+
+;; Function g (g, funcdef_no=1, decl_uid=4465, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 5 4
+;;
+;; Loop 1
+;;  header 3, latch 5
+;;  depth 1, outer 0, finite_p
+;;  upper_bound 9
+;;  likely_upper_bound 9
+;;  estimate 9
+;;  iterations by profile: 9.001101 (unreliable) entry count:97603128 (estimated locally, freq 1.0000)
+;;  nodes: 3 5
+;; 2 succs { 3 }
+;; 3 succs { 5 4 }
+;; 5 succs { 3 }
+;; 4 succs { 1 }
+
+SSA replacement table
+N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j
+
+s_9 -> { s_4 }
+Incremental SSA update started at block: 3
+Number of blocks in CFG: 6
+Number of blocks to update: 3 ( 50%)
+
+
+int g ()
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 97603128]:
+
+  <bb 3> [local count: 976138696]:
+  # s_8 = PHI <s_4(5), 0(2)>
+  # i_10 = PHI <i_5(5), 0(2)>
+  s_4 = s_8 + i_10;
+  i_5 = i_10 + 1;
+  if (i_5 <= 9)
+    goto <bb 5>; [90.00%]
+  else
+    goto <bb 4>; [10.00%]
+
+  <bb 5> [local count: 878535567]:
+  goto <bb 3>; [100.00%]
+
+  <bb 4> [local count: 97603128]:
+  # s_9 = PHI <s_4(3)>
+  return s_9;
+
+}
+
+

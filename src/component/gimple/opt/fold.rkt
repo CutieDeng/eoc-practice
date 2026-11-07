@@ -26,7 +26,7 @@
          "../tree.rkt"
          "../gimple.rkt")
 
-(provide gimple-simplify-const fold-const-binop fold-const-unop fold-const-compare
+(provide fold-const-aggregate-ref gimple-simplify-const fold-const-binop fold-const-unop fold-const-compare
          type-precision* type-unsigned?*)
 
 (define (icst? t) (and t (eq? (tree-code t) 'integer_cst)))
@@ -108,3 +108,26 @@
        [(binary) (fold-const-binop st code type (valueize (gassign-rhs1 g)) (valueize (gassign-rhs2 g)))]
        [else #f])]
     [else #f]))
+
+;; fold_const_aggregate_ref_1 for the loads the fixtures fold: a MEM_REF
+;; of the address of a STRING_CST at a constant offset read with a
+;; one-byte integral type (fold_ctor_reference / fold_string_cst)
+(define (fold-const-aggregate-ref st t valueize)
+  (cond
+    [(not (eq? (tree-code t) 'mem_ref)) #f]
+    [else
+     (define base (valueize (tree-operand t 0)))
+     (define off (tree-operand t 1))
+     (cond
+       [(and base (Tree? base) (eq? (tree-code base) 'addr_expr)
+             (eq? (tree-code (tree-operand base 0)) 'string_cst)
+             (icst? off))
+        (define bytes (string-cst-bytes (tree-operand base 0)))
+        (define i (integer-cst-value off))
+        (define ty (tree-type t))
+        (cond
+          [(and (eq? (type-code st ty) 'integer_type) (eqv? (type-precision* st ty) 8) (>= i 0) (< i (bytes-length bytes)))
+           (define b (bytes-ref bytes i))
+           (build-int-cst st ty (if (and (not (type-unsigned?* st ty)) (>= b 128)) (- b 256) b))]
+          [else #f])]
+       [else #f])]))

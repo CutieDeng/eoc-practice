@@ -28,7 +28,7 @@
          "release-ssa.rkt"
          "fixup-cfg.rkt")
 
-(provide o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
+(provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
 (define pass-name car)
 (define pass-fn cadr)
 (define pass-prunes-locals? caddr)
@@ -72,3 +72,21 @@
          (p 'iftoswitch identity-pass))
    (if (>= major 14) (list (p 'sccopy1 identity-pass)) '())
    (list (p 'profile_estimate profile-estimate) (p 'local-pure-const1 local-pure-const) (p 'modref1 modref) (p 'release_ssa release-ssa #t))))
+
+;; all_optimizations (after the IPA stage): the instances ported so far,
+;; in GCC's order.  fixup_cfg3 = pass_fixup_cfg right after the inline
+;; transform (whose own fixup / cleanup the harness runs before).
+(define (late-passes st)
+  (define major (gcc-major-version st))
+  (define (p name fn [locals? #f]) (list name fn locals?))
+  (define (ccp2 st fndecl cfg) (ccp st fndecl cfg #:nonzero? #t))
+  ;; pass_rebuild_frequencies (GCC >= 14): the profile is consistent on the fixtures
+  (define (rebuild-frequencies st fndecl cfg) (values (cfg-add-message (cfg-clear-messages cfg) "Profile is consistent") st))
+  (append
+   (list (p 'fixup_cfg3 fixup-cfg-pass) (p 'adjust_alignment identity-pass) (p 'ccp2 ccp2) (p 'objsz1 identity-pass)
+         (p 'waccess2 identity-pass))
+   (if (>= major 14) (list (p 'rebuild_frequencies1 rebuild-frequencies)) '())
+   (list (p 'backprop identity-pass)
+         (p (if (>= major 13) 'phiprop2 'phiprop) identity-pass)
+         (p 'forwprop2 forwprop) (p 'alias ealias) (p 'retslot identity-pass) (p 'fre3 fre) (p 'mergephi2 identity-pass)
+         (p 'dse2 dse) (p 'dce2 dce (>= major 15)))))

@@ -1,0 +1,27 @@
+
+;; Function h (_Z1hRK1S, funcdef_no=1, decl_uid=4498, cgraph_uid=2, symbol_order=1)
+
+
+
+ local analysis of int h(const S&)/2
+   scanning: _3 = s_2(D)->x;
+    Indirect ref read is not const
+  scanning: _5 = _3 * 2;
+  scanning: _4 = _5 + 1;
+  scanning: return _4;
+Function is locally pure.
+int h (const struct S & s)
+{
+  int _3;
+  int _4;
+  int _5;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = s_2(D)->x;
+  _5 = _3 * 2;
+  _4 = _5 + 1;
+  return _4;
+
+}
+
+

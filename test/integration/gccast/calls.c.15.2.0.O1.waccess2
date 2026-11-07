@@ -1,0 +1,76 @@
+
+;; Function use (use, funcdef_no=1, decl_uid=4470, cgraph_uid=2, symbol_order=1)
+
+pointer_query counters:
+  index cache size:   29
+  index entries:      1
+  access cache size:  2
+  access entries:     1
+  hits:               1
+  misses:             3
+  failures:           0
+  max_depth:          1
+int use (int a, int b, int * p)
+{
+  int D.4490;
+  int D.4488;
+  int r;
+  _Bool _1;
+  _Bool _2;
+  _Bool _3;
+  _Bool _4;
+  _Bool _5;
+  _Bool _6;
+  int _7;
+  int _8;
+  int _9;
+  int _23;
+  int _24;
+  int _25;
+  int _26;
+  int _27;
+
+  <bb 2> [local count: 1073741824]:
+  _1 = a_12(D) > 0;
+  _2 = b_13(D) <= 9;
+  _3 = _1 & _2;
+  if (_3 != 0)
+    goto <bb 3>; [33.00%]
+  else
+    goto <bb 4>; [67.00%]
+
+  <bb 3> [local count: 354334800]:
+  r_18 = ext (a_12(D), b_13(D));
+  goto <bb 6>; [100.00%]
+
+  <bb 4> [local count: 719407024]:
+  _4 = a_12(D) == 0;
+  _5 = p_14(D) == 0B;
+  _6 = _4 | _5;
+  if (_6 != 0)
+    goto <bb 5>; [50.00%]
+  else
+    goto <bb 6>; [50.00%]
+
+  <bb 5> [local count: 359703512]:
+  _24 = b_13(D) * 2;
+  _26 = _24;
+  r_16 = _26;
+
+  <bb 6> [local count: 1073741824]:
+  # r_10 = PHI <r_18(3), 0(4), r_16(5)>
+  _7 = MAX_EXPR <a_12(D), b_13(D)>;
+  r_19 = _7 + r_10;
+  r_20 = r_19 + 1;
+  *p_14(D) = r_19;
+  _8 = ~r_19;
+  MEM[(int *)p_14(D) + 4B] = _8;
+  _25 = r_19 * 2;
+  _27 = _25;
+  _9 = _27;
+  _23 = _9 + r_20;
+  return _23;
+
+}
+
+

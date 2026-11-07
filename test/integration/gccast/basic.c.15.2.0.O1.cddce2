@@ -1,0 +1,27 @@
+
+;; Function g (g, funcdef_no=1, decl_uid=4465, cgraph_uid=2, symbol_order=1)
+
+int g ()
+{
+  int i;
+  int s;
+
+  <bb 2> [local count: 97603128]:
+
+  <bb 3> [local count: 976138696]:
+  # i_10 = PHI <i_5(5), 0(2)>
+  i_5 = i_10 + 1;
+  if (i_5 <= 9)
+    goto <bb 5>; [90.00%]
+  else
+    goto <bb 4>; [10.00%]
+
+  <bb 5> [local count: 878535567]:
+  goto <bb 3>; [100.00%]
+
+  <bb 4> [local count: 97603128]:
+  return 45;
+
+}
+
+

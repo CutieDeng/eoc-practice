@@ -1,0 +1,18 @@
+
+;; Function h (_Z1hRK1S, funcdef_no=1, decl_uid=3987, cgraph_uid=2, symbol_order=1)
+
+int h (const struct S & s)
+{
+  int _3;
+  int _4;
+  int _5;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = s_2(D)->x;
+  _5 = _3 * 2;
+  _4 = _5 + 1;
+  return _4;
+
+}
+
+

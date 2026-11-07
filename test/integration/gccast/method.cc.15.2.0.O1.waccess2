@@ -1,0 +1,27 @@
+
+;; Function h (_Z1hRK1S, funcdef_no=1, decl_uid=4498, cgraph_uid=2, symbol_order=1)
+
+pointer_query counters:
+  index cache size:   0
+  index entries:      0
+  access cache size:  0
+  access entries:     0
+  hits:               0
+  misses:             0
+  failures:           0
+  max_depth:          0
+int h (const struct S & s)
+{
+  int _3;
+  int _4;
+  int _5;
+
+  <bb 2> [local count: 1073741824]:
+  _3 = s_2(D)->x;
+  _5 = _3 * 2;
+  _4 = _5 + 1;
+  return _4;
+
+}
+
+

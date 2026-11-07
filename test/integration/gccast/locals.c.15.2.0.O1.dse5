@@ -1,0 +1,33 @@
+
+;; Function locals (locals, funcdef_no=0, decl_uid=4467, cgraph_uid=1, symbol_order=0)
+
+int locals (int n)
+{
+  int i;
+  int addr;
+  int s;
+  int arr[4];
+  int _1;
+  int _2;
+  int _3;
+  int _5;
+  int addr.0_6;
+  int _18;
+
+  <bb 2> [local count: 214748370]:
+  addr = 5;
+  _1 = n_11(D) + 1;
+  _2 = _1 + n_11(D);
+  _3 = take (&addr);
+  s_44 = _2 * 2;
+  s_17 = _2 + s_44;
+  _5 = _3 + s_17;
+  addr.0_6 = addr;
+  _18 = _5 + addr.0_6;
+  arr ={v} {CLOBBER(eos)};
+  addr ={v} {CLOBBER(eos)};
+  return _18;
+
+}
+
+

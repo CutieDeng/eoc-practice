@@ -1,0 +1,31 @@
+
+;; Function g (g, funcdef_no=1, decl_uid=3608, cgraph_uid=2, symbol_order=1)
+
+int g ()
+{
+  int i;
+  int s;
+  unsigned int ivtmp_4;
+  unsigned int ivtmp_8;
+
+  <bb 2> [local count: 97603128]:
+
+  <bb 3> [local count: 976138697]:
+  # i_10 = PHI <i_5(5), 0(2)>
+  # ivtmp_8 = PHI <ivtmp_4(5), 10(2)>
+  i_5 = i_10 + 1;
+  ivtmp_4 = ivtmp_8 - 1;
+  if (ivtmp_4 != 0)
+    goto <bb 5>; [90.91%]
+  else
+    goto <bb 4>; [9.09%]
+
+  <bb 5> [local count: 887407693]:
+  goto <bb 3>; [100.00%]
+
+  <bb 4> [local count: 97603128]:
+  return 45;
+
+}
+
+
