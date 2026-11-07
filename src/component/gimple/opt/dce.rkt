@@ -138,13 +138,26 @@
              [else (void)]))])
       (loop)))
 
-  ;; eliminate_unnecessary_stmts: blocks dominated by the entry block,
-  ;; last pushed first (a post-order of the dominator tree)
+  ;; eliminate_unnecessary_stmts: get_all_dominated_blocks of the entry
+  ;; block's successor (breadth first; et_set_father makes the son added
+  ;; last, in block chain order, the first son), popped from the end
   (define something-changed #f)
+  (define released '())                   ; release_ssa_name order, reversed
+  (define (release! g)
+    (define vd (and (not (gphi? g)) (stmt-vdef g)))
+    (for ([d (in-list (if (gphi? g) (list (gphi-result g)) (append (if vd (list vd) '()) (let ([l (stmt-ssa-lhs g)]) (if l (list l) '())))))])
+      (set! released (cons (ssa-name-version d) released))))
+  (define chain-pos (for/hasheqv ([b (in-pvector (cfg-bbs cfg))] [i (in-naturals)]) (values b i)))
   (define blocks
-    (let walk ([idx (dom-index dom (GEdge-dest (pvector-first (cfg-succs cfg ENTRY))))] [acc '()])
-      (define bb (dom-node dom idx))
-      (for/fold ([acc (cons bb acc)]) ([c (in-pvector (dom-children dom idx))]) (walk c acc))))
+    (let ([root (GEdge-dest (pvector-first (cfg-succs cfg ENTRY)))])
+      (let bfs ([queue (list root)] [acc '()])
+        (cond
+          [(null? queue) acc]                          ; ACC is the reverse of the BFS order
+          [else
+           (define bb (car queue))
+           (define sons (sort (for/list ([c (in-pvector (dom-children dom (dom-index dom bb)))]) (dom-node dom c))
+                              > #:key (lambda (b) (hash-ref chain-pos b -1))))
+           (bfs (append (cdr queue) sons) (cons bb acc))]))))
   (for ([bb (in-list blocks)] #:unless (= bb EXIT))
     (let loop ([id (mfn-last m bb)])
       (when id
@@ -158,6 +171,7 @@
                          (and (not (ssa-default-def? u)) (not (hash-ref processed (ssa-name-version u) #f)))))))
            (unless keep-clobber?
              (set! something-changed #t)
+             (release! g)
              (mfn-unlink-vdef! m id)
              (mfn-remove! m id))]
           [(and (gcall? g) (ssa-name? (gcall-lhs g)) (not (hash-ref processed (ssa-name-version (gcall-lhs g)) #f)))
@@ -190,6 +204,8 @@
           [else (hash-ref necessary pid #f)]))
       (unless nec?
         (set! something-changed #t)
+        (release! ph)
         (mfn-remove! m pid))))
   (define cfg1 (mfn->gcfg m))
-  (if something-changed (cleanup-tree-cfg st0 cfg1 print-cond-rhs) (values cfg1 st0)))
+  (define st1 (for/fold ([st st0]) ([v (in-list (reverse released))]) (ssa-queue-release st v)))
+  (if something-changed (cleanup-tree-cfg st1 cfg1 print-cond-rhs) (values cfg1 st1)))

@@ -112,6 +112,13 @@
       (for ([d (in-list (stmt-all-defs g))]) (set-copy-of! d d)))
     (values res taken out))
 
+  ;; loop-closed SSA (inside the loop pipeline): no copy across a loop exit edge
+  (define lcssa-loops
+    (and (memq 'lcssa (decl-flag st fndecl 'loops-state '()))
+         (let-values ([(ls _b) (find-loops cfg (cfg-dom cfg))]) ls)))
+  (define (loop-exit-edge? src dest)
+    (define l (and lcssa-loops (loop-of lcssa-loops src)))
+    (and l (not (loop-inside? l dest))))
   (define (visit-phi e uid ph)
     (define lhs (gphi-result ph))
     (define bb (eng-uid-bb e uid))
@@ -125,6 +132,7 @@
            (define av (if (ssa-name? arg) (copy-of-val arg) (valueize arg)))
            (cond
              [(not av) (loop (cdr args) val)]
+             [(and lcssa-loops (ssa-name? av) (loop-exit-edge? (car (car args)) bb)) lhs]
              [(not val) (loop (cdr args) av)]
              [(not (same? val av)) lhs]
              [else (loop (cdr args) val)])])))

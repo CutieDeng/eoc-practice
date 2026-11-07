@@ -33,9 +33,11 @@
   (define (num m k) (hash-ref! m k (lambda () (add1 (hash-count m)))))
   ;; D.N, name.K_N (named temporaries), name_N (SSA names of variables),
   ;; _N (anonymous SSA names); the version counter is one sequence
+  ;; the legend line of update_ssa's replacement table ("O_1") is not a name
+  (define legend "N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j")
   (define renamed
     (regexp-replace* #px"D\\.[0-9]+|([A-Za-z_][A-Za-z0-9_]*)\\.([0-9]+)_([0-9]+)|([A-Za-z_][A-Za-z0-9_]*)_([0-9]+)\\b|(?<![A-Za-z0-9_.])_[0-9]+\\b"
-                     s
+                     (string-replace s legend "<update_ssa legend>")
                      (lambda (all name k n vname vn)
                        (cond
                          [(string-prefix? all "D.") (format "D.~a" (num d-map all))]
@@ -43,7 +45,7 @@
                          [vname (format "~a_~a" vname (num ssa-map vn))]
                          [else (format "_~a" (num ssa-map (substring all 1)))]))))
   (define lines
-    (for/list ([l (string-split renamed "\n" #:trim? #f)]
+    (for/list ([l (string-split (string-replace renamed "<update_ssa legend>" legend) "\n" #:trim? #f)]
                #:unless (string-prefix? l ";;"))
       (string-trim l #:left? #f)))
   (define collapsed

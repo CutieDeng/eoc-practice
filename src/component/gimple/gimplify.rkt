@@ -36,7 +36,7 @@
          (struct-out gctx)
          is-gimple-reg is-gimple-val is-gimple-lvalue is-gimple-reg-type
          is-gimple-constant is-gimple-min-invariant get-symbol-constant-value tree-swap-operands-p
-         is-gimple-condexpr-for-cond decl-address-invariant-p)
+         is-gimple-condexpr-for-cond decl-address-invariant-p unsigned-type-for)
 
 ;; ------------------------------------------------------------
 ;; Status codes (enum gimplify_status) and fallback_t

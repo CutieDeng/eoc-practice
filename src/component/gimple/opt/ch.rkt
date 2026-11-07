@@ -49,33 +49,14 @@
          "loops.rkt"
          (only-in "ipa.rkt" estimate-num-insns)
          (only-in "mfn.rkt" stmt-use-names stmt-def-names)
-         (only-in "range-info.rkt" copy-range-info))
+         (only-in "range-info.rkt" copy-range-info)
+         "update-ssa.rkt")
 
 (provide ch-pass)
 
 (define param-max-loop-header-insns 20)
 
 (define (icst? t) (and (Tree? t) (eq? (tree-code t) 'integer_cst)))
-
-;; ------------------------------------------------------------
-;; dominators over block indices
-;; ------------------------------------------------------------
-
-(define (dom-of cfg)
-  (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
-               (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
-(define (dominates? d a b) (dom-dominates? d (dom-index d a) (dom-index d b)))
-(define (idom-of d bb)
-  (define i (dom-index d bb))
-  (define j (and i (dom-idom d i)))
-  (and j (not (= j i)) (dom-node d j)))
-(define (ncd d bbs)
-  (define is (for/list ([b (in-list bbs)] #:when (dom-index d b)) (dom-index d b)))
-  (and (pair? is) (dom-node d (for/fold ([a (car is)]) ([b (in-list (cdr is))]) (dom-nearest-common-dominator d a b)))))
-;; children in RPO (dom_walker sorts the sons by RPO)
-(define (dom-kids d bb)
-  (define i (dom-index d bb))
-  (if i (for/list ([k (in-list (sort (pvector->list (dom-children d i)) <))]) (dom-node d k)) '()))
 
 ;; ------------------------------------------------------------
 ;; the pass
@@ -503,139 +484,12 @@
 
 
   ;; ---- update_ssa (TODO_update_ssa) with the name replacement table ----
+  ;; update_ssa (TODO_update_ssa) with the replacement table of the copies
   (define (update-ssa!)
-    (define dom (dom-of cfg))
-    (define news (reverse new-names))
-    (define (old-of n) (hash-ref new->old (ssa-name-version n)))
-    (define olds-by-version (for/fold ([m (hasheqv)]) ([n (in-list news)]) (let ([o (old-of n)]) (hash-set m (ssa-name-version o) o))))
-    (define old-versions (sort (hash-keys olds-by-version) <))
-    (define (old? t) (and (ssa-name? t) (hash-has-key? olds-by-version (ssa-name-version t))))
-    (define (new? t) (and (ssa-name? t) (hash-has-key? new->old (ssa-name-version t))))
-    (define blocks intbits-empty)
-    (define (mark! bb) (set! blocks (intbits-set blocks bb)))
-    (define def-blocks (make-hasheqv)) (define phi-blocks (make-hasheqv)) (define livein (make-hasheqv))
-    (define (add! h v bb) (hash-set! h v (intbits-set (hash-ref h v intbits-empty) bb)))
-    (define (ref h v) (hash-ref h v intbits-empty))
-    (define sites (def-site-map))
-    (define (phi-def? v bb) (for/or ([ph (in-pvector (block-phis bb))]) (= (ssa-name-version (gphi-result ph)) v)))
-    ;; prepare_def_site_for: a new name is a definition of the names it replaces
-    (define (prepare-def-site! name olds)
-      (define bb (hash-ref sites (ssa-name-version name) #f))
-      (when bb
-        (mark! bb)
-        (for ([o (in-list olds)])
-          (add! def-blocks (ssa-name-version o) bb)
-          (when (phi-def? (ssa-name-version name) bb) (add! phi-blocks (ssa-name-version o) bb)))))
-    (for ([n (in-list news)]) (prepare-def-site! n (list (old-of n))))
-    (for ([ov (in-list old-versions)])
-      (define o (hash-ref olds-by-version ov))
-      (prepare-def-site! o (list o))
-      ;; prepare_use_sites_for
-      (for ([bb (in-pvector (cfg-bbs cfg))])
-        (for* ([ph (in-pvector (block-phis bb))] [a (in-pvector (gphi-args ph))] #:when (ssa-name=? (cdr a) o))
-          (mark! bb) (mark! (car a))
-          (unless (intbits-ref (ref def-blocks ov) (car a)) (add! livein ov (car a))))
-        (for ([g (in-pvector (block-stmts bb))] #:when (for/or ([u (in-list (stmt-use-names g))]) (ssa-name=? u o)))
-          (mark! bb)
-          (unless (intbits-ref (ref def-blocks ov) bb) (add! livein ov bb)))))
-    ;; prune_unused_phi_nodes: a PHI survives when it is the nearest
-    ;; dominating definition of a use (uses propagate to the PHI's preds)
-    (define (prune-unused-phi-nodes phis kills uses)
-      (cond
-        [(intbits-empty? uses) '()]
-        [else
-         (define phis1 (for/list ([b (in-list phis)] #:unless (and (intbits-ref kills b) (not (intbits-ref uses b)))) b))
-         (cond
-           [(null? phis1) '()]
-           [else
-            (define (def-block? b) (or (intbits-ref kills b) (memv b phis1)))
-            (define (nearest-def b) (let loop ([b b]) (cond [(not b) #f] [(def-block? b) b] [else (loop (idom-of dom b))])))
-            (define live (make-hasheqv))
-            (define uses* uses)
-            (let loop ([work (intbits->list uses)])
-              (unless (null? work)
-                (define b (car work))
-                (define p (cond [(= b ENTRY) #f] [(memv b phis1) b] [else (let ([i (idom-of dom b)]) (and i (nearest-def i)))]))
-                (cond
-                  [(or (not p) (not (memv p phis1)) (hash-ref live p #f)) (loop (cdr work))]
-                  [else
-                   (hash-set! live p #t)
-                   (define more (for/list ([u (in-pvector (cfg-preds cfg p))] #:unless (or (intbits-ref uses* u) (intbits-ref kills u)))
-                                  (set! uses* (intbits-set uses* u))
-                                  u))
-                   (loop (append (cdr work) more))])))
-            (for/list ([b (in-list phis1)] #:when (hash-ref live b #f)) b)])]))
-    ;; insert_updated_phi_nodes_for, old names in version order
-    (define entry-limit (if (>= major 15) (single-succ cfg ENTRY) ENTRY))
-    (for ([ov (in-list old-versions)])
-      (define o (hash-ref olds-by-version ov))
-      (define dbs (ref def-blocks ov))
-      (unless (intbits-empty? dbs)
-        (define idf (sort (for/list ([i (in-list (intbits->list (dom-idf dom (for/fold ([s intbits-empty]) ([b (in-list (intbits->list dbs))]) (intbits-set s (dom-index dom b))))))])
-                            (dom-node dom i))
-                          <))
-        (define entry (ncd dom (intbits->list dbs)))
-        (define pruned (if (and entry (not (= entry entry-limit)))
-                           (for/list ([b (in-list idf)] #:when (and (not (= b entry)) (dominates? dom entry b))) b)
-                           idf))
-        (unless (null? pruned)
-          (for ([b (in-list pruned)]) (mark! b) (for ([p (in-pvector (cfg-preds cfg b))] #:when (>= p 2)) (mark! p)))
-          (define points (for/list ([b (in-list pruned)] #:unless (intbits-ref (ref phi-blocks ov) b)) b))
-          (for ([b (in-list (sort (prune-unused-phi-nodes points dbs (ref livein ov)) <))])
-            (mark! b)
-            (define nn (new-def-for! o))
-            (define preds (cfg-preds cfg b))
-            (set-phis! b (pvector-cons-right (block-phis b)
-                                             (gphi #f (hasheq 'arg-stamps (for/pvector ([p (in-pvector preds)]) (fresh-stamp!)))
-                                                   (ssa-name-var o) nn (for/pvector ([p (in-pvector preds)]) (cons p o)))))))))
-    ;; rewrite_blocks (REWRITE_UPDATE) from the nearest common dominator
-    (define start (ncd dom (intbits->list blocks)))
-    (define (rewrite-uses g cur)
-      (define changed #f)
-      (define g1 (map-uses g (lambda (t)
-                               (define rd (and (old? t) (hash-ref cur (ssa-name-version t) #f)))
-                               (cond [(and rd (not (ssa-name=? rd t))) (set! changed #t) rd] [else t]))))
-      (if changed (stmt-set-flag g1 'stamp (fresh-stamp!)) g1))
-    (define (register cur name)
-      (cond [(new? name) (hash-set cur (ssa-name-version (hash-ref new->old (ssa-name-version name))) name)]
-            [(old? name) (hash-set cur (ssa-name-version name) name)]
-            [else cur]))
-    (define (walk bb cur)
-      (define cur1
-        (cond
-          [(not (intbits-ref blocks bb)) cur]
-          [else
-           (define c1 (for/fold ([c cur]) ([ph (in-pvector (block-phis bb))]) (register c (gphi-result ph))))
-           (define-values (stmts* c2)
-             (for/fold ([acc (pvector-empty)] [c c1]) ([g (in-pvector (block-stmts bb))])
-               (define g1 (rewrite-uses g c))
-               (values (pvector-cons-right acc g1) (for/fold ([c c]) ([d (in-list (stmt-def-names g1))]) (register c d)))))
-           (set-stmts! bb stmts*)
-           (for ([e (in-list (pvector->list (cfg-succs cfg bb)))])
-             (define d (GEdge-dest e))
-             (when (and (cfg-block cfg d) (not (pvector-empty? (block-phis d))))
-               (set-phis! d (for/pvector ([ph (in-pvector (block-phis d))])
-                              (define k (for/first ([a (in-pvector (gphi-args ph))] [i (in-naturals)] #:when (= (car a) bb)) i))
-                              (define a (and k (cdr (pvector-ref (gphi-args ph) k))))
-                              (define rd (and a (old? a) (hash-ref c2 (ssa-name-version a) #f)))
-                              (cond
-                                [(and rd (not (ssa-name=? rd a)))
-                                 (define stamps (or (phi-arg-stamps ph) (for/pvector ([x (in-pvector (gphi-args ph))]) #f)))
-                                 (gphi (gphi-loc ph) (hash-set (gphi-flags ph) 'arg-stamps (pvector-set stamps k (fresh-stamp!))) (gphi-var ph) (gphi-result ph)
-                                       (pvector-set (gphi-args ph) k (cons bb rd)))]
-                                [else ph])))))
-           c2]))
-      (for ([k (in-list (dom-kids dom bb))]) (walk k cur1)))
-    (when start (walk start (hasheqv)))
-    ;; dump_update_ssa and the summary lines
-    (msg! "") (msg! "SSA replacement table") (msg! "N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j") (msg! "")
-    (for ([n (in-list (reverse new-names))]) (msg! "~a -> { ~a }" (print-expr st n) (print-expr st (old-of n))))
-    (msg! "Incremental SSA update started at block: ~a" start)
-    (define lbb (last-basic-block cfg))
-    (define c (intbits-count blocks))
-    (msg! "Number of blocks in CFG: ~a" lbb)
-    (msg! "Number of blocks to update: ~a (~a%)" c (~r (round (/ (* c 100) lbb)) #:min-width 3 #:pad-string " "))
-    (msg! "") (msg! ""))
+    (define-values (cfg1 st1)
+      (update-ssa st fndecl cfg (for/list ([n (in-list (reverse new-names))]) (cons n (hash-ref new->old (ssa-name-version n))))))
+    (set! cfg cfg1) (set! st st1)
+    (set! stamp (max stamp (cfg-next-stamp cfg1))))
 
   ;; ---- do_rpo_vn over the copied region: the copied PHIs are copies,
   ;; the copied condition folds ---------------------------------------

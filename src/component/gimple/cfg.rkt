@@ -34,6 +34,7 @@
          "state.rkt"
          "tree.rkt"
          "gimple.rkt"
+         "../../driver/dominance/dom.rkt"
          (only-in "gimplify.rkt" tree-swap-operands-p))
 
 (provide build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-next-stamp cfg-clear-messages cfg-add-message
@@ -44,7 +45,8 @@
          split-block set-succs set-preds prof-move-edge assign-label-uid register-label link-block unlink-block
          bb-next bb-prev
          redirect-edge-succ find-edge edge-flag? single-succ-p single-pred-p single-succ last-basic-block block-set-preds
-         split-edge/st split-edges-for-insertion)
+         split-edge/st split-edges-for-insertion
+         cfg-dom (struct-out Loop) find-loops loop-inside? loop-of replace-uses-by bb-set-last-stmt)
 
 ;; ------------------------------------------------------------
 ;; Edge flags (subset of EDGE_*; values are our own)
@@ -1009,6 +1011,96 @@
                 [else (eloop (add1 k) c st)])])))
        (loop (if (= bb EXIT) #f (or (bb-next c1 bb) EXIT)) c1 st1)])))
 
+;; ---- natural loops ----------------------------------------------------------
+
+;; dominators over block indices (ENTRY first)
+(define (cfg-dom c)
+  (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs c) EXIT) ENTRY) ENTRY
+               (lambda (i) (for/pvector ([e (in-pvector (cfg-succs c i))]) (GEdge-dest e)))))
+
+;;   (find-loops cfg dom) -> (values loops back-edges)
+;;     loops      : list of Loop in discovery order (num = position + 1,
+;;                  loop 0 is the function); Loop (num header latches body
+;;                  parent depth) with body an intbits of block indices
+;;     back-edges : hash (src . dest) -> #t  (dest dominates src)
+;;   (loop-of loops bb) -> the innermost Loop containing BB or #f
+(struct Loop (num header latches body parent depth) #:transparent)
+
+(define (dominates? dom a b) (dom-dominates? dom (dom-index dom a) (dom-index dom b)))
+
+;; flow_loops_find: headers in RPO, bodies by the backward walk from the latches
+(define (find-loops cfg dom)
+  (define back (make-hash))
+  (define rpo (for/list ([b (in-pvector (dom-rpo dom))] #:unless (or (= b ENTRY) (= b EXIT))) b))
+  (define headers
+    (for/list ([bb (in-list rpo)]
+               #:when (for/or ([src (in-pvector (cfg-preds cfg bb))])
+                        (and (not (= src ENTRY)) (dom-reachable? dom src) (dominates? dom bb src))))
+      bb))
+  (define loops
+    (for/list ([h (in-list headers)] [i (in-naturals 1)])
+      (define latches (for/list ([src (in-pvector (cfg-preds cfg h))]
+                                 #:when (and (not (= src ENTRY)) (dom-reachable? dom src) (dominates? dom h src)))
+                        (hash-set! back (cons src h) #t)
+                        src))
+      ;; flow_loop_nodes_find: everything that reaches a latch without passing the header
+      (define body
+        (let loop ([work latches] [seen (intbits-set intbits-empty h)])
+          (cond
+            [(null? work) seen]
+            [(intbits-ref seen (car work)) (loop (cdr work) seen)]
+            [else
+             (define b (car work))
+             (loop (append (cdr work) (for/list ([p (in-pvector (cfg-preds cfg b))] #:unless (= p ENTRY)) p))
+                   (intbits-set seen b))])))
+      (Loop i h latches body #f 0)))
+  ;; nesting: the parent is the innermost other loop whose body contains the header
+  (define with-parents
+    (for/list ([l (in-list loops)])
+      (define candidates
+        (for/list ([o (in-list loops)]
+                   #:when (and (not (eq? o l)) (intbits-ref (Loop-body o) (Loop-header l))))
+          o))
+      (define parent
+        (and (pair? candidates)
+             (argmin (lambda (o) (intbits-count (Loop-body o))) candidates)))
+      (Loop (Loop-num l) (Loop-header l) (Loop-latches l) (Loop-body l) (and parent (Loop-num parent)) 0)))
+  (define (depth-of l)
+    (let loop ([l l] [d 1])
+      (if (Loop-parent l) (loop (findf (lambda (o) (= (Loop-num o) (Loop-parent l))) with-parents) (add1 d)) d)))
+  (values (for/list ([l (in-list with-parents)])
+            (Loop (Loop-num l) (Loop-header l) (Loop-latches l) (Loop-body l) (Loop-parent l) (depth-of l)))
+          back))
+
+(define (loop-inside? l bb) (intbits-ref (Loop-body l) bb))
+
+;; the innermost loop containing BB
+(define (loop-of loops bb)
+  (define cs (filter (lambda (l) (loop-inside? l bb)) loops))
+  (and (pair? cs) (argmax Loop-depth cs)))
+
+
+;; tree_forwarder_block_p's current_loops part: BB (a forwarder to DEST)
+;; is kept when it is a loop header, a simple latch or a preheader the
+;; loop state asks for ('loops-state of the function: 'simple-latches,
+;; 'preheaders), or another edge into a loop header
+(define (loop-protected-forwarder? st c bb dest)
+  (define state (let ([d (GS-fndecl st)]) (if d (decl-flag st d 'loops-state '()) '())))
+  (define-values (loops _b) (find-loops c (cfg-dom c)))
+  (define (header-of b) (findf (lambda (l) (= (Loop-header l) b)) loops))
+  (define (num l) (and l (Loop-num l)))
+  (cond
+    [(null? loops) #f]
+    [(header-of bb) #t]
+    [(header-of dest)
+     => (lambda (dl)
+          (define bl (loop-of loops bb))
+          (cond
+            [(eqv? (num bl) (num dl)) (and (memq 'simple-latches state) #t)]
+            [(eqv? (num bl) (Loop-parent dl)) (and (memq 'preheaders state) #t)]
+            [else #t]))]
+    [else #f]))
+
 ;; ---- forwarder blocks -------------------------------------------------------
 
 ;; maybe_remove_forwarder_block (no PHIs, no loops, no abnormal edges):
@@ -1042,6 +1134,7 @@
                               (or (stmt-has-location? g) (loc-has-location? locus))
                               (not (equal? (stmt-loc g) locus)))))))
         (values #f c st)]
+       [(loop-protected-forwarder? st c i dest) (values #f c st)]
        ;; PHIs in DEST: a predecessor that already reaches DEST must agree
        ;; on every PHI argument (phi_alternatives_equal); the split-edge
        ;; fallback is not ported
@@ -1163,7 +1256,9 @@
     (for/fold ([c c3]) ([i (in-list (intbits->list (GCfg-touched c3)))])
       (define g (and (cfg-block c i) (bb-last-stmt c i)))
       (if (gswitch? g) (bb-set-last-stmt c i (group-case-labels-stmt c g)) c)))
-  (values (compact-blocks c4) st3))
+  ;; compact_blocks unless the SCEV cache (indexed by block number) is active
+  (define scev? (let ([d (GS-fndecl st3)]) (and d (memq 'scev (decl-flag st3 d 'loops-state '())))))
+  (values (if scev? c4 (compact-blocks c4)) st3))
 
 ;; ------------------------------------------------------------
 ;; Entry point: execute_build_cfg: (values cfg st)

@@ -33,12 +33,19 @@
          "dom.rkt"
          "copyprop.rkt"
          "reassoc.rkt"
+         "loop-pipeline.rkt"
+         "sccp.rkt"
+         "ivcanon.rkt"
          (only-in "../print.rkt" print-cond-rhs))
 
-(provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? run-pass)
+(provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? pass-enabled? run-pass)
 (define pass-name car)
 (define pass-fn cadr)
 (define pass-prunes-locals? caddr)
+;; the pass's gate for one function (a pass without a gate always runs;
+;; a pass whose gate fails neither runs nor prints a dump)
+(define (pass-gate p) (and (pair? (cdddr p)) (cadddr p)))
+(define (pass-enabled? p st decl cfg) (let ([g (pass-gate p)]) (or (not g) (g st decl cfg))))
 
 ;; execute_one_pass for one function: the pass, then the SSA free list
 ;; bookkeeping of execute_todo.  A pass that records its releases
@@ -108,7 +115,10 @@
 ;; transform (whose own fixup / cleanup the harness runs before).
 (define (late-passes st)
   (define major (gcc-major-version st))
-  (define (p name fn [locals? #f]) (list name fn locals?))
+  (define (p name fn [locals? #f] #:gate [gate #f]) (list name fn locals? gate))
+  ;; the sub-passes of pass_tree_loop
+  (define (lp name fn [locals? #f]) (p name fn locals? #:gate in-loop-pipeline?))
+  (define (has-loops? st decl cfg) (function-has-loops? cfg))
   (define (ccp2 st fndecl cfg) (ccp st fndecl cfg #:nonzero? #t))
   ;; pass_rebuild_frequencies (GCC >= 14): the profile is consistent on the fixtures
   (define (rebuild-frequencies st fndecl cfg) (values (cfg-add-message (cfg-clear-messages cfg) "Profile is consistent") st))
@@ -133,7 +143,10 @@
          (p (if (>= major 15) 'pow 'sincos) identity-pass) (p 'laddress identity-pass)
          ;; pass_lim: loop_optimizer_init (LOOPS_NORMAL); no invariant is moved on the fixtures
          (p 'lim2 loops-normal-pass) (p 'walloca2 identity-pass)
-         (p 'sink1 (sink-pass #f)) (p 'dse3 dse) (p 'dce4 dce) (p 'fix_loops identity-pass))))
+         (p 'sink1 (sink-pass #f)) (p 'dse3 dse) (p 'dce4 dce) (p 'fix_loops identity-pass)
+         ;; pass_tree_loop: gate_loop (the function has a loop)
+         (p 'loop loop-pass #:gate has-loops?)
+         (lp 'loopinit loop-init-pass) (lp 'sccp sccp-pass) (lp 'cddce2 dce) (lp 'ivcanon ivcanon-pass) (lp 'copyprop3 copyprop))))
 
 ;; pass_sink_code: loop_optimizer_init (LOOPS_NORMAL), split_edges_for_insertion,
 ;; the statement sinking (not ported: nothing is sunk on the fixtures);

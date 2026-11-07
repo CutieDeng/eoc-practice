@@ -77,6 +77,12 @@ status={
  'tree-pow':'恒等','tree-sincos':'恒等','tree-laddress':'恒等','tree-lim2':'完成（子集：只有 loop_optimizer_init 的 preheader / latch；不变量外提未移植，夹具无触发）',
  'tree-walloca2':'恒等','tree-sink1':'完成（子集：loop_optimizer_init + split_edges_for_insertion（switch 边新建 case 标号）；语句下沉未移植，夹具无触发）',
  'tree-dse3':'完成（复用 dse）','tree-dce4':'完成（复用 dce）','tree-fix_loops':'恒等',
+ 'tree-loop':'完成（gate_loop：函数有循环才进入子流水线；`opt/loop-pipeline.rkt` 记录 loop-pipeline 与 loops-state 标志）',
+ 'tree-loopinit':'完成（loop_optimizer_init (LOOPS_NORMAL) + rewrite_into_loop_closed_ssa（`opt/update-ssa.rkt` 的增量 update_ssa 与 dump）；loops-state 置 preheaders / simple-latches / lcssa / scev：cleanup 保护 latch 与 preheader、不压缩块号）',
+ 'tree-sccp':'完成（`opt/sccp.rkt` final_value_replacement_loop；`opt/scev.rkt` 标量演化 + 迭代次数（lt/le、单位步长）；`opt/generic-fold.rkt` GENERIC fold 子集；≥13 常量直接替换使用）',
+ 'tree-cddce2':'完成（复用 dce；释放顺序按 GCC 的支配树 BFS 逆序）',
+ 'tree-ivcanon':'完成（`opt/ivcanon.rkt` create_canonical_iv；try_unroll 的 UL_SINGLE_ITER 只对不迭代的循环生效，未移植）',
+ 'tree-copyprop3':'完成（复用 copyprop；LCSSA 下不跨循环出口边传播）',
  'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
@@ -121,8 +127,8 @@ flag_status={
  '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析与取消规则；CFG 更新未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
  '-fearly-inlining':'恒等（不内联）','-finline':'未移植','-finline-functions-called-once':'未移植','-finline-atomics':'未移植','-fno-inline-stringops':'未移植',
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
- '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'未移植','-ftree-loop-im':'未移植',
- '-ftree-loop-ivcanon':'未移植','-ftree-scev-cprop':'未移植','-fivopts':'未移植','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植',
+ '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'部分（loop / loopinit / no_loop 的 gate）','-ftree-loop-im':'未移植',
+ '-ftree-loop-ivcanon':'完成（ivcanon）','-ftree-scev-cprop':'完成（sccp）','-fivopts':'未移植','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植',
  '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'部分（sink1 的边拆分；下沉未移植）','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
  '-fbit-tests':'未移植（switchlower）','-fjump-tables':'未移植（switchlower）','-fallocation-dce':'未移植','-fmalloc-dce':'未移植','-flifetime-dse':'未移植',
  '-fprintf-return-value':'部分（折叠子集）','-fmath-errno':'部分（折叠子集）','-ffp-int-builtin-inexact':'部分','-fsigned-zeros':'部分','-ftrapping-math':'部分',

@@ -96,7 +96,8 @@
          (define-values (c2 s2) (fixup-cfg-pass s decl c))
          (values c2 (remove-unused-locals s2 c2 l) s2)]
         [else (values (vector-ref f 1) (vector-ref f 2) st0)]))
-    (for/fold ([cfg cfg-i] [st st-i] [locals locals-i] #:result st) ([p (in-list (late-passes st-i))])
+    (for/fold ([cfg cfg-i] [st st-i] [locals locals-i] #:result st)
+              ([p (in-list (late-passes st-i))] #:when (pass-enabled? p st decl cfg))
       (define-values (cfg1 st1) (run-pass p st decl cfg))
       (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
       (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))

@@ -26,63 +26,10 @@
          "../../../driver/dominance/dom.rkt"
          "../cfg.rkt")
 
+;; Loop, find-loops, loop-inside?, loop-of live in cfg.rkt (CFG cleanup
+;; protects loop headers, latches and preheaders)
 (provide (struct-out Loop) find-loops normalize-loops dfs-back-edges loop-exits loop-of loop-latch-edge
          loop-preheader-edge loop-inside? loops-innermost-first)
-
-(struct Loop (num header latches body parent depth) #:transparent)
-
-(define (dominates? dom a b) (dom-dominates? dom (dom-index dom a) (dom-index dom b)))
-
-;; flow_loops_find: headers in RPO, bodies by the backward walk from the latches
-(define (find-loops cfg dom)
-  (define back (make-hash))
-  (define rpo (for/list ([b (in-pvector (dom-rpo dom))] #:unless (or (= b ENTRY) (= b EXIT))) b))
-  (define headers
-    (for/list ([bb (in-list rpo)]
-               #:when (for/or ([src (in-pvector (cfg-preds cfg bb))])
-                        (and (not (= src ENTRY)) (dom-reachable? dom src) (dominates? dom bb src))))
-      bb))
-  (define loops
-    (for/list ([h (in-list headers)] [i (in-naturals 1)])
-      (define latches (for/list ([src (in-pvector (cfg-preds cfg h))]
-                                 #:when (and (not (= src ENTRY)) (dom-reachable? dom src) (dominates? dom h src)))
-                        (hash-set! back (cons src h) #t)
-                        src))
-      ;; flow_loop_nodes_find: everything that reaches a latch without passing the header
-      (define body
-        (let loop ([work latches] [seen (intbits-set intbits-empty h)])
-          (cond
-            [(null? work) seen]
-            [(intbits-ref seen (car work)) (loop (cdr work) seen)]
-            [else
-             (define b (car work))
-             (loop (append (cdr work) (for/list ([p (in-pvector (cfg-preds cfg b))] #:unless (= p ENTRY)) p))
-                   (intbits-set seen b))])))
-      (Loop i h latches body #f 0)))
-  ;; nesting: the parent is the innermost other loop whose body contains the header
-  (define with-parents
-    (for/list ([l (in-list loops)])
-      (define candidates
-        (for/list ([o (in-list loops)]
-                   #:when (and (not (eq? o l)) (intbits-ref (Loop-body o) (Loop-header l))))
-          o))
-      (define parent
-        (and (pair? candidates)
-             (argmin (lambda (o) (intbits-count (Loop-body o))) candidates)))
-      (Loop (Loop-num l) (Loop-header l) (Loop-latches l) (Loop-body l) (and parent (Loop-num parent)) 0)))
-  (define (depth-of l)
-    (let loop ([l l] [d 1])
-      (if (Loop-parent l) (loop (findf (lambda (o) (= (Loop-num o) (Loop-parent l))) with-parents) (add1 d)) d)))
-  (values (for/list ([l (in-list with-parents)])
-            (Loop (Loop-num l) (Loop-header l) (Loop-latches l) (Loop-body l) (Loop-parent l) (depth-of l)))
-          back))
-
-(define (loop-inside? l bb) (intbits-ref (Loop-body l) bb))
-
-;; the innermost loop containing BB
-(define (loop-of loops bb)
-  (define cs (filter (lambda (l) (loop-inside? l bb)) loops))
-  (and (pair? cs) (argmax Loop-depth cs)))
 
 ;; loops_list (LI_FROM_INNERMOST): deeper loops first, then by number
 (define (loops-innermost-first loops)
