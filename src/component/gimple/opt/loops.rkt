@@ -139,7 +139,10 @@
            (or (= src ENTRY)
                (not (= 1 (pvector-length (cfg-succs cfg src))))
                (let ([last (bb-last-stmt cfg src)]) (and last (stmt-ends-bb? last)))))
-         (if need? (let-values ([(_nb c) (split-edge cfg src h)]) c) cfg)])))
+         ;; create_preheader: "Created preheader block for loop N" whenever dump_file
+         (if need?
+             (let-values ([(_nb c) (split-edge cfg src h)]) (cfg-add-message c (format "Created preheader block for loop ~a" (Loop-num l))))
+             cfg)])))
   ;; force_single_succ_latches
   (define-values (loops1 _b1) (find-loops cfg1 (dom-of cfg1)))
   (for/fold ([cfg cfg1]) ([l (in-list loops1)])

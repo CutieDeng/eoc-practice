@@ -71,6 +71,7 @@ status={
  'tree-ch2':'完成（`opt/ch.rkt`：should_duplicate_loop_header_p 15/12 两版决策、do-while 判定、SEME 区域复制、update_profile_after_ch、按名字的增量 update_ssa 与其 dump、区域 VN 子集、TODO_cleanup_cfg）',
  'tree-cplxlower1':'恒等','tree-bitintlower1':'恒等（gcc ≥ 14）','tree-sra':'恒等',
  'tree-ompdevlow':'不比较（无 OpenMP）','tree-ompexpssa2':'不比较（无 OpenMP）',
+ 'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做 path ranger、线程化的 CFG 更新、关系 oracle）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
 # -fdump-passes evaluates each gate once, before any function is compiled, so
@@ -111,10 +112,10 @@ flag_status={
  '-ftree-ccp':'完成（ccp1）','-ftree-bit-ccp':'完成（ccp1）','-ftree-forwprop':'完成（forwprop1）','-ftree-fre':'完成（fre1）','-ftree-dse':'完成（dse1）',
  '-ftree-dce':'完成（cddce1、dce2；后续实例未）','-ftree-builtin-call-dce':'恒等（cdce）','-fguess-branch-probability':'完成（profile_estimate）',
  '-fipa-pure-const':'完成（local 实例）；IPA 传播未','-fipa-modref':'完成（local 实例）；IPA 传播未','-fipa-strict-aliasing':'-O1 无 strict aliasing，alias set 恒 0',
- '-ftree-phiprop':'恒等','-fthread-jumps':'恒等（threader 未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
+ '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析与取消规则；CFG 更新未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
  '-fearly-inlining':'恒等（不内联）','-finline':'未移植','-finline-functions-called-once':'未移植','-finline-atomics':'未移植','-fno-inline-stringops':'未移植',
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
- '-ftree-copy-prop':'未移植','-ftree-dominator-opts':'未移植','-ftree-reassoc':'未移植','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'未移植','-ftree-loop-im':'未移植',
+ '-ftree-copy-prop':'未移植','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'未移植','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'未移植','-ftree-loop-im':'未移植',
  '-ftree-loop-ivcanon':'未移植','-ftree-scev-cprop':'未移植','-fivopts':'未移植','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植',
  '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'未移植','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
  '-fbit-tests':'未移植（switchlower）','-fjump-tables':'未移植（switchlower）','-fallocation-dce':'未移植','-fmalloc-dce':'未移植','-flifetime-dse':'未移植',

@@ -42,7 +42,7 @@
          "fold.rkt"
          "mfn.rkt")
 
-(provide fold-stmt simplify-assign-rhs simplify-cond canonicalize-mem-ref-addr gimple-fold-stmt-to-constant
+(provide follow-ssa-edges? fold-stmt simplify-assign-rhs simplify-cond canonicalize-mem-ref-addr gimple-fold-stmt-to-constant
          commutative-code? swap-tree-comparison invert-tree-comparison
          get-addr-base-and-unit-offset mem-ref-offset build-fold-addr-expr
          negate-expr-p may-propagate-copy)
@@ -50,6 +50,11 @@
 (define (icst? t) (and t (eq? (tree-code t) 'integer_cst)))
 
 ;; may_propagate_copy (no abnormal edges)
+;; gimple_simplify's valueization of SSA operands for looking through
+;; their definitions: #t = follow_all_ssa_edges, #f = no_follow_ssa_edges
+;; (fold_stmt's default, gimple_fold_stmt_to_constant_1 in the threader)
+(define follow-ssa-edges? (make-parameter #t))
+
 (define (may-propagate-copy st dest orig)
   (and (useless-type-conversion-p st (tree-type dest) (tree-type orig))
        (not (and (ssa-name? dest) (ssa-virtual? dest)))))
@@ -195,7 +200,7 @@
 ;; an operand's defining assignment, looked through VALUEIZE: (values code op1 op2) or #f
 (define (def-rhs m valueize t)
   (define v (if (ssa-name? t) (valueize t) t))
-  (define g (and (ssa-name? v) (mfn-def-stmt m v)))
+  (define g (and (ssa-name? v) (follow-ssa-edges?) (mfn-def-stmt m v)))
   (and g (gassign? g) (values (gassign-code g) (gassign-rhs1 g) (gassign-rhs2 g))))
 
 (define (all-ones? st t)
@@ -215,7 +220,7 @@
   (define cls (gimple-rhs-class st code))
   (define (defr t) (if (ssa-name? t) (let-values ([(dc d1 d2) (def-rhs* t)]) (values dc d1 d2)) (values #f #f #f)))
   (define (def-rhs* t)
-    (define g (and (ssa-name? t) (mfn-def-stmt m t)))
+    (define g (and (ssa-name? t) (follow-ssa-edges?) (mfn-def-stmt m t)))
     (if (and g (gassign? g)) (values (gassign-code g) (gassign-rhs1 g) (gassign-rhs2 g)) (values #f #f #f)))
   (cond
     ;; constants

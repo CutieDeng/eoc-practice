@@ -28,7 +28,8 @@
          "release-ssa.rkt"
          "fixup-cfg.rkt"
          "loops.rkt"
-         "ch.rkt")
+         "ch.rkt"
+         "dom.rkt")
 
 (provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals?)
 (define pass-name car)
@@ -98,7 +99,7 @@
          (p 'phiopt2 identity-pass)
          (p 'ch2 ch-pass) (p 'cplxlower1 identity-pass))
    (if (>= major 14) (list (p 'bitintlower1 identity-pass)) '())
-   (list (p 'sra identity-pass))))
+   (list (p 'sra identity-pass) (p 'dom2 dom-pass))))
 
 ;; a pass whose only visible effect on the fixtures is loop_optimizer_init (LOOPS_NORMAL)
 (define (loops-normal-pass st fndecl cfg)

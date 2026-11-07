@@ -48,7 +48,8 @@
          (only-in "sreal.rkt" rdiv max-probability prob-invert prob-minus prob-always prob-never)
          "loops.rkt"
          (only-in "ipa.rkt" estimate-num-insns)
-         (only-in "mfn.rkt" stmt-use-names stmt-def-names))
+         (only-in "mfn.rkt" stmt-use-names stmt-def-names)
+         (only-in "range-info.rkt" copy-range-info))
 
 (provide ch-pass)
 
@@ -175,7 +176,8 @@
   (define (new-def-for! old)
     (define var (ssa-name-var old))
     (define-values (n st1) (if var (make-ssa-name st var) (make-ssa-name st (tree-type old) #:name (tree-attr old 'identifier #f))))
-    (set! st st1)
+    ;; duplicate_ssa_name copies the range info
+    (set! st (copy-range-info st1 fndecl old n))
     (set! new-names (cons n new-names))
     (hash-set! new->old (ssa-name-version n) old)
     n)
