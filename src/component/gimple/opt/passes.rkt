@@ -39,6 +39,7 @@
          "sccp.rkt"
          "ivcanon.rkt"
          "cunroll.rkt"
+         "ivopts.rkt"
          (only-in "../print.rkt" print-cond-rhs)
          (only-in "simplify.rkt" simplify-assign-rhs simplify-cond follow-ssa-edges?))
 
@@ -180,7 +181,11 @@
          (p 'sink1 (sink-pass #f)) (p 'dse3 dse) (p 'dce4 dce) (p 'fix_loops identity-pass)
          ;; pass_tree_loop: gate_loop (the function has a loop)
          (p 'loop loop-pass #:gate has-loops?)
-         (lp 'loopinit loop-init-pass) (lp 'sccp sccp-pass) (lp 'cddce2 dce) (lp 'ivcanon ivcanon-pass) (lp 'copyprop3 copyprop) (lp 'cunroll cunroll-pass))))
+         (lp 'loopinit loop-init-pass) (lp 'sccp sccp-pass) (lp 'cddce2 dce) (lp 'ivcanon ivcanon-pass) (lp 'copyprop3 copyprop) (lp 'cunroll cunroll-pass)
+         ;; pass_lim (lim4): nothing is invariant in the remaining loops
+         (lp 'ivopts ivopts-pass) (lp 'lim4 identity-pass) (lp 'loopdone loop-done-pass)
+         ;; pass_tree_no_loop: the functions that never had a loop
+         (p 'no_loop identity-pass #:gate not-in-loop-pipeline?))))
 
 ;; pass_sink_code: loop_optimizer_init (LOOPS_NORMAL), split_edges_for_insertion,
 ;; the statement sinking (not ported: nothing is sunk on the fixtures);

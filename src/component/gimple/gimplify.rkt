@@ -1380,7 +1380,8 @@
                    #:when (let ([t (cdr p)])
                             (and (eq? (tree-code t) 'integer_type) (tree-attr t 'unsigned)
                                  (eqv? (tree-attr t 'precision) prec) (equal? (tree-attr t 'mode) mode)
-                                 (zero? (tree-attr t 'quals 0)) (not (tree-attr t 'main-variant #f)))))
+                                 (zero? (tree-attr t 'quals 0)) (not (tree-attr t 'main-variant #f))
+                                 (not (tree-attr t 'nonstandard #f)))))
          (car p)))
      (cond
        [found (values found st)]

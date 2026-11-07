@@ -33,7 +33,7 @@
          gcc-major-version
          fresh-uid fresh-tmp-var-id fresh-ssa-version ssa-free-queue ssa-queue-release ssa-flush-free ssa-clear-free
          ssa-pass-log log-ssa-release!
-         decl-flag set-decl-flag decl-initial
+         decl-flag set-decl-flag decl-initial gimple-add-tmp-var take-added-locals
          type-ref type-code type-attr add-type type-type type-main-variant
          global-type void-type boolean-type size-type sizetype ptr-type
          tree-code-class tree-code-length tree-code-name->accessor-pos)
@@ -159,6 +159,19 @@
   (define uid (decl-uid d))
   (define over (intmap-ref (GS-decl-flags st) uid (hasheq)))
   (gs-set-decl-flags st (intmap-set (GS-decl-flags st) uid (hash-set over key v))))
+
+;; gimple_add_tmp_var inside a pass: the variable is recorded on the
+;; current function; the driver appends it to the local decls
+;; (add_local_decl) with take-added-locals
+(define (gimple-add-tmp-var st var)
+  (define fn (GS-fndecl st))
+  (set-decl-flag st fn 'added-locals (append (decl-flag st fn 'added-locals '()) (list var))))
+(define (take-added-locals st fn locals)
+  (define added (decl-flag st fn 'added-locals '()))
+  (if (null? added)
+      (values locals st)
+      (values (for/fold ([l locals]) ([v (in-list added)]) (pvector-cons-right l v))
+              (set-decl-flag st fn 'added-locals '()))))
 
 ;; DECL_INITIAL (gimplify_decl_expr clears it after moving the init out)
 (define (decl-initial st d) (decl-flag st d 'initial #f))

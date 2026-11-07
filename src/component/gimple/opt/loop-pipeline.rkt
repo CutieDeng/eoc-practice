@@ -24,6 +24,9 @@
 ;;     loop_optimizer_init (LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS),
 ;;     rewrite_into_loop_closed_ssa (NULL, TODO_update_ssa), scev_initialize
 ;;   (rewrite-into-loop-closed-ssa st decl cfg) -> (values cfg st)
+;;   (loop-done-pass st decl cfg)         pass_tree_loop_done:
+;;     loop_optimizer_finalize (fn, true): clean_up_loop_closed_phi, the
+;;     loops state back to LOOPS_MAY_HAVE_MULTIPLE_LATCHES; TODO_cleanup_cfg
 ;;
 ;; Not ported: TODO_update_address_taken at the start of loopinit.
 ;; ============================================================
@@ -40,9 +43,10 @@
          (only-in "mfn.rkt" stmt-use-names stmt-def-names)
          (only-in "range-info.rkt" copy-range-info)
          "loops.rkt"
-         "update-ssa.rkt")
+         "update-ssa.rkt"
+         (only-in "../print.rkt" print-cond-rhs))
 
-(provide function-has-loops? in-loop-pipeline? not-in-loop-pipeline? loop-pass loop-init-pass
+(provide function-has-loops? in-loop-pipeline? not-in-loop-pipeline? loop-pass loop-init-pass loop-done-pass
          rewrite-into-loop-closed-ssa loops-state set-loops-state)
 
 (define (loops-state st decl) (decl-flag st decl 'loops-state '()))
@@ -168,3 +172,52 @@
                                                      (gphi #f (hasheq 'arg-stamps (for/pvector ([p (in-pvector preds)]) (fresh-stamp!)))
                                                            (ssa-name-var var) n (for/pvector ([p (in-pvector preds)]) (cons p var)))))))))
      (update-ssa st decl cfg (reverse table) #:phis? multiple?)]))
+
+;; ------------------------------------------------------------
+;; pass_tree_loop_done
+;; ------------------------------------------------------------
+
+(define (loop-done-pass st0 decl cfg0)
+  (define st (gs-set-fndecl st0 decl))
+  (define cfg (cfg-clear-messages cfg0))
+  (define state (loops-state st decl))
+  ;; free_numbers_of_iterations_estimates, scev_finalize, then
+  ;; loop_optimizer_finalize (fn, true)
+  (define-values (cfg1 st1)
+    (if (and (memq 'lcssa state) (memq 'recorded-exits state))
+        (clean-up-loop-closed-phi st cfg)
+        (values cfg st)))
+  (define st2 (set-loops-state st1 decl '()))
+  (cleanup-tree-cfg st2 cfg1 print-cond-rhs))
+
+;; get_loop_exit_edges with LOOPS_HAVE_RECORDED_EXITS: record_loop_exits
+;; (at loopinit) links each exit at the head of the loop's list while
+;; walking the blocks in layout order, so the list runs backwards; the
+;; fixtures' exits are not re-recorded afterwards
+(define (recorded-exits cfg l)
+  (reverse
+   (for*/list ([bb (in-pvector (cfg-bbs cfg))] #:when (loop-inside? l bb)
+               [e (in-pvector (cfg-succs cfg bb))] #:unless (loop-inside? l (GEdge-dest e)))
+     (cons bb (GEdge-dest e)))))
+
+;; clean_up_loop_closed_phi: the single-argument PHIs of the exits with a
+;; single predecessor are replaced by their argument (replace_uses_by)
+;; and removed (their results released)
+(define (clean-up-loop-closed-phi st0 cfg0)
+  (define-values (loops _b) (find-loops cfg0 (dom-of cfg0)))
+  (for*/fold ([cfg cfg0] [st st0]) ([l (in-list (sort loops < #:key Loop-num))]
+                                    [e (in-list (recorded-exits cfg0 l))])
+    (define dest (cdr e))
+    (cond
+      [(not (= 1 (pvector-length (cfg-preds cfg dest)))) (values cfg st)]
+      [else
+       (for/fold ([cfg cfg] [st st]) ([ph (in-pvector (GBlock-phis (cfg-block cfg dest)))])
+         (define rhs (cdr (pvector-ref (gphi-args ph) 0)))
+         (define lhs (gphi-result ph))
+         ;; may_propagate_copy: no abnormal PHIs here
+         (define c1 (replace-uses-by st cfg lhs rhs))
+         (define b (cfg-block c1 dest))
+         (define c2 (set-block c1 (block-set-phis b (for/pvector ([p (in-pvector (GBlock-phis b))]
+                                                                  #:unless (= (ssa-name-version (gphi-result p)) (ssa-name-version lhs)))
+                                                      p))))
+         (values c2 (ssa-queue-release st (ssa-name-version lhs))))])))

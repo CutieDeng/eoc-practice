@@ -562,6 +562,8 @@
     [else
      (update-ssa!)
      (for ([region (in-list (reverse copied-regions))])
+       ;; do_rpo_vn: the "vn_top" temporary takes a name number
+       (set! st (let-values ([(_n s) (fresh-tmp-var-id st)]) s))
        (vn-region! region)
        (set! st (for/fold ([st st]) ([v (in-list vn-removed)]) (ssa-queue-release st v))))
      (define-values (cfg1 st1) (cleanup-tree-cfg st cfg print-cond-rhs))

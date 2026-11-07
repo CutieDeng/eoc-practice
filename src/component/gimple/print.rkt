@@ -34,6 +34,22 @@
                  (if (bitwise-bit-set? q 1) "volatile " "")
                  (if (bitwise-bit-set? q 2) "restrict " "")))
 
+
+;; dump_generic_node for an INTEGER_TYPE without a name
+;; (build_nonstandard_integer_type): named after the C type of that
+;; precision (aarch64: char 8, short 16, int 32, long 64, long long 64)
+(define (nameless-integer-type-name uns? prec)
+  (define (pick u s) (if uns? u s))
+  (case prec
+    [(8) (pick "unsigned char" "signed char")]
+    [(16) (pick "unsigned short" "signed short")]
+    [(32) (pick "unsigned int" "signed int")]
+    [(64) (pick "unsigned long" "signed long")]
+    [else
+     (if (and (>= prec 8) (= prec (expt 2 (sub1 (integer-length prec)))))
+         (format "~a~a_t" (pick "uint" "int") prec)
+         (format "<unnamed-~a:~a>" (pick "unsigned" "signed") prec))]))
+
 (define (print-type st ty)
   (define code (type-code st ty))
   (case code
@@ -44,6 +60,7 @@
                     (cond
                       [(eq? code 'enumeral_type) (string-append "enum " (or nm "<anon>"))]
                       [nm nm]
+                      [(eq? code 'integer_type) (nameless-integer-type-name (type-attr st ty 'unsigned) (type-attr st ty 'precision))]
                       [else (format "<unnamed-~a:~a>" (if (type-attr st ty 'unsigned) "unsigned" "signed") (type-attr st ty 'precision))]))]
     [(record_type union_type)
      (define nm (type-name-string st ty))
@@ -222,7 +239,10 @@
        [(integer_cst)
         (define v (integer-cst-value e))
         (cond
-          [(pointer-type-p st (tree-type e)) (if (zero? v) "0B" (format "~aB" v))]
+          ;; TREE_INT_CST_LOW as a signed HOST_WIDE_INT, "B" for bytes
+          [(pointer-type-p st (tree-type e))
+           (define m (bitwise-and v (sub1 (arithmetic-shift 1 64))))
+           (if (zero? v) "0B" (format "~aB" (if (bitwise-bit-set? m 63) (- m (arithmetic-shift 1 64)) m)))]
           [else (number->string v)])]
        [(real_cst) (print-real e)]
        [(string_cst) (print-string-cst (string-cst-bytes e))]
@@ -242,6 +262,15 @@
           [else
            (format "MEM[(~a *)~a~a]" (print-type st (tree-type e)) (pe ptr)
                    (if (integer-zerop off) "" (format " + ~aB" (integer-cst-value off))))])]
+       ;; dump_mem_ref for TARGET_MEM_REF (base offset index step index2):
+       ;; MEM[(alias type)base + offset + index2 + index * step]
+       [(target_mem_ref)
+        (define base (tree-operand e 0)) (define off (tree-operand e 1))
+        (define idx (tree-operand e 2)) (define stp (tree-operand e 3)) (define idx2 (tree-operand e 4))
+        (format "MEM[(~a)~a~a~a~a]" (print-type st (type-main-variant st (tree-type off))) (pe base)
+                (if (integer-zerop off) "" (format " + ~a" (pe off)))
+                (if idx2 (format " + ~a" (pe idx2)) "")
+                (if idx (format " + ~a * ~a" (pe idx) (if stp (pe stp) "1")) ""))]
        [(indirect_ref) (string-append "*" (pe (tree-operand e 0)))]
        [(component_ref)
         (define base (tree-operand e 0))

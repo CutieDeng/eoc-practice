@@ -66,7 +66,9 @@
          compute-overall-effect-of-inner-loop number-of-latch-executions
          (struct-out niter-desc) (struct-out affine-iv) number-of-iterations-exit simple-iv
          expression-expensive-p scev-reset!
-         find-loop-niter find-loop-niter-by-eval just-once-each-iteration? loop-latch)
+         find-loop-niter find-loop-niter-by-eval just-once-each-iteration? loop-latch
+         expand-simple-operations def-stmt-of def-bb-of dominated-by? superloop-at-depth convert-affine-scev
+         min-invariant?)
 
 ;; ------------------------------------------------------------
 ;; the context

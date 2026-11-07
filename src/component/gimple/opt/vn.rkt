@@ -1144,7 +1144,9 @@
 ;; ------------------------------------------------------------
 
 (define (fre st fndecl cfg0)
-  (define st0 (gs-set-fndecl st fndecl))
+  ;; do_rpo_vn_1: VN_TOP = create_tmp_var_raw (void_type_node, "vn_top")
+  ;; takes a temporary name number (create_tmp_var_name)
+  (define st0 (let-values ([(_n s) (fresh-tmp-var-id (gs-set-fndecl st fndecl))]) s))
   (define cfg (cfg-clear-messages cfg0))
   (define m (gcfg->mfn cfg))
   (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY

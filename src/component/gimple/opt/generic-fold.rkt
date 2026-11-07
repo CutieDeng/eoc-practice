@@ -46,6 +46,7 @@
 
 (provide with-gs gs gs!
          ty-prec ty-uns? ty-int? ty-ptr? ty-wraps? ty-undef? nowrap-type-p utype-for stype-for ty-min ty-max
+         nonstandard-int-type
          icst icst? icst-val int-fits-type? boolean-cst
          operand-equal? tree-nop-conversion-p negate-expr-p gf-strip-nops gf-strip-sign-nops
          gf-convert gf-build1 gf-build2 gf-build3 gf-binary const-binop gf-negate
@@ -89,15 +90,32 @@
                             (eqv? (tree-attr t 'precision #f) prec)
                             (zero? (tree-attr t 'quals 0))
                             (not (tree-attr t 'main-variant #f))
-                            (not (tree-attr t 'sizetype #f)))))
+                            (not (tree-attr t 'sizetype #f))
+                            (not (tree-attr t 'nonstandard #f)))))
     (car p)))
+;; build_nonstandard_integer_type (PREC, UNS?): a nameless INTEGER_TYPE,
+;; one per precision and signedness (nonstandard_integer_type_cache);
+;; printed as "unsigned long" etc. (print.rkt)
+(define (nonstandard-int-type prec uns?)
+  (or (for/first ([p (in-list (intmap->literal-datum (GS-types (gs))))]
+                  #:when (let ([t (cdr p)])
+                           (and (eq? (tree-code t) 'integer_type) (tree-attr t 'nonstandard #f)
+                                (eq? (and (tree-attr t 'unsigned #f) #t) uns?)
+                                (eqv? (tree-attr t 'precision #f) prec))))
+        (car p))
+      (let* ([like (or (find-int-type prec uns?) (find-int-type prec (not uns?)))]
+             [base (type-ref (gs) like)])
+        (let-values ([(uid st) (fresh-uid (gs))])
+          (define t (make-tree 'integer_type
+                               #:attrs (hash-set* (hash-remove (hash-remove (Tree-attrs base) 'main-variant) 'name)
+                                                  'uid uid 'unsigned uns? 'nonstandard #t)))
+          (let-values ([(u st2) (add-type st t)]) (gs! st2) u)))))
+;; signed_or_unsigned_type_for: T itself when it already has that
+;; signedness, else build_nonstandard_integer_type of T's precision
 (define (signed-or-unsigned-type-for uns? t)
   (cond
     [(and (ty-int? t) (eq? (ty-uns? t) uns?) (not (ty-ptr? t))) t]
-    [(ty-ptr? t) (or (find-int-type (ty-prec t) uns?) (error 'unsigned-type-for "no integer type for ~a" t))]
-    [else
-     (or (find-int-type (ty-prec t) uns?)
-         (let-values ([(u s) ((if uns? unsigned-type-for* signed-type-for*) (gs) t)]) (gs! s) u))]))
+    [else (nonstandard-int-type (ty-prec t) uns?)]))
 (define (utype-for t) (signed-or-unsigned-type-for #t t))
 (define (stype-for t) (signed-or-unsigned-type-for #f t))
 (define (unsigned-type-for* st t) (unsigned-type-for st t))
