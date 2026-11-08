@@ -74,3 +74,65 @@ int thr (int a, int b)
 }
 
 
+
+;; Function thr_join (thr_join, funcdef_no=1, decl_uid=4473, cgraph_uid=2, symbol_order=1)
+
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+int thr_join (int a, int b)
+{
+  int z;
+  int y;
+  int x;
+  int _1;
+  int _3;
+  int _15;
+  int _17;
+
+  <bb 2> :
+  if (a_6(D) > 0)
+    goto <bb 4>; [INV]
+  else
+    goto <bb 3>; [INV]
+
+  <bb 3> :
+  x_10 = h (b_8(D));
+
+  <bb 4> :
+  # x_2 = PHI <1(2), x_10(3)>
+  _1 = b_8(D) * b_8(D);
+  y_12 = _1 + a_6(D);
+  z_13 = b_8(D) ^ y_12;
+  if (b_8(D) > 10)
+    goto <bb 5>; [INV]
+  else
+    goto <bb 8>; [INV]
+
+  <bb 5> :
+  if (x_2 == 1)
+    goto <bb 6>; [INV]
+  else
+    goto <bb 7>; [INV]
+
+  <bb 6> :
+  _17 = h (z_13);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <bb 8>; [INV]
+
+  <bb 7> :
+  _15 = z_13 + 3;
+  // predicted unlikely by early return (on trees) predictor.
+
+  <bb 8> :
+  # _3 = PHI <_17(6), _15(7), y_12(4)>
+  return _3;
+
+}
+
+

@@ -5,40 +5,79 @@ int thr (int a, int b)
 {
   int y;
   int x;
-  int D.3621;
+  int D.3630;
 
-  if (a == 1) goto <D.3613>; else goto <D.3614>;
-  <D.3613>:
-  x = b + 1;
-  goto <D.3615>;
-  <D.3614>:
-  if (a == 2) goto <D.3616>; else goto <D.3617>;
-  <D.3616>:
-  x = b * 3;
-  goto <D.3618>;
-  <D.3617>:
-  x = b + -7;
-  <D.3618>:
-  <D.3615>:
-  _1 = x * x;
-  y = b + _1;
-  if (a == 1) goto <D.3619>; else goto <D.3620>;
-  <D.3619>:
-  D.3621 = g (y);
-  // predicted unlikely by early return (on trees) predictor.
-  goto <D.3624>;
-  <D.3620>:
-  if (a == 2) goto <D.3622>; else goto <D.3623>;
+  if (a == 1) goto <D.3622>; else goto <D.3623>;
   <D.3622>:
-  _2 = y + 5;
-  D.3621 = g (_2);
-  // predicted unlikely by early return (on trees) predictor.
+  x = b + 1;
   goto <D.3624>;
   <D.3623>:
-  D.3621 = y;
-  goto <D.3624>;
+  if (a == 2) goto <D.3625>; else goto <D.3626>;
+  <D.3625>:
+  x = b * 3;
+  goto <D.3627>;
+  <D.3626>:
+  x = b + -7;
+  <D.3627>:
   <D.3624>:
-  return D.3621;
+  _1 = x * x;
+  y = b + _1;
+  if (a == 1) goto <D.3628>; else goto <D.3629>;
+  <D.3628>:
+  D.3630 = g (y);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3633>;
+  <D.3629>:
+  if (a == 2) goto <D.3631>; else goto <D.3632>;
+  <D.3631>:
+  _2 = y + 5;
+  D.3630 = g (_2);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3633>;
+  <D.3632>:
+  D.3630 = y;
+  goto <D.3633>;
+  <D.3633>:
+  return D.3630;
+}
+
+
+
+;; Function thr_join (thr_join, funcdef_no=1, decl_uid=3616, cgraph_uid=2, symbol_order=1)
+
+int thr_join (int a, int b)
+{
+  int z;
+  int y;
+  int x;
+  int D.3641;
+
+  if (a > 0) goto <D.3634>; else goto <D.3635>;
+  <D.3634>:
+  x = 1;
+  goto <D.3636>;
+  <D.3635>:
+  x = h (b);
+  <D.3636>:
+  _1 = b * b;
+  y = a + _1;
+  z = y ^ b;
+  if (b > 10) goto <D.3637>; else goto <D.3638>;
+  <D.3637>:
+  if (x == 1) goto <D.3639>; else goto <D.3640>;
+  <D.3639>:
+  D.3641 = h (z);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3642>;
+  <D.3640>:
+  D.3641 = z + 3;
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3642>;
+  <D.3638>:
+  D.3641 = y;
+  goto <D.3642>;
+  <D.3642>:
+  return D.3641;
 }
 
 

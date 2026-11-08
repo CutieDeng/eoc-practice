@@ -3,7 +3,9 @@
 ;; -O1 alignment: the plugin's -O1 GENERIC (<name>.<ver>.O1.dat) through the
 ;; same chain with GS-optimize = 1 must reproduce GCC's -O1 dumps of
 ;; gimplify / lower / cfg / ssa and then of every ported -O1 pass.  Functions are compared one by one (GCC
-;; orders them by call-graph position when optimizing), each renumbered.
+;; orders them by call-graph position when optimizing) with their SSA
+;; versions and temporary numbers as printed: only the D.N uids are
+;; renumbered (they start after GCC's builtin declarations).
 
 (require rackunit racket/runtime-path racket/string racket/file racket/list
          "../../kernel/data/data.rkt"
@@ -43,7 +45,7 @@
   (for/hash ([c (in-list chunks)]
              #:when (let ([sig (signature c)]) (and sig (regexp-match? #px"([A-Za-z_][A-Za-z0-9_]*) \\(" sig))))
     (define m (regexp-match #px"([A-Za-z_][A-Za-z0-9_]*) \\(" (signature c)))
-    (values (cadr m) (normalize-gimple-text (string-join c "\n")))))
+    (values (cadr m) (normalize-gimple-text (string-join c "\n") #:rename-ssa? #f))))
 
 ;; per-stage dump texts of a TU: hash stage -> text.  The lowering
 ;; stages print their own dump format; every optimizer pass prints the

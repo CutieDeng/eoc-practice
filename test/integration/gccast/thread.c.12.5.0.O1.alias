@@ -171,3 +171,155 @@ int thr (int a, int b)
 }
 
 
+
+;; Function thr_join (thr_join, funcdef_no=1, decl_uid=3616, cgraph_uid=2, symbol_order=1)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+a = &NONLOCAL
+b = &NONLOCAL
+callescape(11) = NONLOCAL
+CALLUSED(12) = callescape(11)
+callarg(14) = b
+callarg(14) = callarg(14) + UNKNOWN
+callarg(14) = *callarg(14) + UNKNOWN
+CALLUSED(12) = callarg(14)
+*callarg(14) = callescape(11)
+CALLCLOBBERED(13) = callarg(14)
+callescape(11) = callarg(14)
+ESCAPED = b
+x_10 = NONLOCAL
+x_10 = callarg(14)
+x_2 = &NONLOCAL
+x_2 = x_10
+_1 = b
+_1 = b
+y_11 = _1
+y_11 = a
+z_12 = b
+z_12 = y_11
+callescape(20) = NONLOCAL
+CALLUSED(21) = callescape(20)
+callarg(23) = z_12
+callarg(23) = callarg(23) + UNKNOWN
+callarg(23) = *callarg(23) + UNKNOWN
+CALLUSED(21) = callarg(23)
+*callarg(23) = callescape(20)
+CALLCLOBBERED(22) = callarg(23)
+callescape(20) = callarg(23)
+ESCAPED = z_12
+_15 = NONLOCAL
+_15 = callarg(23)
+_13 = z_12
+_13 = &NONLOCAL
+_3 = _15
+_3 = _13
+_3 = y_11
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+a = { NONLOCAL }
+b = { NONLOCAL } same as a
+h = { }
+callescape(11) = { ESCAPED NONLOCAL }
+CALLUSED(12) = { ESCAPED NONLOCAL } same as callescape(11)
+CALLCLOBBERED(13) = { ESCAPED NONLOCAL } same as callarg(14)
+callarg(14) = { ESCAPED NONLOCAL }
+x_10 = { ESCAPED NONLOCAL } same as callescape(11)
+x_2 = { ESCAPED NONLOCAL } same as callescape(11)
+_1 = { NONLOCAL } same as a
+y_11 = { NONLOCAL } same as a
+z_12 = { NONLOCAL } same as a
+callescape(20) = { ESCAPED NONLOCAL }
+CALLUSED(21) = { ESCAPED NONLOCAL } same as callescape(20)
+CALLCLOBBERED(22) = { ESCAPED NONLOCAL } same as callarg(23)
+callarg(23) = { ESCAPED NONLOCAL }
+_15 = { ESCAPED NONLOCAL } same as callescape(20)
+_13 = { NONLOCAL } same as a
+_3 = { ESCAPED NONLOCAL } same as callescape(20)
+thr_join = { }
+
+
+Alias information for thr_join
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+
+int thr_join (int a, int b)
+{
+  int z;
+  int y;
+  int x;
+  int _1;
+  int _3;
+  int _13;
+  int _15;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_6(D) > 0)
+    goto <bb 4>; [74.50%]
+  else
+    goto <bb 3>; [25.50%]
+
+  <bb 3> [local count: 273804168]:
+  x_10 = h (b_8(D));
+
+  <bb 4> [local count: 1073741824]:
+  # x_2 = PHI <1(2), x_10(3)>
+  _1 = b_8(D) * b_8(D);
+  y_11 = _1 + a_6(D);
+  z_12 = b_8(D) ^ y_11;
+  if (b_8(D) > 10)
+    goto <bb 5>; [50.00%]
+  else
+    goto <bb 8>; [50.00%]
+
+  <bb 5> [local count: 536870913]:
+  if (x_2 == 1)
+    goto <bb 6>; [20.24%]
+  else
+    goto <bb 7>; [79.76%]
+
+  <bb 6> [local count: 108662672]:
+  _15 = h (z_12);
+  goto <bb 8>; [100.00%]
+
+  <bb 7> [local count: 428208240]:
+  _13 = z_12 + 3;
+
+  <bb 8> [local count: 1073741824]:
+  # _3 = PHI <_15(6), _13(7), y_11(4)>
+  return _3;
+
+}
+
+

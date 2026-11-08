@@ -64,3 +64,89 @@ int thr (int a, int b)
 }
 
 
+
+;; Function thr_join (thr_join, funcdef_no=1, decl_uid=3616, cgraph_uid=2, symbol_order=1)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5 6 7 8
+;; 2 succs { 8 3 }
+;; 3 succs { 4 7 }
+;; 4 succs { 5 6 }
+;; 5 succs { 7 }
+;; 6 succs { 7 }
+;; 7 succs { 1 }
+;; 8 succs { 5 7 }
+Sinking z_20 = b_8(D) ^ y_19;
+ from bb 8 to bb 11
+int thr_join (int a, int b)
+{
+  int z;
+  int y;
+  int x;
+  int _1;
+  int _3;
+  int _13;
+  int _15;
+  int _18;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_6(D) > 0)
+    goto <bb 8>; [74.50%]
+  else
+    goto <bb 3>; [25.50%]
+
+  <bb 3> [local count: 273804168]:
+  x_10 = h (b_8(D));
+  _1 = b_8(D) * b_8(D);
+  y_11 = _1 + a_6(D);
+  z_12 = b_8(D) ^ y_11;
+  if (b_8(D) > 10)
+    goto <bb 4>; [100.00%]
+  else
+    goto <bb 9>; [0.00%]
+
+  <bb 9> [local count: 0]:
+  goto <bb 7>; [100.00%]
+
+  <bb 4> [local count: 428208241]:
+  if (x_10 == 1)
+    goto <bb 10>; [0.00%]
+  else
+    goto <bb 6>; [100.00%]
+
+  <bb 10> [local count: 0]:
+
+  <bb 5> [local count: 108662672]:
+  # z_22 = PHI <z_12(10), z_20(11)>
+  _15 = h (z_22);
+  goto <bb 7>; [100.00%]
+
+  <bb 6> [local count: 428208240]:
+  _13 = z_12 + 3;
+
+  <bb 7> [local count: 1073741824]:
+  # _3 = PHI <_15(5), _13(6), y_11(9), y_19(12)>
+  return _3;
+
+  <bb 8> [local count: 799937656]:
+  _18 = b_8(D) * b_8(D);
+  y_19 = a_6(D) + _18;
+  if (b_8(D) > 10)
+    goto <bb 11>; [13.58%]
+  else
+    goto <bb 12>; [86.42%]
+
+  <bb 12> [local count: 691274984]:
+  goto <bb 7>; [100.00%]
+
+  <bb 11> [local count: 108662672]:
+  z_20 = b_8(D) ^ y_19;
+  goto <bb 5>; [100.00%]
+
+}
+
+

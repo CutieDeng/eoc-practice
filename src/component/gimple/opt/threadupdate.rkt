@@ -30,6 +30,10 @@
 ;; and ssa_redirect_edges (the incoming edge goes to the duplicate, the
 ;; PHI arguments of the old destination with it).
 ;;
+;; Fixture coverage: thread.c thr (three paths through one block, the
+;; template copies), thr_join (a joiner path: the copy keeps its
+;; condition, its on-path edge goes to the final destination).
+;;
 ;; The redirection data live in a model of GCC's hash_table (open
 ;; addressing over prime_tab sizes, hash = index of the final
 ;; destination, double hashing, expansion at 3/4), so they are visited

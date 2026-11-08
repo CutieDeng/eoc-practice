@@ -77,7 +77,7 @@ status={
  'tree-reassoc1':'完成（`opt/reassoc.rkt`：rank、linearize、按 rank 排序、常量合并、串行 rewrite_expr_tree；新名字取 SSA 空闲表；range test / undistribute / 并行重写未移植）',
  'tree-dce3':'完成（复用 dce）','tree-forwprop3':'完成（复用 forwprop）','tree-phiopt3':'恒等','tree-ccp3':'完成（复用 ccp，nonzero_p）',
  'tree-pow':'恒等','tree-sincos':'恒等','tree-laddress':'恒等','tree-lim2':'完成（子集：只有 loop_optimizer_init 的 preheader / latch；不变量外提未移植，夹具无触发）',
- 'tree-walloca2':'恒等','tree-sink1':'完成（子集：loop_optimizer_init + split_edges_for_insertion（switch 边新建 case 标号）；语句下沉未移植，夹具无触发）',
+ 'tree-walloca2':'恒等','tree-sink1':'完成（`opt/sink.rkt`：loop_optimizer_init + split_edges_for_insertion、statement_sink_location（单用途 / 多用途的最近公共支配块 / PHI 入边块，load 不越过 store：12 版 VUSE 立即使用、15 版 virtual_operand_live）、select_best_block（12：循环深度 + 75% 频率阈值；15：do_not_sink + 后支配）、死语句删除；thread.c 的 thr_join 下沉 z = b ^ y；sink_common_stores_to_bb 的变换未移植（触发时报错））',
  'tree-dse3':'完成（复用 dse）','tree-dce4':'完成（复用 dce）','tree-fix_loops':'恒等',
  'tree-loop':'完成（gate_loop：函数有循环才进入子流水线；`opt/loop-pipeline.rkt` 记录 loop-pipeline 与 loops-state 标志）',
  'tree-loopinit':'完成（loop_optimizer_init (LOOPS_NORMAL) + rewrite_into_loop_closed_ssa（`opt/update-ssa.rkt` 的增量 update_ssa 与 dump）；loops-state 置 preheaders / simple-latches / lcssa / scev：cleanup 保护 latch 与 preheader、不压缩块号）',
@@ -102,7 +102,7 @@ status={
  'tree-sink2':'完成（复用 sink，unsplit）',
  'tree-crited1':'完成（split_critical_edges）',
  'tree-local-pure-const2':'完成（复用 pure-const；finite_p 按循环号保存）',
- 'tree-modref2':'完成（复用 modref；Past summary（IPA 传播对不可用被调函数的 collapse）与参数标志比较）',
+ 'tree-modref2':'完成（复用 modref；Past summary（IPA 传播对不可用被调函数的 collapse；早期摘要无用时按 IPA 分析（跳过调用）判断 IPA 摘要是否存在）与参数标志比较）',
  'tree-uncprop1':'恒等','tree-nrv':'恒等','tree-isel':'恒等',
  'tree-waccess3':'完成（警告未移植；后期实例在夹具上不做 pointer query，计数为 0）',
  'tree-optimized':'完成（execute_fixup_cfg + cleanup_tree_cfg，TODO_remove_unused_locals）',
@@ -147,12 +147,12 @@ flag_status={
  '-ftree-ccp':'完成（ccp1）','-ftree-bit-ccp':'完成（ccp1）','-ftree-forwprop':'完成（forwprop1）','-ftree-fre':'完成（fre1）','-ftree-dse':'完成（dse1）',
  '-ftree-dce':'完成（cddce1、dce2；后续实例未）','-ftree-builtin-call-dce':'恒等（cdce）','-fguess-branch-probability':'完成（profile_estimate）',
  '-fipa-pure-const':'完成（local 实例）；IPA 传播未','-fipa-modref':'完成（local 实例）；IPA 传播未','-fipa-strict-aliasing':'-O1 无 strict aliasing，alias set 恒 0',
- '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（含同一块多条路径的模板块复制；循环头线程化未移植）；后向线程器 ethread / thread 未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
+ '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（含同一块多条路径的模板块复制、joiner 块复制（thread.c 的 thr_join）；循环头线程化未移植）；后向线程器 ethread / thread 未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
  '-fearly-inlining':'恒等（不内联）','-finline':'未移植','-finline-functions-called-once':'未移植','-finline-atomics':'未移植','-fno-inline-stringops':'未移植',
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
  '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'完成（loop 到 loopdone、no_loop）','-ftree-loop-im':'未移植',
  '-ftree-loop-ivcanon':'完成（ivcanon）','-ftree-scev-cprop':'完成（sccp）','-fivopts':'完成（ivopts）','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植（-O1 的 cunroll 不用）',
- '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'部分（sink1 的边拆分；下沉未移植）','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
+ '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'完成（sink1 / sink2；公共 store 下沉未移植）','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
  '-fbit-tests':'未移植（switchlower）','-fjump-tables':'未移植（switchlower）','-fallocation-dce':'未移植','-fmalloc-dce':'未移植','-flifetime-dse':'未移植',
  '-fprintf-return-value':'部分（折叠子集）','-fmath-errno':'部分（折叠子集）','-ffp-int-builtin-inexact':'部分','-fsigned-zeros':'部分','-ftrapping-math':'部分',
  '-ftree-ter':'未移植（out-of-SSA）','-ftree-coalesce-vars':'未移植（out-of-SSA）','-fsemantic-interposition':'简化模型','-ftoplevel-reorder':'简化模型','-fplt':'范围外',
@@ -205,7 +205,7 @@ L.append("## 0. 数据来源与口径\n")
 L.append("- **pass 清单**：`gcc-15 -O1 -fdump-passes` 与 `gcc-12 -O1 -fdump-passes`（Homebrew gcc 15.2.0 / gcc@12 12.5.0）打印的完整 pass 树，含 gate 关闭的 pass。这是 GCC 对 `passes.def` 的实例化结果。此前版本的表只列了夹具实际产生 dump 文件的 pass，漏掉了无 dump 名的 `*` pass 与 gate 关闭的 pass。")
 L.append("- **passes.def 规模**（`gcc.git` 的 releases/gcc-15 与 releases/gcc-12 分支）：NEXT_PASS / INSERT_PASS 条目 426（gcc-15）、406（gcc-12）；不同 pass 名 294（gcc-15）。-fdump-passes 展开为 %d 个实例（gcc-15）、%d 个（gcc-12）。" % (len(rows), len(p12)))
 L.append("- **优化开关**：`gcc-15 -O{0,1,2,3} -Q --help=optimizers`：%d 个开关；-O0 启用 54，-O1 新增 43（共 96），-O2 再增 46（共 142），-O3 再增 14（共 156），135 个在 -O0 到 -O3 下都不默认启用。另有 316 个 `--param`，不在本表。" % len(levels))
-L.append("- **对齐判据**：`src/component/gimple/o1-test.rkt`，%d 夹具（%s）× 2 版本逐函数比较归一化 dump。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。\n" % (len(FIXTURES), '、'.join(f+'.c' for f in FIXTURES)))
+L.append("- **对齐判据**：`src/component/gimple/o1-test.rkt`，%d 夹具（%s）× 2 版本逐函数比较 dump（去掉 `;;` 行；SSA 版本号与临时量编号按原样比较，只把 D.N 的 uid 重新编号）。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。\n" % (len(FIXTURES), '、'.join(f+'.c' for f in FIXTURES)))
 L.append("- **执行与否**：`-fdump-passes` 在编译任何函数之前对每个 gate 求值一次，所以看函数的 gate（循环 pass、postreload）打印 OFF，而关闭分组里的子 pass 可能打印 ON。GIMPLE pass 改用夹具的 dump 文件判定：4 个夹具中任一个有该 pass 的 dump 文件即为执行；两者不一致时 gcc-15 列写成 `ON（实际未执行）` / `OFF（实际执行）`。IPA、RTL 与无 dump 名的 pass 仍按 `-fdump-passes`。统计表的“执行 / 不执行”按此口径。\n")
 L.append("## 1. 统计（gcc-15 pass 树实例，-O1）\n")
 L.append("| 类别 | 执行 | 不执行 | 完成 | 恒等 | 未移植（执行） |\n|---|---|---|---|---|---|")

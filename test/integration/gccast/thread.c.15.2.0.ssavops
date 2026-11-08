@@ -5,7 +5,7 @@ int thr (int a, int b)
 {
   int y;
   int x;
-  int D.4478;
+  int D.4487;
   int _1;
   int _2;
   int _4;
@@ -73,6 +73,76 @@ int thr (int a, int b)
 <L10>:
   # VUSE <.MEM_5>
   return _4;
+
+}
+
+
+
+;; Function thr_join (thr_join, funcdef_no=1, decl_uid=4473, cgraph_uid=2, symbol_order=1)
+
+int thr_join (int a, int b)
+{
+  int z;
+  int y;
+  int x;
+  int D.4498;
+  int _1;
+  int _3;
+  int _14;
+  int _15;
+  int _17;
+
+  <bb 2> :
+  if (a_6(D) > 0)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 4>; [INV]
+
+  <bb 3> :
+  x_11 = 1;
+  goto <bb 5>; [INV]
+
+  <bb 4> :
+  # .MEM_9 = VDEF <.MEM_7(D)>
+  x_10 = h (b_8(D));
+
+  <bb 5> :
+  # x_2 = PHI <x_11(3), x_10(4)>
+  # .MEM_4 = PHI <.MEM_7(D)(3), .MEM_9(4)>
+  _1 = b_8(D) * b_8(D);
+  y_12 = a_6(D) + _1;
+  z_13 = y_12 ^ b_8(D);
+  if (b_8(D) > 10)
+    goto <bb 6>; [INV]
+  else
+    goto <bb 9>; [INV]
+
+  <bb 6> :
+  if (x_2 == 1)
+    goto <bb 7>; [INV]
+  else
+    goto <bb 8>; [INV]
+
+  <bb 7> :
+  # .MEM_16 = VDEF <.MEM_4>
+  _17 = h (z_13);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <bb 10>; [INV]
+
+  <bb 8> :
+  _15 = z_13 + 3;
+  // predicted unlikely by early return (on trees) predictor.
+  goto <bb 10>; [INV]
+
+  <bb 9> :
+  _14 = y_12;
+
+  <bb 10> :
+  # _3 = PHI <_17(7), _15(8), _14(9)>
+  # .MEM_5 = PHI <.MEM_16(7), .MEM_4(8), .MEM_4(9)>
+<L7>:
+  # VUSE <.MEM_5>
+  return _3;
 
 }
 

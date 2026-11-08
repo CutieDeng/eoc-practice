@@ -27,10 +27,16 @@
 ;; looping const/pure functions, ignore_nondeterminism_p also looks at
 ;; the caller's const/pure flags.
 ;;
+;; The late instance dumps the IPA pass's summary as its past summary:
+;; the early summary collapsed for calls to unavailable callees (IPA
+;; propagation), or, when the early summary was useless, the one the IPA
+;; analysis keeps (its walk leaves the calls to the propagation, so a
+;; function without memory accesses of its own keeps an empty summary).
+;;
 ;; Not ported: fnspec strings and builtins, static chains and return
-;; slots, exceptions, IPA mode (escape points, LTO summaries), the
-;; past-summary comparison, points-to (pure-const.rkt's local-pointer
-;; walk instead), interposable_eaf_flags.
+;; slots, exceptions, IPA mode's escape points and parameter flags, LTO
+;; summaries, points-to (pure-const.rkt's local-pointer walk instead),
+;; interposable_eaf_flags.
 ;; ============================================================
 
 (require racket/list racket/string
@@ -702,7 +708,7 @@
         (if (decl-flag st0 fndecl 'pure #f) " (pure)" ""))
   ;; a summary kept from an earlier run (the late instance): the IPA
   ;; pass's summary, i.e. this function's early summary as propagated
-  (define past (let ([s (callee-summary st0 fndecl)]) (and s (msum-loads s) (ipa-propagated s))))
+  (define past (let ([s (or (callee-summary st0 fndecl) (decl-flag st0 fndecl 'modref-ipa #f))]) (and s (msum-loads s) (ipa-propagated s))))
   (when past
     (msg! "Past summary:")
     (parameterize ([current-msg! (lambda (s) (msg! "~a" s))]) (dump-summary past)))
@@ -1199,9 +1205,12 @@
                             (lambda (b t) (when (and (memq (tree-code b) '(mem_ref target_mem_ref)) (integer-zerop (tree-operand b 0))) (set! found #t))))
     found)
 
+  ;; analyze_function (ipa=1) leaves the calls other than internal ones
+  ;; to the IPA propagation
+  (define ipa-mode? #f)
   (define (analyze-stmt! g bb)
     (walk-stmt-loads-stores st0 g analyze-load! analyze-store!)
-    (when (gcall? g) (analyze-call! g bb)))
+    (when (and (gcall? g) (or (not ipa-mode?) (gcall-internal? g))) (analyze-call! g bb)))
 
   ;; find_always_executed_bbs (assume_return_or_eh = true)
   (define (always-executed-bbs)
@@ -1266,27 +1275,37 @@
              (vector-set! cs 3 (max (vector-ref cs 3) (vector-ref c2 3))))))
        (sort ret <)]))
 
+  (define (walk-statements! ae)
+    (let/ec k
+      (for ([bb (in-pvector (cfg-bbs cfg))])
+        (set! always-executed (and (memv bb ae) #t))
+        (for ([id (in-list (mfn-stmts m bb))])
+          (define g (mfn-stmt m id))
+          (unless (glabel? g)
+            (when (null-deref? g)
+              (msg! " - NULL memory access; terminating BB")
+              (k #t))                    ; break out of this block only
+            (analyze-stmt! g bb)
+            (unless (sum-useful? summary ecf-flags #f major) (k #f)))))
+      #t))
+  (define (always-executed-list)
+    (if (>= major 13) (always-executed-bbs) (list (GEdge-dest (pvector-first (cfg-succs cfg ENTRY))))))
+  ;; whether the IPA pass keeps a summary for this function: the walk
+  ;; without the calls, useful_p of the result (its parameter flags,
+  ;; which the IPA escape-point analysis computes, are not modelled)
+  (define (ipa-summary-exists? ecf)
+    (define saved (list summary msgs pending recursive-calls always-executed))
+    (set! summary (make-msum)) (set! ipa-mode? #t)
+    (walk-statements! (always-executed-list))
+    (define useful (sum-useful? summary ecf #t major))
+    (set! summary (list-ref saved 0)) (set! msgs (list-ref saved 1)) (set! pending (list-ref saved 2))
+    (set! recursive-calls (list-ref saved 3)) (set! always-executed (list-ref saved 4)) (set! ipa-mode? #f)
+    useful)
   (define (access-analyze!)
-    (define ae
-      (cond
-        [(>= major 13)
-         (define bbs (always-executed-bbs))
-         (msg! "Always executed bbbs (assuming return or EH): ~a" (string-join (map number->string bbs) ", "))
-         bbs]
-        [else (list (GEdge-dest (pvector-first (cfg-succs cfg ENTRY))))]))
-    (define summary-useful
-      (let/ec k
-        (for ([bb (in-pvector (cfg-bbs cfg))])
-          (set! always-executed (and (memv bb ae) #t))
-          (for ([id (in-list (mfn-stmts m bb))])
-            (define g (mfn-stmt m id))
-            (unless (glabel? g)
-              (when (null-deref? g)
-                (msg! " - NULL memory access; terminating BB")
-                (k #t))                    ; break out of this block only
-              (analyze-stmt! g bb)
-              (unless (sum-useful? summary ecf-flags #f major) (k #f)))))
-        #t))
+    (define ae (always-executed-list))
+    (when (>= major 13)
+      (msg! "Always executed bbbs (assuming return or EH): ~a" (string-join (map number->string ae) ", ")))
+    (define summary-useful (walk-statements! ae))
     (define st1 st0)
     (when summary-useful
       ;; propagate over recursive calls
@@ -1337,6 +1356,14 @@
          (for ([i (in-range (vector-length old-flags))])
            (define o (remove-useless-eaf (vector-ref old-flags i) ecf2 returns-void?))
            (unless (zero? o) (msg! "  Flags for param ~a worsened:~a -> " i (eaf-flags-string o))))]))
-    (define st3 (if keep? (set-decl-flag st2 fndecl 'modref summary) st2))
+    ;; the early summary is the callees' summary; a function whose early
+    ;; summary is useless can still have the IPA pass's summary, which the
+    ;; late instance dumps as its past summary
+    (define st3
+      (cond
+        [keep? (set-decl-flag st2 fndecl 'modref summary)]
+        [(and (not past) (not (decl-flag st2 fndecl 'modref-ipa #f)) (ipa-summary-exists? ecf2))
+         (set-decl-flag st2 fndecl 'modref-ipa summary)]
+        [else st2]))
     (define cfg1 (for/fold ([c cfg]) ([mm (in-list (reverse msgs))]) (cfg-add-message c mm)))
     (if fixup? (fixup-cfg st3 cfg1) (values cfg1 st3))))

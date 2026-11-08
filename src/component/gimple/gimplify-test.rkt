@@ -28,7 +28,9 @@
       st3))
   (values (get-output-string o) st*))
 
-(define (normalize-gimple-text s)
+;; RENAME-SSA? #f keeps SSA versions and named-temporary numbers as they
+;; are (only the D.N uids, which start at GCC's builtin count, are renumbered)
+(define (normalize-gimple-text s #:rename-ssa? [rename-ssa? #t])
   (define d-map (make-hash)) (define ssa-map (make-hash)) (define k-map (make-hash))
   (define (num m k) (hash-ref! m k (lambda () (add1 (hash-count m)))))
   ;; D.N, name.K_N (named temporaries), name_N (SSA names of variables),
@@ -41,6 +43,7 @@
                      (lambda (all name k n vname vn)
                        (cond
                          [(string-prefix? all "D.") (format "D.~a" (num d-map all))]
+                         [(not rename-ssa?) all]
                          [name (format "~a.~a_~a" name (num k-map k) (num ssa-map n))]
                          [vname (format "~a_~a" vname (num ssa-map vn))]
                          [else (format "_~a" (num ssa-map (substring all 1)))]))))

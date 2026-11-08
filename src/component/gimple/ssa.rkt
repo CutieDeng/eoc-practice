@@ -227,20 +227,22 @@
                                  (if (= (car arg) pred) (cons pred name) arg)))))
    (add1 n)))
 
-;; rewrite_stmt for every statement of the block: real uses, VUSE, VDEF,
-;; real def
+;; rewrite_stmt for every statement of the block: the uses (the VUSE
+;; first: finalize_ssa_uses prepends it to the use list, so the virtual
+;; operand's default definition is numbered before a parameter first used
+;; in the same statement), then the VDEF and the real def
 (define (rename-stmts a i acc use def)
   (define vop (ga-vop a))
   (define-values (stmts* a* acc*)
     (for/fold ([out (pvector-empty)] [a a] [acc acc] #:result (values out a acc)) ([g (in-pvector (block-stmts a i))])
       (define st (ga-st a))
-      (define-values (map1 a1 acc1)
-        (for/fold ([m intmap-empty] [a a] [acc acc]) ([u (in-list (stmt-uses st g))] #:when (ga-only? a u))
+      (define-values (vu? vd?) (if (ga-only a) (values #f #f) (stmt-vops st g)))
+      (define-values (vuse a0 acc0) (if vu? (use a acc vop) (values #f a acc)))
+      (define-values (map1 a2 acc2)
+        (for/fold ([m intmap-empty] [a a0] [acc acc0]) ([u (in-list (stmt-uses st g))] #:when (ga-only? a u))
           (cond
             [(intmap-has-key? m (decl-uid u)) (values m a acc)]
             [else (let-values ([(n a acc) (use a acc u)]) (values (intmap-set m (decl-uid u) n) a acc))])))
-      (define-values (vu? vd?) (if (ga-only a) (values #f #f) (stmt-vops st g)))
-      (define-values (vuse a2 acc2) (if vu? (use a1 acc1 vop) (values #f a1 acc1)))
       (define-values (vdef a3 acc3) (if vd? (def a2 acc2 vop) (values #f a2 acc2)))
       (define d (let ([d (stmt-def st g)]) (and d (ga-only? a d) d)))
       (define-values (dn a4 acc4) (if d (def a3 acc3 d) (values #f a3 acc3)))

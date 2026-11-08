@@ -1,39 +1,73 @@
 int thr (int a, int b)
 {
-  int D.4478;
+  int D.4487;
   int x;
   int y;
 
-  if (a == 1) goto <D.4470>; else goto <D.4471>;
-  <D.4470>:
+  if (a == 1) goto <D.4479>; else goto <D.4480>;
+  <D.4479>:
   x = b + 1;
-  goto <D.4472>;
-  <D.4471>:
-  if (a == 2) goto <D.4473>; else goto <D.4474>;
-  <D.4473>:
+  goto <D.4481>;
+  <D.4480>:
+  if (a == 2) goto <D.4482>; else goto <D.4483>;
+  <D.4482>:
   x = b * 3;
-  goto <D.4475>;
-  <D.4474>:
+  goto <D.4484>;
+  <D.4483>:
   x = b + -7;
-  <D.4475>:
-  <D.4472>:
+  <D.4484>:
+  <D.4481>:
   _1 = x * x;
   y = b + _1;
-  if (a == 1) goto <D.4476>; else goto <D.4477>;
-  <D.4476>:
-  D.4478 = g (y);
+  if (a == 1) goto <D.4485>; else goto <D.4486>;
+  <D.4485>:
+  D.4487 = g (y);
   // predicted unlikely by early return (on trees) predictor.
-  return D.4478;
-  <D.4477>:
-  if (a == 2) goto <D.4479>; else goto <D.4480>;
-  <D.4479>:
+  return D.4487;
+  <D.4486>:
+  if (a == 2) goto <D.4488>; else goto <D.4489>;
+  <D.4488>:
   _2 = y + 5;
-  D.4478 = g (_2);
+  D.4487 = g (_2);
   // predicted unlikely by early return (on trees) predictor.
-  return D.4478;
-  <D.4480>:
-  D.4478 = y;
-  return D.4478;
+  return D.4487;
+  <D.4489>:
+  D.4487 = y;
+  return D.4487;
+}
+
+
+int thr_join (int a, int b)
+{
+  int D.4498;
+  int x;
+  int y;
+  int z;
+
+  if (a > 0) goto <D.4491>; else goto <D.4492>;
+  <D.4491>:
+  x = 1;
+  goto <D.4493>;
+  <D.4492>:
+  x = h (b);
+  <D.4493>:
+  _1 = b * b;
+  y = a + _1;
+  z = y ^ b;
+  if (b > 10) goto <D.4494>; else goto <D.4495>;
+  <D.4494>:
+  if (x == 1) goto <D.4496>; else goto <D.4497>;
+  <D.4496>:
+  D.4498 = h (z);
+  // predicted unlikely by early return (on trees) predictor.
+  return D.4498;
+  <D.4497>:
+  D.4498 = z + 3;
+  // predicted unlikely by early return (on trees) predictor.
+  return D.4498;
+  <D.4495>:
+  D.4498 = y;
+  return D.4498;
 }
 
 

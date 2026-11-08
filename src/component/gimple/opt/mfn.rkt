@@ -33,6 +33,7 @@
          mfn-stmt mfn-bb mfn-phi? mfn-phis mfn-stmts mfn-first mfn-last mfn-next mfn-prev
          mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-imm-uses mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
          mfn-replace! mfn-relink! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
+         mfn-move-before! mfn-move-to-end!
          stmt-use-names stmt-def-names)
 
 (struct cell (stmt prev next bb) #:mutable)
@@ -190,6 +191,33 @@
 (define (mfn-insert-after! m id g)
   (define c (cell-of m id))
   (link-new! m g (cell-bb c) id (cell-next c)))
+
+;; gsi_move_before / gsi_move_to_bb_end: the statement's cell moves; its
+;; operands are not modified, so its immediate uses keep their places
+(define (unlink-cell! m id)
+  (define c (cell-of m id))
+  (define bb (cell-bb c))
+  (if (cell-prev c) (set-cell-next! (cell-of m (cell-prev c)) (cell-next c)) (hash-set! (mfn-heads m) bb (cell-next c)))
+  (if (cell-next c) (set-cell-prev! (cell-of m (cell-next c)) (cell-prev c)) (hash-set! (mfn-tails m) bb (cell-prev c)))
+  (set-cell-prev! c #f) (set-cell-next! c #f))
+(define (link-cell! m id bb prev next)
+  (define c (cell-of m id))
+  (set-cell-bb! c bb) (set-cell-prev! c prev) (set-cell-next! c next)
+  (if prev (set-cell-next! (cell-of m prev) id) (hash-set! (mfn-heads m) bb id))
+  (if next (set-cell-prev! (cell-of m next) id) (hash-set! (mfn-tails m) bb id)))
+(define (mfn-move-before! m id target)
+  (unlink-cell! m id)
+  (define t (cell-of m target))
+  (link-cell! m id (cell-bb t) (cell-prev t) target))
+;; after the last statement, or before it when it is a control statement
+(define (mfn-move-to-end! m id bb)
+  (unlink-cell! m id)
+  (define last (mfn-last m bb))
+  (cond
+    [(not last) (link-cell! m id bb #f #f)]
+    [(let ([g (mfn-stmt m last)]) (or (gcond? g) (gswitch? g) (ggoto? g) (greturn? g)))
+     (link-cell! m id bb (cell-prev (cell-of m last)) last)]
+    [else (link-cell! m id bb last #f)]))
 
 ;; unlink_stmt_vdef: the uses of the statement's vdef become uses of its vuse
 (define (mfn-unlink-vdef! m id)
