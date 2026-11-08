@@ -585,7 +585,9 @@
       (define v (and (ssa-name? t) (hash-ref subst (ssa-name-version t) #f)))
       (if v (value v) t))
     (for ([bb (in-list region)])
-      (for ([ph (in-pvector (block-phis bb))] #:when (= 1 (pvector-length (gphi-args ph))))
+      ;; process_bb skips virtual PHIs before eliminating (they stay for
+      ;; the CFG cleanup's block merging)
+      (for ([ph (in-pvector (block-phis bb))] #:when (and (= 1 (pvector-length (gphi-args ph))) (not (ssa-virtual? (gphi-result ph)))))
         (hash-set! subst (ssa-name-version (gphi-result ph)) (value (cdr (pvector-ref (gphi-args ph) 0)))))
       (for ([ph (in-pvector (block-phis bb))] #:when (hash-ref subst (ssa-name-version (gphi-result ph)) #f))
         (set! vn-removed (cons (ssa-name-version (gphi-result ph)) vn-removed)))

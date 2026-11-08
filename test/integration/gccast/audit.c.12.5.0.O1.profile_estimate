@@ -1,0 +1,196 @@
+
+;; Function au_two (au_two, funcdef_no=0, decl_uid=3608, cgraph_uid=1, symbol_order=0)
+
+Created preheader block for loop 2
+;; 3 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 8 5 6 7
+;;
+;; Loop 2
+;;  header 6, latch 5
+;;  depth 1, outer 0
+;;  nodes: 6 5
+;;
+;; Loop 1
+;;  header 4, latch 3
+;;  depth 1, outer 0
+;;  nodes: 4 3
+;; 2 succs { 4 }
+;; 3 succs { 4 }
+;; 4 succs { 3 8 }
+;; 8 succs { 6 }
+;; 5 succs { 6 }
+;; 6 succs { 5 7 }
+;; 7 succs { 1 }
+Predictions for bb 2
+1 edges in bb 2 predicted to even probabilities
+Predictions for bb 3
+1 edges in bb 3 predicted to even probabilities
+Predictions for bb 4
+  first match heuristics: 89.00%
+  combined heuristics: 89.00%
+  loop exit heuristics of edge 4->8: 11.00%
+Predictions for bb 8
+1 edges in bb 8 predicted to even probabilities
+Predictions for bb 5
+1 edges in bb 5 predicted to even probabilities
+Predictions for bb 6
+  first match heuristics: 89.00%
+  combined heuristics: 89.00%
+  call heuristics of edge 6->5 (ignored): 33.00%
+  loop exit heuristics of edge 6->7: 11.00%
+Predictions for bb 7
+1 edges in bb 7 predicted to even probabilities
+cyclic probability of bb 4 is 0.890000; turning freq 1.000000 to 9.090909
+cyclic probability of bb 6 is 0.890000; turning freq 1.000000 to 9.090909
+int au_two (int n, int * a)
+{
+  int v;
+  int j;
+  int i;
+  int s;
+  int _1;
+  long unsigned int _2;
+  long unsigned int _3;
+  int * _4;
+  int _5;
+  int _6;
+  long unsigned int _7;
+  long unsigned int _8;
+  int * _9;
+  int _10;
+
+  <bb 2> [local count: 118111600]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 955630225]:
+  _1 = i_13 * 2;
+  _2 = (long unsigned int) _1;
+  _3 = _2 * 4;
+  _4 = a_22(D) + _3;
+  _5 = *_4;
+  s_27 = _5 + s_11;
+  i_28 = i_13 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # s_11 = PHI <0(2), s_27(3)>
+  # i_13 = PHI <0(2), i_28(3)>
+  if (i_13 < n_18(D))
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 8>; [11.00%]
+
+  <bb 8> [local count: 118111600]:
+  goto <bb 6>; [100.00%]
+
+  <bb 5> [local count: 955630225]:
+  _6 = j_14 * 2;
+  _7 = (long unsigned int) _6;
+  _8 = _7 * 4;
+  _9 = a_22(D) + _8;
+  _10 = *_9;
+  v_24 = g (_10);
+  s_25 = s_12 + v_24;
+  j_26 = j_14 + 1;
+
+  <bb 6> [local count: 1073741824]:
+  # s_12 = PHI <s_11(8), s_25(5)>
+  # j_14 = PHI <0(8), j_26(5)>
+  if (j_14 < n_18(D))
+    goto <bb 5>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 7> [local count: 118111600]:
+  return s_12;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=1, decl_uid=3626, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5
+;;
+;; Loop 1
+;;  header 4, latch 3
+;;  depth 1, outer 0
+;;  nodes: 4 3
+;; 2 succs { 4 }
+;; 3 succs { 4 }
+;; 4 succs { 3 5 }
+;; 5 succs { 1 }
+Predictions for bb 2
+1 edges in bb 2 predicted to even probabilities
+Predictions for bb 3
+1 edges in bb 3 predicted to even probabilities
+Predictions for bb 4
+  first match heuristics: 66.67%
+  combined heuristics: 66.67%
+  guessed loop iterations heuristics of edge 4->5: 33.33%
+Predictions for bb 5
+1 edges in bb 5 predicted to even probabilities
+cyclic probability of bb 4 is 0.666700; turning freq 1.000000 to 3.000300
+int au_trail (struct au_s * s)
+{
+  int i;
+  int t;
+  int _1;
+  int _2;
+  int _3;
+
+  <bb 2> [local count: 357878152]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 715863673]:
+  _1 = i_5 * 2;
+  _2 = s_9(D)->d[_1];
+  t_11 = _2 + t_4;
+  i_12 = i_5 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # t_4 = PHI <0(2), t_11(3)>
+  # i_5 = PHI <0(2), i_12(3)>
+  _3 = s_9(D)->n;
+  if (_3 > i_5)
+    goto <bb 3>; [66.67%]
+  else
+    goto <bb 5>; [33.33%]
+
+  <bb 5> [local count: 357878152]:
+  return t_4;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=2, decl_uid=3635, cgraph_uid=3, symbol_order=2)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2
+;; 2 succs { 1 }
+Predictions for bb 2
+1 edges in bb 2 predicted to even probabilities
+void au_unused (int x)
+{
+  int r;
+
+  <bb 2> [local count: 1073741824]:
+  g (x_2(D));
+  return;
+
+}
+
+

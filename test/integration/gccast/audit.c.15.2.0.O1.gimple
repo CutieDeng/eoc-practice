@@ -1,0 +1,84 @@
+int au_two (int n, int * a)
+{
+  int D.4496;
+  int s;
+
+  s = 0;
+  {
+    int i;
+
+    i = 0;
+    goto <D.4474>;
+    <D.4473>:
+    _1 = i * 2;
+    _2 = (long unsigned int) _1;
+    _3 = _2 * 4;
+    _4 = a + _3;
+    _5 = *_4;
+    s = s + _5;
+    i = i + 1;
+    <D.4474>:
+    if (i < n) goto <D.4473>; else goto <D.4471>;
+    <D.4471>:
+  }
+  {
+    int j;
+
+    j = 0;
+    goto <D.4478>;
+    <D.4477>:
+    {
+      int v;
+
+      _6 = j * 2;
+      _7 = (long unsigned int) _6;
+      _8 = _7 * 4;
+      _9 = a + _8;
+      _10 = *_9;
+      v = g (_10);
+      s = s + v;
+    }
+    j = j + 1;
+    <D.4478>:
+    if (j < n) goto <D.4477>; else goto <D.4475>;
+    <D.4475>:
+  }
+  D.4496 = s;
+  return D.4496;
+}
+
+
+int au_trail (struct au_s * s)
+{
+  int D.4498;
+  int t;
+
+  t = 0;
+  {
+    int i;
+
+    i = 0;
+    goto <D.4490>;
+    <D.4489>:
+    _1 = i * 2;
+    _2 = s->d[_1];
+    t = t + _2;
+    i = i + 1;
+    <D.4490>:
+    _3 = s->n;
+    if (i < _3) goto <D.4489>; else goto <D.4487>;
+    <D.4487>:
+  }
+  D.4498 = t;
+  return D.4498;
+}
+
+
+void au_unused (int x)
+{
+  int r;
+
+  r = g (x);
+}
+
+

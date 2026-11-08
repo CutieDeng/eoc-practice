@@ -148,14 +148,30 @@
   (or (and (memq stage '(ealias alias)) (string=? ver "12.5.0"))
       (eq? stage 'waccess2)))
 
+;; fixtures that reach an unported case: that pass runs as the identity
+;; and only the stages before it are compared (audit.c: ivopts would add
+;; autoincrement candidates and needs unmeasured target costs)
+(define fixture-stop '(("audit.c" . ivopts)))
+(define fixtures-o1 '("basic.c" "calls.c" "struct.c" "ccp.c" "thread.c" "sink.c" "audit.c"))
+(define (stop-of name) (let ([p (assoc name fixture-stop)]) (and p (cdr p))))
+(define (stage-texts-for name tu)
+  (define stop (stop-of name))
+  (parameterize ([o1-skip-passes (if stop (list stop) '())]) (o1-stage-texts tu)))
+;; the stages before STOP (all when #f)
+(define (stages-before stages stop)
+  (if stop (let loop ([ss stages]) (if (or (null? ss) (eq? (car ss) stop)) '() (cons (car ss) (loop (cdr ss))))) stages))
+
 (module+ test
   ;; GCC 15 prints the loops' iteration bounds in the ";; Loop" headers
   ;; of every dump: they must equal ours at the start of that pass
-  (for ([name '("basic.c" "calls.c" "struct.c" "ccp.c" "thread.c" "sink.c")])
+  (for ([name fixtures-o1])
     (define tu (read-gccast-file (build-path fixtures (format "~a.15.2.0.O1.dat" name))))
-    (define log (hash-ref (o1-stage-texts tu) 'loop-bounds))
+    (define log (hash-ref (stage-texts-for name tu) 'loop-bounds))
+    (define compared (stages-before (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))
+                                            (map pass-name (late-passes (import-tu tu #:optimize 1))))
+                                    (stop-of name)))
     (test-case (format "~a 15.2.0 -O1: loop iteration bounds at every pass" name)
-      (for ([(stage fns) (in-hash log)])
+      (for ([(stage fns) (in-hash log)] #:when (memq stage compared))
         (define f (build-path fixtures (format "~a.15.2.0.O1.~a" name stage)))
         (when (file-exists? f)
           (for* ([(fn loops) (in-hash (dump-loop-bounds (file->string f)))] [(num g) (in-hash loops)])
@@ -163,11 +179,12 @@
             (define ours (if b (list (vector-ref (struct->vector b) 1) (vector-ref (struct->vector b) 2) (vector-ref (struct->vector b) 3)) (list #f #f #f)))
             (check-equal? ours g (format "~a ~a loop ~a" stage fn num)))))))
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c" "ccp.c" "thread.c" "sink.c")])
+         [name fixtures-o1])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))
-    (define texts (o1-stage-texts tu))
-    (define stages (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))
-                           (map pass-name (late-passes (import-tu tu #:optimize 1)))))
+    (define texts (stage-texts-for name tu))
+    (define stages (stages-before (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))
+                                          (map pass-name (late-passes (import-tu tu #:optimize 1))))
+                                  (stop-of name)))
     (for ([stage stages]
           #:unless (stage-excluded? ver stage)
           #:when (file-exists? (build-path fixtures (format "~a.~a.O1.~a" name ver stage))))

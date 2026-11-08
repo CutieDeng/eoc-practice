@@ -47,7 +47,7 @@
          (only-in "ssa-ops.rkt" stmt-real-uses stmt-has-side-effects?)
          "../../../driver/dominance/dom.rkt")
 
-(provide late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? pass-enabled? run-pass)
+(provide o1-skip-passes late-passes o1-passes identity-pass ealias pass-name pass-fn pass-prunes-locals? pass-enabled? run-pass)
 (define pass-name car)
 (define pass-fn cadr)
 (define pass-prunes-locals? caddr)
@@ -65,7 +65,17 @@
 (define (live-versions cfg)
   (for/hasheqv ([n (in-pvector (ssa-names-in-version-order cfg))] #:unless (tree-attr n 'default-def #f))
     (values (ssa-name-version n) #t)))
+;; o1-skip-passes (default: O1_SKIP_PASSES="ivopts ..."): the named passes
+;; leave the function unchanged, so the stages before an unported case can
+;; still be compared with GCC's dumps
+(define o1-skip-passes
+  (make-parameter (let ([v (getenv "O1_SKIP_PASSES")]) (if v (map string->symbol (regexp-split #rx"[ ,]+" v)) '()))))
 (define (run-pass p st decl cfg)
+  (if (memq (pass-name p) (o1-skip-passes)) (values cfg st) (run-pass* p st decl cfg)))
+(define (run-pass* p st decl cfg)
+  (when (getenv "O1_DEBUG_FREE")
+    (eprintf "## ~a ~a free=~s queue=~s\n" (pass-name p) (tree-attr decl 'name "?")
+             (decl-flag st decl 'ssa-free '()) (decl-flag st decl 'ssa-free-queue '())))
   (when (getenv "NITER_DEBUG")
     (eprintf "@@ ~a ~a ~s\n" (pass-name p) (tree-attr decl 'name "?")
              (for/list ([(k v) (in-hash (decl-flag st decl 'loop-bounds (hasheqv)))]) (cons k v))))

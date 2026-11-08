@@ -368,6 +368,16 @@ ccp1 移植记录：
 - cfg.rkt 为 SSA 之后的 cleanup 补了两处：`remove_edge` 同步删 PHI 实参（与 preds 一样 unordered_remove），`merge_blocks` 把 B 的单实参 PHI 用 `replace_uses_by` 传播掉。forwarder 删除在 dest 有 PHI 时的实参复制仍未做。
 - 未移植：`evaluate_stmt` 的 builtin 分支（malloc/alloca/assume_aligned/bswap）、nonzero-bits/range info、ipa-cp 参数位、`&DECL` 以外的指针对齐（且 dump 无 DECL_ALIGN，用对象 TYPE_ALIGN 代替，与 GCC 的局部变量对齐提升有差）、`fold_stmt` 的 `follow_single_use_edges` 与 match.pd 恒等式、`fold_const_aggregate_ref`。插件未导出 `DECL_BUILT_IN_CLASS`，builtin 判定按 `__builtin_` 前缀。
 
+源码级逻辑对齐审计（2026-11-08）：
+
+- 范围：sink、update_ssa / LCSSA / DCE / CFG cleanup、jump threading（threadedge / threadupdate / dom）、循环迭代界（niter / scev / ivcanon / cunroll / profile 触发点）、GENERIC 折叠（fold-const / match.pd）。逐函数对照 GCC 12.5 / 13.3 / 14.2 / 15.2 源码；版本门限按源码定位到具体主版本。
+- 修正与文档化的条目见 beta 上 2026-11-08 的 FIX 提交；未移植项记在各模块头部 "Not ported"。
+- 新夹具 `audit.c`（兄弟循环、结构尾数组、未用调用结果）只比较 ivopts 之前的阶段（`o1-test.rkt` 的 `fixture-stop`，ivopts 以恒等运行）。夹具暴露、尚未移植的三处：
+  1. ivopts 的自增地址候选（访问步长等于访问大小时 `add_autoinc_candidates`），以及未测的目标代价（`mult_by_coeff_cost (8, DI)`）；
+  2. `determine_unlikely_bbs` 的 cold 调用（`abort ()` 的块计数为 0、出口概率 never）：插件数据不含 cold 属性；
+  3. GCC 15 估频中递归调用块的频率封顶（"Dropping frequency of recursive call"）。
+- 未改的模型限制：每条语句只有一个 use stamp（GCC 的 SET_USE 只重链一个操作数）；forwprop 的删除顺序仍按"未记录名字降序"入释放队列。
+
 ## 6. 执行顺序与依赖
 
 ```

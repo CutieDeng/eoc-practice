@@ -37,7 +37,7 @@
          "../../driver/dominance/dom.rkt"
          (only-in "gimplify.rkt" tree-swap-operands-p))
 
-(provide build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-next-stamp cfg-clear-messages cfg-add-message
+(provide stmt-defs-for-release build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-next-stamp cfg-clear-messages cfg-add-message
          cfg-set-profile prof-count prof-prob split-edge label-to-block make-edge remove-edge create-bb
          EDGE-FALLTHRU EDGE-TRUE-VALUE EDGE-FALSE-VALUE
          cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges

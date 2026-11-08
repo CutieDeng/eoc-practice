@@ -26,7 +26,9 @@ for i,a in enumerate(args):
 S=tempfile.mkdtemp(prefix='gcc-pass-sheet-')+'/'
 FIX=os.path.join(REPO,'gccast-plugin','tests','struct.c')
 # the o1-test.rkt fixtures (gccast-plugin/tests/<name>.c)
-FIXTURES=['basic','calls','struct','ccp','thread','sink']
+FIXTURES=['basic','calls','struct','ccp','thread','sink','audit']
+# fixtures compared only up to a pass that reaches an unported case
+FIXTURE_STOP={'audit':'ivopts'}
 def run(cmd, out):
     with open(out,'w') as f: subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=False)
 run([GCC15,'-O1','-fdump-passes','-c','-o','/dev/null',FIX], S+'passes15.txt')
@@ -189,7 +191,15 @@ def late_impact(ver):
             b=body(d+f)
             if prev is not None and b!=prev: ch.append(f.split('.',2)[2])
             prev=b
-        out[fx]=[c for c in ch if not c.endswith('statistics')]
+        ch=[c for c in ch if not c.endswith('statistics')]
+        stop=FIXTURE_STOP.get(fx)
+        if stop:
+            # the stages from the stop pass on are not compared for this fixture
+            k=next((i for i,c in enumerate(ch) if re.sub(r'^\d+t\.','',c)==stop), None)
+            if k is None:
+                k=len(ch)
+            ch=ch[:k]
+        out[fx]=ch
     return out
 impact=late_impact('15'); impact12=late_impact('12')
 cnt=collections.Counter()
@@ -205,7 +215,7 @@ L.append("## 0. 数据来源与口径\n")
 L.append("- **pass 清单**：`gcc-15 -O1 -fdump-passes` 与 `gcc-12 -O1 -fdump-passes`（Homebrew gcc 15.2.0 / gcc@12 12.5.0）打印的完整 pass 树，含 gate 关闭的 pass。这是 GCC 对 `passes.def` 的实例化结果。此前版本的表只列了夹具实际产生 dump 文件的 pass，漏掉了无 dump 名的 `*` pass 与 gate 关闭的 pass。")
 L.append("- **passes.def 规模**（`gcc.git` 的 releases/gcc-15 与 releases/gcc-12 分支）：NEXT_PASS / INSERT_PASS 条目 426（gcc-15）、406（gcc-12）；不同 pass 名 294（gcc-15）。-fdump-passes 展开为 %d 个实例（gcc-15）、%d 个（gcc-12）。" % (len(rows), len(p12)))
 L.append("- **优化开关**：`gcc-15 -O{0,1,2,3} -Q --help=optimizers`：%d 个开关；-O0 启用 54，-O1 新增 43（共 96），-O2 再增 46（共 142），-O3 再增 14（共 156），135 个在 -O0 到 -O3 下都不默认启用。另有 316 个 `--param`，不在本表。" % len(levels))
-L.append("- **对齐判据**：`src/component/gimple/o1-test.rkt`，%d 夹具（%s）× 2 版本逐函数比较 dump（去掉 `;;` 行；SSA 版本号与临时量编号按原样比较，只把 D.N 的 uid 重新编号）。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。\n" % (len(FIXTURES), '、'.join(f+'.c' for f in FIXTURES)))
+L.append("- **对齐判据**：`src/component/gimple/o1-test.rkt`，%d 夹具（%s）× 2 版本逐函数比较 dump（去掉 `;;` 行；SSA 版本号与临时量编号按原样比较，只把 D.N 的 uid 重新编号）。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。\n" % (len(FIXTURES), '、'.join(f+'.c' for f in FIXTURES)) + ''.join('；%s.c 只比较 %s 之前的阶段（%s 以恒等运行：自增候选未移植、目标代价未测）' % (f, p, p) for f, p in FIXTURE_STOP.items()))
 L.append("- **执行与否**：`-fdump-passes` 在编译任何函数之前对每个 gate 求值一次，所以看函数的 gate（循环 pass、postreload）打印 OFF，而关闭分组里的子 pass 可能打印 ON。GIMPLE pass 改用夹具的 dump 文件判定：4 个夹具中任一个有该 pass 的 dump 文件即为执行；两者不一致时 gcc-15 列写成 `ON（实际未执行）` / `OFF（实际执行）`。IPA、RTL 与无 dump 名的 pass 仍按 `-fdump-passes`。统计表的“执行 / 不执行”按此口径。\n")
 L.append("## 1. 统计（gcc-15 pass 树实例，-O1）\n")
 L.append("| 类别 | 执行 | 不执行 | 完成 | 恒等 | 未移植（执行） |\n|---|---|---|---|---|---|")

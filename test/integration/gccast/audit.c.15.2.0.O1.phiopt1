@@ -1,0 +1,111 @@
+
+;; Function au_two (au_two, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+
+int au_two (int n, int * a)
+{
+  int v;
+  int j;
+  int i;
+  int s;
+  int _1;
+  long unsigned int _2;
+  long unsigned int _3;
+  int * _4;
+  int _5;
+  int _6;
+  long unsigned int _7;
+  long unsigned int _8;
+  int * _9;
+  int _10;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = i_13 * 2;
+  _2 = (long unsigned int) _1;
+  _3 = _2 * 4;
+  _4 = a_22(D) + _3;
+  _5 = *_4;
+  s_27 = _5 + s_11;
+  i_28 = i_13 + 1;
+
+  <bb 4> :
+  # s_11 = PHI <0(2), s_27(3)>
+  # i_13 = PHI <0(2), i_28(3)>
+  if (i_13 < n_18(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 6>; [INV]
+
+  <bb 5> :
+  _6 = j_14 * 2;
+  _7 = (long unsigned int) _6;
+  _8 = _7 * 4;
+  _9 = a_22(D) + _8;
+  _10 = *_9;
+  v_24 = g (_10);
+  s_25 = s_12 + v_24;
+  j_26 = j_14 + 1;
+
+  <bb 6> :
+  # s_12 = PHI <s_11(4), s_25(5)>
+  # j_14 = PHI <0(4), j_26(5)>
+  if (j_14 < n_18(D))
+    goto <bb 5>; [INV]
+  else
+    goto <bb 7>; [INV]
+
+  <bb 7> :
+  return s_12;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+
+int au_trail (struct au_s * s)
+{
+  int i;
+  int t;
+  int _1;
+  int _2;
+  int _3;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = i_5 * 2;
+  _2 = s_9(D)->d[_1];
+  t_11 = _2 + t_4;
+  i_12 = i_5 + 1;
+
+  <bb 4> :
+  # t_4 = PHI <0(2), t_11(3)>
+  # i_5 = PHI <0(2), i_12(3)>
+  _3 = s_9(D)->n;
+  if (_3 > i_5)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  return t_4;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=2, decl_uid=4492, cgraph_uid=3, symbol_order=2)
+
+void au_unused (int x)
+{
+  <bb 2> :
+  g (x_2(D));
+  return;
+
+}
+
+

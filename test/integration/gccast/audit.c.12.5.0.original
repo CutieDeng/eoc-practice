@@ -1,0 +1,77 @@
+
+;; Function au_two (null)
+;; enabled by -tree-original
+
+
+{
+  int s = 0;
+
+    int s = 0;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.3617>;
+    <D.3616>:;
+    s = *(a + (sizetype) ((long unsigned int) (i * 2) * 4)) + s;
+    i++ ;
+    <D.3617>:;
+    if (i < n) goto <D.3616>; else goto <D.3614>;
+    <D.3614>:;
+  }
+  {
+    int j = 0;
+
+        int j = 0;
+    goto <D.3621>;
+    <D.3620>:;
+    {
+      int v = g (*(a + (sizetype) ((long unsigned int) (j * 2) * 4)));
+
+            int v = g (*(a + (sizetype) ((long unsigned int) (j * 2) * 4)));
+      s = s + v;
+    }
+    j++ ;
+    <D.3621>:;
+    if (j < n) goto <D.3620>; else goto <D.3618>;
+    <D.3618>:;
+  }
+  return s;
+}
+
+
+;; Function au_trail (null)
+;; enabled by -tree-original
+
+
+{
+  int t = 0;
+
+    int t = 0;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.3633>;
+    <D.3632>:;
+    t = s->d[i * 2] + t;
+    i++ ;
+    <D.3633>:;
+    if (s->n > i) goto <D.3632>; else goto <D.3630>;
+    <D.3630>:;
+  }
+  return t;
+}
+
+
+;; Function au_unused (null)
+;; enabled by -tree-original
+
+
+{
+  int r = g (x);
+
+    int r = g (x);
+  (void) r;
+}
+

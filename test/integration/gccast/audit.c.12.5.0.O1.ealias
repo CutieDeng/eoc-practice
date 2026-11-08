@@ -1,0 +1,353 @@
+
+;; Function au_two (au_two, funcdef_no=0, decl_uid=3608, cgraph_uid=1, symbol_order=0)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+n = &NONLOCAL
+a = &NONLOCAL
+_1 = i_13
+_1 = &NONLOCAL
+_2 = _1
+_3 = _2
+_3 = &NONLOCAL
+_4 = a
+_5 = *_4
+s_27 = _5
+s_27 = s_11
+i_28 = i_13
+i_28 = &NONLOCAL
+s_11 = &NULL
+s_11 = s_27
+i_13 = &NULL
+i_13 = i_28
+_6 = j_14
+_6 = &NONLOCAL
+_7 = _6
+_8 = _7
+_8 = &NONLOCAL
+_9 = a
+_10 = *_9
+callescape(26) = NONLOCAL
+CALLUSED(27) = callescape(26)
+callarg(29) = _10
+callarg(29) = callarg(29) + UNKNOWN
+callarg(29) = *callarg(29) + UNKNOWN
+CALLUSED(27) = callarg(29)
+*callarg(29) = callescape(26)
+CALLCLOBBERED(28) = callarg(29)
+callescape(26) = callarg(29)
+ESCAPED = _10
+v_24 = NONLOCAL
+v_24 = callarg(29)
+s_25 = s_12
+s_25 = v_24
+j_26 = j_14
+j_26 = &NONLOCAL
+s_12 = s_11
+s_12 = s_25
+j_14 = &NULL
+j_14 = j_26
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+n = { NONLOCAL }
+a = { NONLOCAL } same as n
+_1 = { NULL NONLOCAL }
+i_13 = { NULL NONLOCAL } same as _1
+_2 = { NULL NONLOCAL } same as _1
+_3 = { NULL NONLOCAL } same as _1
+_4 = { NONLOCAL } same as n
+_5 = { ESCAPED NONLOCAL }
+s_27 = { NULL ESCAPED NONLOCAL }
+s_11 = { NULL ESCAPED NONLOCAL } same as s_27
+i_28 = { NULL NONLOCAL } same as _1
+_6 = { NULL NONLOCAL } same as _1
+j_14 = { NULL NONLOCAL } same as _1
+_7 = { NULL NONLOCAL } same as _1
+_8 = { NULL NONLOCAL } same as _1
+_9 = { NONLOCAL } same as n
+_10 = { ESCAPED NONLOCAL }
+g = { }
+callescape(26) = { ESCAPED NONLOCAL }
+CALLUSED(27) = { ESCAPED NONLOCAL } same as callescape(26)
+CALLCLOBBERED(28) = { ESCAPED NONLOCAL } same as callarg(29)
+callarg(29) = { ESCAPED NONLOCAL }
+v_24 = { ESCAPED NONLOCAL } same as callescape(26)
+s_25 = { NULL ESCAPED NONLOCAL }
+s_12 = { NULL ESCAPED NONLOCAL } same as s_25
+j_26 = { NULL NONLOCAL } same as _1
+au_two = { }
+
+
+Alias information for au_two
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+_4, points-to non-local, points-to NULL, points-to vars: { }
+_9, points-to non-local, points-to NULL, points-to vars: { }
+a_22(D), points-to non-local, points-to NULL, points-to vars: { }
+
+int au_two (int n, int * a)
+{
+  int v;
+  int j;
+  int i;
+  int s;
+  int _1;
+  long unsigned int _2;
+  long unsigned int _3;
+  int * _4;
+  int _5;
+  int _6;
+  long unsigned int _7;
+  long unsigned int _8;
+  int * _9;
+  int _10;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = i_13 * 2;
+  _2 = (long unsigned int) _1;
+  _3 = _2 * 4;
+  _4 = a_22(D) + _3;
+  _5 = *_4;
+  s_27 = _5 + s_11;
+  i_28 = i_13 + 1;
+
+  <bb 4> :
+  # s_11 = PHI <0(2), s_27(3)>
+  # i_13 = PHI <0(2), i_28(3)>
+  if (i_13 < n_18(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 6>; [INV]
+
+  <bb 5> :
+  _6 = j_14 * 2;
+  _7 = (long unsigned int) _6;
+  _8 = _7 * 4;
+  _9 = a_22(D) + _8;
+  _10 = *_9;
+  v_24 = g (_10);
+  s_25 = s_12 + v_24;
+  j_26 = j_14 + 1;
+
+  <bb 6> :
+  # s_12 = PHI <s_11(4), s_25(5)>
+  # j_14 = PHI <0(4), j_26(5)>
+  if (j_14 < n_18(D))
+    goto <bb 5>; [INV]
+  else
+    goto <bb 7>; [INV]
+
+  <bb 7> :
+  return s_12;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=1, decl_uid=3626, cgraph_uid=2, symbol_order=1)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+s = &NONLOCAL
+_1 = i_5
+_1 = &NONLOCAL
+_2 = *s + UNKNOWN
+t_11 = _2
+t_11 = t_4
+i_12 = i_5
+i_12 = &NONLOCAL
+t_4 = &NULL
+t_4 = t_11
+i_5 = &NULL
+i_5 = i_12
+_3 = *s
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+s = { NONLOCAL }
+_1 = { NULL NONLOCAL }
+i_5 = { NULL NONLOCAL } same as _1
+_2 = { ESCAPED NONLOCAL }
+t_11 = { NULL ESCAPED NONLOCAL }
+t_4 = { NULL ESCAPED NONLOCAL } same as t_11
+i_12 = { NULL NONLOCAL } same as _1
+_3 = { ESCAPED NONLOCAL }
+au_trail = { }
+
+
+Alias information for au_trail
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+s_9(D), points-to non-local, points-to NULL, points-to vars: { }
+
+int au_trail (struct au_s * s)
+{
+  int i;
+  int t;
+  int _1;
+  int _2;
+  int _3;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = i_5 * 2;
+  _2 = s_9(D)->d[_1];
+  t_11 = _2 + t_4;
+  i_12 = i_5 + 1;
+
+  <bb 4> :
+  # t_4 = PHI <0(2), t_11(3)>
+  # i_5 = PHI <0(2), i_12(3)>
+  _3 = s_9(D)->n;
+  if (_3 > i_5)
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  return t_4;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=2, decl_uid=3635, cgraph_uid=3, symbol_order=2)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+x = &NONLOCAL
+callescape(10) = NONLOCAL
+CALLUSED(11) = callescape(10)
+callarg(13) = x
+callarg(13) = callarg(13) + UNKNOWN
+callarg(13) = *callarg(13) + UNKNOWN
+CALLUSED(11) = callarg(13)
+*callarg(13) = callescape(10)
+CALLCLOBBERED(12) = callarg(13)
+callescape(10) = callarg(13)
+ESCAPED = x
+r_4 = NONLOCAL
+r_4 = callarg(13)
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+x = { NONLOCAL }
+g = { }
+callescape(10) = { ESCAPED NONLOCAL }
+CALLUSED(11) = { ESCAPED NONLOCAL } same as callescape(10)
+CALLCLOBBERED(12) = { ESCAPED NONLOCAL } same as callarg(13)
+callarg(13) = { ESCAPED NONLOCAL }
+r_4 = { ESCAPED NONLOCAL } same as callescape(10)
+
+
+Alias information for au_unused
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to vars: { }
+
+Flow-insensitive points-to information
+
+
+void au_unused (int x)
+{
+  int r;
+
+  <bb 2> :
+  r_4 = g (x_2(D));
+  return;
+
+}
+
+

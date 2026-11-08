@@ -141,7 +141,17 @@
 
 ;; ---- mutation ----
 
-(define (mfn-replace! m id g0)
+;; update_stmt rescans the operands: an assignment that no longer reads
+;; memory (every operand an SSA name, a constant or an address) and does
+;; not store loses its VUSE
+(define (drop-stale-vuse g)
+  (if (and (gassign? g) (stmt-vuse g) (not (stmt-vdef g))
+           (for/and ([op (in-list (list (gassign-lhs g) (gassign-rhs1 g) (gassign-rhs2 g) (gassign-rhs3 g)))])
+             (or (not op) (memq (tree-code op) '(ssa_name integer_cst real_cst complex_cst vector_cst addr_expr)))))
+      (stmt-set-flag g 'vuse #f)
+      g))
+(define (mfn-replace! m id g00)
+  (define g0 (drop-stale-vuse g00))
   (define c (cell-of m id))
   (define-values (g n) (restamp (cell-stmt c) g0 (mfn-next-stamp m)))
   (set-mfn-next-stamp! m n)

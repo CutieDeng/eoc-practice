@@ -695,7 +695,8 @@
             (cond
               [(gcall? t)
                (vector-set! (hash-ref stmts bb) k (gcall (gcall-loc t) (gcall-flags t) #f (gcall-fn t) (gcall-args t) (gcall-fntype t) (gcall-internal? t) (gcall-ecf t)))
-               (hash-set! released i #t)])
+               (hash-set! released i #t)
+               (log-ssa-release! i)])
             (loop wl1)]
            [else
             (define used (if phi? (map cdr (phi-ssa-args t)) (stmt-real-uses t)))
@@ -705,6 +706,9 @@
                 (if (ssa-default-def? u) wl (intbits-set wl (ssa-ver u)))))
             (vector-set! (hash-ref (if phi? phis stmts) bb) k #f)
             (hash-set! released i #t)
+            ;; remove_phi_node / release_defs (the VDEF, then the LHS), in
+            ;; worklist order: the lowest version first, then what it frees
+            (for ([d (in-list (if phi? (list (gphi-result t)) (stmt-defs-for-release t)))]) (log-ssa-release! (ssa-ver d)))
             (loop wl2)])])))
   (for/fold ([cfg cfg]) ([i (in-pvector (cfg-bbs cfg))])
     (define b (cfg-block cfg i))
@@ -712,8 +716,28 @@
                                     (for/pvector ([g (in-vector (hash-ref stmts i))] #:when g) g)))))
 
 ;; GCC <= 13: the queued statements are removed as they are (stmts_to_remove),
-;; no use counts, no transitive removal
+;; no use counts, no transitive removal.  They were pushed in the
+;; dominator walk (sons in RPO, PHIs before statements) and are popped:
+;; the names are released in the reverse of that order.
 (define (remove-queued c cfg queued)
+  (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
+                           (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
+  (define pushed
+    (let walk ([idx 0] [acc '()])
+      (define bb (dom-node dom idx))
+      (define acc1
+        (cond
+          [(or (= bb ENTRY) (= bb EXIT)) acc]
+          [else
+           (define b (cfg-block cfg bb))
+           (define acc-phis (for/fold ([acc acc]) ([ph (in-pvector (GBlock-phis b))] #:when (intbits-ref queued (ssa-ver (gphi-result ph))))
+                              (cons (list (gphi-result ph)) acc)))
+           (for/fold ([acc acc-phis]) ([g (in-pvector (GBlock-stmts b))]
+                                       #:when (let ([l (stmt-ssa-lhs g)]) (and l (intbits-ref queued (ssa-ver l)))))
+             (cons (stmt-defs-for-release g) acc))]))
+      (for/fold ([acc acc1]) ([k (in-pvector (dom-children dom idx))]) (walk k acc))))
+  ;; PUSHED is newest first: the pop order
+  (for* ([defs (in-list pushed)] [d (in-list defs)]) (log-ssa-release! (ssa-ver d)))
   (for/fold ([cfg cfg]) ([i (in-pvector (cfg-bbs cfg))])
     (define b (cfg-block cfg i))
     (define (keep-phi? ph) (not (intbits-ref queued (ssa-ver (gphi-result ph)))))

@@ -1,0 +1,12 @@
+
+;; Function au_unused (au_unused, funcdef_no=2, decl_uid=3635, cgraph_uid=3, symbol_order=2)
+
+void au_unused (int x)
+{
+  <bb 2> [local count: 1073741824]:
+  g (x_2(D));
+  return;
+
+}
+
+

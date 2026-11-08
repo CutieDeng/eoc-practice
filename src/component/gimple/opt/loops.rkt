@@ -83,9 +83,9 @@
     (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
                  (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
   (define-values (loops _back) (find-loops cfg0 (dom-of cfg0)))
-  ;; create_preheaders (CP_SIMPLE_PREHEADERS)
+  ;; create_preheaders (CP_SIMPLE_PREHEADERS), loops_list (cfun, 0)
   (define cfg1
-    (for/fold ([cfg cfg0]) ([l (in-list loops)])
+    (for/fold ([cfg cfg0]) ([l (in-list (loops-preorder loops))])
       (define h (Loop-header l))
       (define entries (for/list ([p (in-pvector (cfg-preds cfg h))] #:unless (memv p (Loop-latches l))) p))
       (cond
@@ -100,9 +100,9 @@
          (if need?
              (let-values ([(_nb c) (split-edge cfg src h)]) (cfg-add-message c (format "Created preheader block for loop ~a" (Loop-num l))))
              cfg)])))
-  ;; force_single_succ_latches
+  ;; force_single_succ_latches, loops_list (cfun, 0)
   (define-values (loops1 _b1) (find-loops cfg1 (dom-of cfg1)))
-  (for/fold ([cfg cfg1]) ([l (in-list loops1)])
+  (for/fold ([cfg cfg1]) ([l (in-list (loops-preorder loops1))])
     (cond
       [(not (= 1 (length (Loop-latches l)))) cfg]
       [else

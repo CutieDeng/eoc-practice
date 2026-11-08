@@ -1,0 +1,209 @@
+
+;; Function au_two (au_two, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+
+
+
+ local analysis of au_two/1
+   scanning: if (n_16(D) > 0)
+  scanning: ivtmp.15_40 = (unsigned long) a_18(D);
+  scanning: _42 = (unsigned long) n_16(D);
+  scanning: _43 = _42 * 8;
+  scanning: _45 = ivtmp.15_40 + _43;
+  scanning: _41 = (void *) ivtmp.15_38;
+  scanning: _5 = MEM[(int *)_41];
+    Indirect ref read is not const
+  scanning: s_23 = _5 + s_30;
+  scanning: ivtmp.15_39 = ivtmp.15_38 + 8;
+  scanning: if (ivtmp.15_39 != _45)
+  scanning: _11 = (void *) ivtmp.9_14;
+  scanning: _10 = MEM[(int *)_11];
+    Indirect ref read is not const
+  scanning: v_20 = g (_10);
+  scanning: s_21 = v_20 + s_32;
+  scanning: ivtmp.9_12 = ivtmp.9_14 + 8;
+  scanning: if (ivtmp.9_12 != _45)
+  scanning: return s_33;
+Function is locally looping.
+int au_two (int n, int * a)
+{
+  unsigned long ivtmp.15;
+  unsigned long ivtmp.9;
+  int v;
+  int s;
+  int _5;
+  int _10;
+  void * _11;
+  void * _41;
+  unsigned long _42;
+  unsigned long _43;
+  unsigned long _45;
+
+  <bb 2> [local count: 118111600]:
+  if (n_16(D) > 0)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 7> [local count: 12992276]:
+  goto <bb 6>; [100.00%]
+
+  <bb 3> [local count: 105119324]:
+  ivtmp.15_40 = (unsigned long) a_18(D);
+  _42 = (unsigned long) n_16(D);
+  _43 = _42 * 8;
+  _45 = ivtmp.15_40 + _43;
+
+  <bb 4> [local count: 955630224]:
+  # s_30 = PHI <s_23(8), 0(3)>
+  # ivtmp.15_38 = PHI <ivtmp.15_39(8), ivtmp.15_40(3)>
+  _41 = (void *) ivtmp.15_38;
+  _5 = MEM[(int *)_41];
+  s_23 = _5 + s_30;
+  ivtmp.15_39 = ivtmp.15_38 + 8;
+  if (ivtmp.15_39 != _45)
+    goto <bb 8>; [89.00%]
+  else
+    goto <bb 9>; [11.00%]
+
+  <bb 8> [local count: 850510900]:
+  goto <bb 4>; [100.00%]
+
+  <bb 9> [local count: 105119324]:
+
+  <bb 5> [local count: 955630224]:
+  # s_32 = PHI <s_21(10), s_23(9)>
+  # ivtmp.9_14 = PHI <ivtmp.9_12(10), ivtmp.15_40(9)>
+  _11 = (void *) ivtmp.9_14;
+  _10 = MEM[(int *)_11];
+  v_20 = g (_10);
+  s_21 = v_20 + s_32;
+  ivtmp.9_12 = ivtmp.9_14 + 8;
+  if (ivtmp.9_12 != _45)
+    goto <bb 10>; [89.00%]
+  else
+    goto <bb 11>; [11.00%]
+
+  <bb 10> [local count: 850510900]:
+  goto <bb 5>; [100.00%]
+
+  <bb 11> [local count: 105119324]:
+
+  <bb 6> [local count: 118111600]:
+  # s_33 = PHI <s_21(11), 0(7)>
+  return s_33;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+
+
+
+ local analysis of au_trail/2
+   scanning: _12 = s_7(D)->n;
+    Indirect ref read is not const
+  scanning: if (_12 > 0)
+  scanning: ivtmp.23_10 = (unsigned long) s_7(D);
+  scanning: _16 = (unsigned long) _12;
+  scanning: _17 = _16 * 8;
+  scanning: _19 = ivtmp.23_10 + _17;
+  scanning: _11 = (void *) ivtmp.23_5;
+  scanning: _2 = MEM[(int *)_11 + 4B];
+    Indirect ref read is not const
+  scanning: t_8 = _2 + t_13;
+  scanning: ivtmp.23_4 = ivtmp.23_5 + 8;
+  scanning: if (ivtmp.23_4 != _19)
+  scanning: return t_14;
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 6 3 4 7 8 5
+;;
+;; Loop 1
+;;  header 4, latch 7
+;;  depth 1, outer 0, finite_p
+;;  upper_bound 1073741823
+;;  likely_upper_bound 1
+;;  iterations by profile: 2.000300 (unreliable) entry count:238597363 (estimated locally, freq 0.6667)
+;;  nodes: 4 7
+;; 2 succs { 3 6 }
+;; 6 succs { 5 }
+;; 3 succs { 4 }
+;; 4 succs { 7 8 }
+;; 7 succs { 4 }
+;; 8 succs { 5 }
+;; 5 succs { 1 }
+Assume loop 1 to be finite: it has an exit and -ffinite-loops is on or loop was previously finite.
+Function is locally pure.
+int au_trail (struct au_s * s)
+{
+  unsigned long ivtmp.23;
+  int t;
+  int _2;
+  void * _11;
+  int _12;
+  unsigned long _16;
+  unsigned long _17;
+  unsigned long _19;
+
+  <bb 2> [local count: 357878152]:
+  _12 = s_7(D)->n;
+  if (_12 > 0)
+    goto <bb 3>; [66.67%]
+  else
+    goto <bb 6>; [33.33%]
+
+  <bb 6> [local count: 119280789]:
+  goto <bb 5>; [100.00%]
+
+  <bb 3> [local count: 238597363]:
+  ivtmp.23_10 = (unsigned long) s_7(D);
+  _16 = (unsigned long) _12;
+  _17 = _16 * 8;
+  _19 = ivtmp.23_10 + _17;
+
+  <bb 4> [local count: 715863672]:
+  # t_13 = PHI <t_8(7), 0(3)>
+  # ivtmp.23_5 = PHI <ivtmp.23_4(7), ivtmp.23_10(3)>
+  _11 = (void *) ivtmp.23_5;
+  _2 = MEM[(int *)_11 + 4B];
+  t_8 = _2 + t_13;
+  ivtmp.23_4 = ivtmp.23_5 + 8;
+  if (ivtmp.23_4 != _19)
+    goto <bb 7>; [66.67%]
+  else
+    goto <bb 8>; [33.33%]
+
+  <bb 7> [local count: 477266309]:
+  goto <bb 4>; [100.00%]
+
+  <bb 8> [local count: 238597363]:
+
+  <bb 5> [local count: 357878152]:
+  # t_14 = PHI <t_8(8), 0(6)>
+  return t_14;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=2, decl_uid=4492, cgraph_uid=3, symbol_order=2)
+
+
+
+ local analysis of au_unused/3
+   scanning: g (x_2(D));
+  scanning: return;
+Function is locally looping.
+void au_unused (int x)
+{
+  <bb 2> [local count: 1073741824]:
+  g (x_2(D));
+  return;
+
+}
+
+
