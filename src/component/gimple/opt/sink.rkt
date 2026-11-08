@@ -35,10 +35,16 @@
 ;; dumped (TDF_VOPS), and the VUSEs of statements a sunk store no longer
 ;; dominates are rewired.  UNSPLIT? asks for TODO_cleanup_cfg.
 ;;
-;; Not ported (an error when reached): sink_common_stores_to_bb's
-;; transformation (the search runs; a block whose predecessors all end
-;; in stores of the same location stops the pass), infinite loops
-;; (connect_infinite_loops_to_exit), irreducible regions, abnormal edges.
+;; sink_common_stores_to_bb runs first in every block: stores of one
+;; location that define all arguments of the block's virtual PHI (and
+;; are used by it alone) are removed and one store is put at the start
+;; of the block, of the common value or of a new PHI merging the values;
+;; the PHI's result moves to the store and the PHI gets a new virtual
+;; name.  It asks for TODO_cleanup_cfg.
+;;
+;; Not ported (an error when reached): infinite loops
+;; (connect_infinite_loops_to_exit), irreducible regions, abnormal edges,
+;; EH.
 ;; ============================================================
 
 (require racket/list
@@ -54,7 +60,9 @@
          "ssa-ops.rkt"
          "mfn.rkt"
          "loops.rkt"
-         (only-in "alias.rkt" make-ao-ref stmt-kills-ref? ref-maybe-used-by-stmt?))
+         (only-in "alias.rkt" make-ao-ref stmt-kills-ref? ref-maybe-used-by-stmt?)
+         (only-in "generic-fold.rkt" with-gs operand-equal?)
+         (only-in "../gimplify.rkt" is-gimple-reg-type))
 
 (provide sink-pass)
 
@@ -65,8 +73,8 @@
   (define st (gs-set-fndecl st0 fndecl))
   (define cfg1 (normalize-loops st (cfg-clear-messages cfg0)))
   (define-values (cfg2 st2) (split-edges-for-insertion st cfg1))
-  (define-values (cfg3 st3) (sink-code st2 cfg2))
-  (if unsplit? (cleanup-tree-cfg st3 cfg3 print-cond-rhs) (values cfg3 st3)))
+  (define-values (cfg3 st3 commoned?) (sink-code st2 cfg2))
+  (if (or unsplit? commoned?) (cleanup-tree-cfg st3 cfg3 print-cond-rhs) (values cfg3 st3)))
 
 (define (sink-code st0 cfg)
   (define st st0)
@@ -295,28 +303,79 @@
         [(or (not bb) (not (dominated-by? bb frombb))) commondom]
         [else (ncd bb commondom)])))
 
-  ;; ---- sink_common_stores_to_bb: the search only -------------------------------
-  (define (check-common-stores! bb)
-    (define vphi (for/first ([pid (in-list (mfn-phis m bb))] #:when (ssa-virtual? (gphi-result (mfn-stmt m pid)))) (mfn-stmt m pid)))
-    (when (and vphi (> (length (preds bb)) 1))
-      (define first-store
-        (let/ec return
-          (for/fold ([first #f]) ([a (in-pvector (gphi-args vphi))])
-            (define arg (cdr a))
-            (define did (and (ssa-name? arg) (mfn-def m arg)))
-            (define def (and did (mfn-stmt m did)))
+  ;; ---- sink_common_stores_to_bb ---------------------------------------------
+  ;; stores to the same location ending every predecessor, each used only
+  ;; by the virtual PHI, become one store at the start of BB (a PHI merges
+  ;; differing values); returns #t when it changed something (TODO_cleanup_cfg)
+  (define (operand-eq? a b) (let-values ([(r _s) (with-gs st (lambda () (operand-equal? a b)))]) r))
+  (define (clobber? g) (and (gassign? g) (tree-clobber-p (gassign-rhs1 g))))
+  (define (virtual-phi-id bb)
+    (for/first ([pid (in-list (mfn-phis m bb))] #:when (ssa-virtual? (gphi-result (mfn-stmt m pid)))) pid))
+  (define (sink-common-stores! bb)
+    (cond
+      [(not (and (> (length (preds bb)) 1) (virtual-phi-id bb))) #f]
+      [else
+       (let loop ([todo #f])
+         (define pid (virtual-phi-id bb))
+         (define phi (mfn-stmt m pid))
+         ;; the common stores defining all PHI arguments: (values first-id args)
+         (define-values (first-id args)
+           (let/ec return
+             (for/fold ([first #f] [acc '()] #:result (values first (reverse acc))) ([a (in-pvector (gphi-args phi))])
+               (define arg (cdr a))
+               (define did (and (ssa-name? arg) (mfn-def m arg)))
+               (define def (and did (mfn-stmt m did)))
+               (cond
+                 [(not (and def (gassign? def))) (return #f '())]
+                 [(for/or ([uid (in-list (mfn-use-ids m arg))]) (not (= uid pid))) (return #f '())]
+                 [(not first) (values did (cons arg acc))]
+                 [(or (not (operand-eq? (gassign-lhs (mfn-stmt m first)) (gassign-lhs def)))
+                      (not (eq? (clobber? (mfn-stmt m first)) (clobber? def))))
+                  (return #f '())]
+                 [else (values first (cons arg acc))]))))
+         (cond
+           [(not first-id) todo]
+           [else
+            (define first (mfn-stmt m first-id))
+            (define defs (for/list ([v (in-list args)]) (mfn-stmt m (mfn-def m v))))
+            (define allsame (or (clobber? first) (for/and ([d (in-list (cdr defs))]) (operand-eq? (gassign-rhs1 first) (gassign-rhs1 d)))))
+            (define type (tree-type (gassign-lhs first)))
             (cond
-              [(not (and def (gassign? def))) (return #f)]
-              [(for/or ([uid (in-list (mfn-use-ids m arg))]) (not (eq? (mfn-stmt m uid) vphi))) (return #f)]
-              [(not first) def]
-              [(not (equal? (gassign-lhs first) (gassign-lhs def))) (return #f)]
-              [else first]))))
-      (when first-store
-        (error 'sink-pass "sink_common_stores_to_bb would sink common stores into bb ~a: not ported" bb))))
+              [(and (not allsame) (not (is-gimple-reg-type st type))) todo]
+              [else
+               ;; a PHI merging the stored values
+               (define from
+                 (cond
+                   [allsame (gassign-rhs1 first)]
+                   [else
+                    (define-values (nm st1) (make-ssa-name st type)) (set! st st1)
+                    (mfn-add-phi! m bb (gphi #f (hasheq) #f nm
+                                             (for/pvector ([p (in-list (preds bb))] [d (in-list defs)]) (cons p (gassign-rhs1 d)))))
+                    nm]))
+               ;; remove all the stores (each once)
+               (define old-result (gphi-result phi))
+               (for ([v (in-list (remove-duplicates args ssa-name=?))])
+                 (define did (mfn-def m v))
+                 (define g (mfn-stmt m did))
+                 (mfn-unlink-vdef! m did)
+                 (mfn-remove! m did)
+                 (set! released (append released (map ssa-name-version (stmt-def-names g)))))
+               ;; the PHI gets a new virtual name, the store its old one
+               (define-values (new-vop st2) (make-ssa-name st (ssa-name-var old-result))) (set! st st2)
+               (define phi* (mfn-stmt m pid))
+               (mfn-replace! m pid (gphi (gphi-loc phi*) (gphi-flags phi*) (gphi-var phi*) new-vop (gphi-args phi*)))
+               (define store (stmt-set-flag (stmt-set-flag (gassign (gassign-loc first) (gassign-flags first) (gassign-lhs first)
+                                                                    (gassign-code first) from #f #f)
+                                                           'vdef old-result)
+                                            'vuse new-vop))
+               (define target (for/first ([id (in-list (mfn-stmts m bb))] #:unless (glabel? (mfn-stmt m id))) id))
+               (if target (mfn-insert-before! m target store) (mfn-append! m bb store))
+               (loop #t)])]))]))
 
   ;; ---- sink_code_in_bb ---------------------------------------------------------
+  (define cleanup? #f)
   (define (sink-code-in-bb! bb)
-    (check-common-stores! bb)
+    (when (sink-common-stores! bb) (set! cleanup? #t))
     (unless (dominates-nothing? bb)
       (for ([id (in-list (reverse (mfn-stmts m bb)))])
         (define g (mfn-stmt m id))
@@ -354,4 +413,4 @@
                   (append* (for/list ([k (in-pvector (dom-children pdom i))]) (walk k)))))))
   (for ([bb (in-list order)]) (sink-code-in-bb! bb))
   (define cfg1 (for/fold ([c (mfn->gcfg m)]) ([l (in-list (reverse messages))]) (cfg-add-message c l)))
-  (values cfg1 (for/fold ([st st]) ([v (in-list released)]) (ssa-queue-release st v))))
+  (values cfg1 (for/fold ([st st]) ([v (in-list released)]) (ssa-queue-release st v)) cleanup?))

@@ -33,7 +33,7 @@
          mfn-stmt mfn-bb mfn-phi? mfn-phis mfn-stmts mfn-first mfn-last mfn-next mfn-prev
          mfn-def mfn-def-of-version mfn-def-stmt mfn-use-ids mfn-imm-uses mfn-num-uses mfn-single-use? mfn-zero-uses? mfn-released?
          mfn-replace! mfn-relink! mfn-remove! mfn-insert-before! mfn-insert-after! mfn-release-name! mfn-unlink-vdef!
-         mfn-move-before! mfn-move-to-end!
+         mfn-move-before! mfn-move-to-end! mfn-append! mfn-add-phi!
          stmt-use-names stmt-def-names)
 
 (struct cell (stmt prev next bb) #:mutable)
@@ -191,6 +191,19 @@
 (define (mfn-insert-after! m id g)
   (define c (cell-of m id))
   (link-new! m g (cell-bb c) id (cell-next c)))
+
+;; gsi_insert_before at the end of BB (an empty block's gsi_after_labels)
+(define (mfn-append! m bb g)
+  (link-new! m g bb (mfn-last m bb) #f))
+;; create_phi_node: the new PHI goes after the block's other PHIs
+(define (mfn-add-phi! m bb g0)
+  (define id (fresh-id! m))
+  (define-values (g n) (restamp #f g0 (mfn-next-stamp m)))
+  (set-mfn-next-stamp! m n)
+  (hash-set! (mfn-cells m) id (cell g #f #f bb))
+  (hash-set! (mfn-phi-lists m) bb (append (hash-ref (mfn-phi-lists m) bb '()) (list id)))
+  (add-tables! m id g)
+  id)
 
 ;; gsi_move_before / gsi_move_to_bb_end: the statement's cell moves; its
 ;; operands are not modified, so its immediate uses keep their places

@@ -26,7 +26,7 @@ for i,a in enumerate(args):
 S=tempfile.mkdtemp(prefix='gcc-pass-sheet-')+'/'
 FIX=os.path.join(REPO,'gccast-plugin','tests','struct.c')
 # the o1-test.rkt fixtures (gccast-plugin/tests/<name>.c)
-FIXTURES=['basic','calls','struct','ccp','thread']
+FIXTURES=['basic','calls','struct','ccp','thread','sink']
 def run(cmd, out):
     with open(out,'w') as f: subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=False)
 run([GCC15,'-O1','-fdump-passes','-c','-o','/dev/null',FIX], S+'passes15.txt')
@@ -77,7 +77,7 @@ status={
  'tree-reassoc1':'完成（`opt/reassoc.rkt`：rank、linearize、按 rank 排序、常量合并、串行 rewrite_expr_tree；新名字取 SSA 空闲表；range test / undistribute / 并行重写未移植）',
  'tree-dce3':'完成（复用 dce）','tree-forwprop3':'完成（复用 forwprop）','tree-phiopt3':'恒等','tree-ccp3':'完成（复用 ccp，nonzero_p）',
  'tree-pow':'恒等','tree-sincos':'恒等','tree-laddress':'恒等','tree-lim2':'完成（子集：只有 loop_optimizer_init 的 preheader / latch；不变量外提未移植，夹具无触发）',
- 'tree-walloca2':'恒等','tree-sink1':'完成（`opt/sink.rkt`：loop_optimizer_init + split_edges_for_insertion、statement_sink_location（单用途 / 多用途的最近公共支配块 / PHI 入边块，load 不越过 store：12 版 VUSE 立即使用、15 版 virtual_operand_live）、select_best_block（12：循环深度 + 75% 频率阈值；15：do_not_sink + 后支配）、死语句删除；thread.c 的 thr_join 下沉 z = b ^ y；sink_common_stores_to_bb 的变换未移植（触发时报错））',
+ 'tree-walloca2':'恒等','tree-sink1':'完成（`opt/sink.rkt`：loop_optimizer_init + split_edges_for_insertion、statement_sink_location（单用途 / 多用途的最近公共支配块 / PHI 入边块，load 不越过 store：12 版 VUSE 立即使用、15 版 virtual_operand_live）、select_best_block（12：循环深度 + 75% 频率阈值；15：do_not_sink + 后支配）、死语句删除；thread.c 的 thr_join 下沉 z = b ^ y；sink_common_stores_to_bb：sink.c 的两个 *p store 合并为 join 块中一个 PHI 值的 store）',
  'tree-dse3':'完成（复用 dse）','tree-dce4':'完成（复用 dce）','tree-fix_loops':'恒等',
  'tree-loop':'完成（gate_loop：函数有循环才进入子流水线；`opt/loop-pipeline.rkt` 记录 loop-pipeline 与 loops-state 标志）',
  'tree-loopinit':'完成（loop_optimizer_init (LOOPS_NORMAL) + rewrite_into_loop_closed_ssa（`opt/update-ssa.rkt` 的增量 update_ssa 与 dump）；loops-state 置 preheaders / simple-latches / lcssa / scev：cleanup 保护 latch 与 preheader、不压缩块号）',
@@ -152,7 +152,7 @@ flag_status={
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
  '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'完成（loop 到 loopdone、no_loop）','-ftree-loop-im':'未移植',
  '-ftree-loop-ivcanon':'完成（ivcanon）','-ftree-scev-cprop':'完成（sccp）','-fivopts':'完成（ivopts）','-faggressive-loop-optimizations':'未移植','-fsplit-ivs-in-unroller':'未移植（-O1 的 cunroll 不用）',
- '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'完成（sink1 / sink2；公共 store 下沉未移植）','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
+ '-fmove-loop-invariants':'未移植','-fmove-loop-stores':'未移植','-ftree-sink':'完成（sink1 / sink2，含公共 store 合并）','-ftree-slsr':'未移植','-fssa-backprop':'未移植','-fstdarg-opt':'恒等（stdarg）',
  '-fbit-tests':'未移植（switchlower）','-fjump-tables':'未移植（switchlower）','-fallocation-dce':'未移植','-fmalloc-dce':'未移植','-flifetime-dse':'未移植',
  '-fprintf-return-value':'部分（折叠子集）','-fmath-errno':'部分（折叠子集）','-ffp-int-builtin-inexact':'部分','-fsigned-zeros':'部分','-ftrapping-math':'部分',
  '-ftree-ter':'未移植（out-of-SSA）','-ftree-coalesce-vars':'未移植（out-of-SSA）','-fsemantic-interposition':'简化模型','-ftoplevel-reorder':'简化模型','-fplt':'范围外',

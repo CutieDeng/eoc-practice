@@ -1,0 +1,15 @@
+void st_common (int * p, int a, int b)
+{
+  if (a > 0) goto <D.4469>; else goto <D.4470>;
+  <D.4469>:
+  h (a);
+  _1 = b + 1;
+  *p = _1;
+  goto <D.4471>;
+  <D.4470>:
+  h (b);
+  *p = a;
+  <D.4471>:
+}
+
+

@@ -60,6 +60,7 @@
       (case key
         [(ops) (let-values ([(v c*) (res c nodes val)]) (values v attrs c*))]
         [(context mode) (values ops (hash-set attrs key val) c)]     ; (code . uid) / "DI": not refs
+        [(end-locus) (values ops (hash-set attrs key val) c)]        ; ("file" line col), a location like Node-loc
         [else (let-values ([(v c*) (res c nodes val)]) (values ops (hash-set attrs key v) c*))])))
   (define attrs*
     (if (eq? (tree-code-class st (Node-code nd)) 'tcc_constant) (hash-set attrs 'constant #t) attrs))

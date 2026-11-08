@@ -1,0 +1,29 @@
+
+;; Function st_common (st_common, funcdef_no=0, decl_uid=3609, cgraph_uid=1, symbol_order=0)
+
+void st_common (int * p, int a, int b)
+{
+  int _1;
+
+  <bb 2> [local count: 1073741824]:
+  if (a_3(D) > 0)
+    goto <bb 3>; [59.00%]
+  else
+    goto <bb 4>; [41.00%]
+
+  <bb 3> [local count: 633507681]:
+  h (a_3(D));
+  _1 = b_5(D) + 1;
+  *p_7(D) = _1;
+  goto <bb 5>; [100.00%]
+
+  <bb 4> [local count: 440234144]:
+  h (b_5(D));
+  *p_7(D) = a_3(D);
+
+  <bb 5> [local count: 1073741824]:
+  return;
+
+}
+
+
