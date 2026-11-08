@@ -6,17 +6,19 @@
 ;; fixtures were dumped with)
 ;; ============================================================
 ;;
-;; GCC computes these from RTL (expmed.cc init_expmed, rtlanal.cc
-;; address_cost, the aarch64 rtx cost tables); the RTL layer is not
-;; ported, so the values are the ones the compilers report.  Each was
-;; measured with -fdump-tree-ivopts-details and --param avg-loop-niter=1
-;; (which makes the setup costs visible undivided) on the fixtures:
+;; The expmed.cc costs (add, shift, shift-and-add, conversion,
+;; mult_by_coeff_cost) are computed as GCC computes them: expmed.rkt
+;; (init_expmed, synth_mult, choose_mult_variant) over the aarch64 rtx
+;; costs of aarch64-rtx-costs.rkt.  synth_mult's alg_hash is part of the
+;; state: GS-globals 'alg-hash, read and written through (gs).
+;; optimize_insn_for_speed_p (), which the search uses, is false only in
+;; a function with the cold attribute (the cgraph frequency a function
+;; gets from its callers is not modelled).
 ;;
-;;   add_cost (SI/DI)             4    candidate costs 9 = 4 + 4 + 1
-;;   convert_cost (DI <- SI)      4    (sizetype) (int) (x + c): 13
-;;   convert_cost (SI <- DI)      0    group 0 cost of the sizetype biv: 0
-;;   mult_by_coeff_cost 1         0    (synth_mult: alg_m)
-;;   mult_by_coeff_cost 12, -12   8 (gcc 15) / 12 (gcc 12)
+;; The others are the values the compilers report, measured with
+;; -fdump-tree-ivopts-details and --param avg-loop-niter=1 (which makes
+;; the setup costs visible undivided) on the fixtures:
+;;
 ;;   address_cost: aarch64_address_cost ported (below)
 ;;   force_expr_to_var_cost: integer 4, symbol 25 (speed) / 13 (size),
 ;;     address 5, target_spill_cost 16 (speed) / 4 (size),
@@ -32,8 +34,11 @@
 ;; (no absolute addresses, no base + index + imm).
 ;; ============================================================
 
-(require "../state.rkt"
-         "generic-fold.rkt")
+(require "../../../kernel/ir/gimple/types.rkt"
+         "../state.rkt"
+         "../tree.rkt"
+         "generic-fold.rkt"
+         (prefix-in expmed: "expmed.rkt"))
 
 (provide (struct-out mem-parts)
          machine-mode-of mode-size mode-bits scalar-int-mode?
@@ -57,24 +62,25 @@
 (define (major) (gcc-major-version (gs)))
 (define (unmeasured what) (error 'target-costs "~a has not been measured for gcc ~a" what (major)))
 
-(define (add-cost speed mode)
-  (if (member mode '("SI" "DI")) 4 (unmeasured (format "add_cost (~a)" mode))))
-(define (shift-cost speed mode m) (unmeasured (format "shift_cost (~a, ~a)" mode m)))
-(define (shiftadd-cost speed mode m) (unmeasured (format "shiftadd_cost (~a, ~a)" mode m)))
-(define (shiftsub0-cost speed mode m) (unmeasured (format "shiftsub0_cost (~a, ~a)" mode m)))
-(define (shiftsub1-cost speed mode m) (unmeasured (format "shiftsub1_cost (~a, ~a)" mode m)))
-(define (convert-cost to from speed)
-  (cond
-    [(equal? to from) 0]
-    [(and (equal? to "DI") (equal? from "SI")) 4]
-    [(and (equal? to "SI") (equal? from "DI")) 0]
-    [else (unmeasured (format "convert_cost (~a <- ~a)" to from))]))
+;; expmed.cc
+(define (add-cost speed mode) (expmed:add-cost (major) speed mode))
+(define (shift-cost speed mode m) (expmed:shift-cost (major) speed mode m))
+(define (shiftadd-cost speed mode m) (expmed:shiftadd-cost (major) speed mode m))
+(define (shiftsub0-cost speed mode m) (expmed:shiftsub0-cost (major) speed mode m))
+(define (shiftsub1-cost speed mode m) (expmed:shiftsub1-cost (major) speed mode m))
+(define (convert-cost to from speed) (expmed:convert-cost (major) to from speed))
+;; mult_by_coeff_cost: threads alg_hash through the state
 (define (mult-by-coeff-cost coef mode speed)
-  (cond
-    ;; synth_mult: multiplying by 1 is the operand itself
-    [(= coef 1) 0]
-    [(and (equal? mode "DI") (memv coef '(12 -12))) (if (>= (major) 13) 8 12)]
-    [else (unmeasured (format "mult_by_coeff_cost (~a, ~a)" coef mode))]))
+  (define st (gs))
+  (define globals (GS-globals st))
+  (define-values (cost h)
+    (expmed:mult-by-coeff-cost (major) (hash-ref globals 'alg-hash expmed:alg-hash-empty) coef mode speed
+                               (not (function-cold? st))))
+  (gs! (gs-set-globals st (hash-set globals 'alg-hash h)))
+  cost)
+(define (function-cold? st)
+  (define a (let ([d (GS-fndecl st)]) (and d (tree-attr d 'attributes #f))))
+  (and (list? a) (member "cold" a) #t))
 
 ;; USE_{LOAD,STORE}_{PRE,POST}_{INCREMENT,DECREMENT} (MODE): aarch64.h
 ;; defines all eight as 0 in 12.5 and 15.2 ("Disable auto-increment in

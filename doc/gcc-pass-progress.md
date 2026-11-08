@@ -261,7 +261,7 @@ gcc-12 合并去重：已对齐 33 个（`sink1`, `lim2`, `optimized`, `ch2`, `d
 | 198 | 　　　　`tree-dse4` | ON（实际未执行） | ON | 未执行（-O1 下 7 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假） |
 | 199 | 　　　`tree-slp1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 200 | 　　　`tree-aprefetch` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 201 | 　　　`tree-ivopts` | ON | ON | 完成（`opt/ivopts.rkt`：bivs / givs（alloc_iv 的 12 / 15 两种规范化）、nonlinear / compare / address 用途与分组、候选（标准、biv、原 biv、用途派生、公共基）、force_expr_to_var_cost / get_computation_aff / 地址代价 / 消去（may_eliminate_iv、cand_value_at）、iv_ca 贪心搜索、create_iv、create_mem_ref 子集（TARGET_MEM_REF）、adjust_iv_update_pos、remove_unused_ivs；`opt/tree-affine.rkt` 仿射组合；`opt/target-costs.rkt` 实测 aarch64 代价；IVOPTS_DEBUG=1 输出 TDF_DETAILS 表；未移植：doloop、autoinc、USE_PTR_ADDRESS、地址中的符号） |
+| 201 | 　　　`tree-ivopts` | ON | ON | 完成（`opt/ivopts.rkt`：bivs / givs（alloc_iv 的 12 / 15 两种规范化）、nonlinear / compare / address 用途与分组、候选（标准、biv、原 biv、用途派生、公共基）、force_expr_to_var_cost / get_computation_aff / 地址代价 / 消去（may_eliminate_iv、cand_value_at）、iv_ca 贪心搜索、create_iv、create_mem_ref 子集（TARGET_MEM_REF）、adjust_iv_update_pos、remove_unused_ivs；`opt/tree-affine.rkt` 仿射组合；`opt/target-costs.rkt` aarch64 代价（expmed 代价表与 mult_by_coeff_cost 按源码移植：`opt/expmed.rkt`、`opt/aarch64-rtx-costs.rkt`）；autoinc 候选按目标宏（aarch64 关闭）；IVOPTS_DEBUG=1 输出 TDF_DETAILS 表；未移植：doloop、USE_PTR_ADDRESS、地址中的符号、用其他候选改写非线性 use） |
 | 202 | 　　　`tree-lim4` | ON | ON | 恒等（夹具循环无不变量） |
 | 203 | 　　　`tree-loopdone` | ON | ON | 完成（loop_optimizer_finalize：clean_up_loop_closed_phi（按记录出口的逆序）、loops-state 清空，TODO_cleanup_cfg 删除 forwarder 并压缩块号） |
 | 204 | 　　`tree-no_loop` | OFF（实际执行） | OFF | 恒等（gate：函数从未进入循环流水线） |
@@ -740,5 +740,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- 最近一次实测：`o1-test.rkt` 1239 项（7 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1597/1598 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
+- 最近一次实测：`o1-test.rkt` 1239 项（7 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1599/1600 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。

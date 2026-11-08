@@ -88,7 +88,7 @@ status={
  'tree-ivcanon':'完成（`opt/ivcanon.rkt` create_canonical_iv，先 estimate_numbers_of_iterations；try_unroll 的 UL_SINGLE_ITER 只对不迭代的循环生效，未移植）',
  'tree-copyprop3':'完成（复用 copyprop；LCSSA 下不跨循环出口边传播）',
  'tree-cunroll':'完成（`opt/cunroll.rkt`：UL_NO_GROWTH 的 try_unroll_loop_completely（tree_estimate_loop_size / estimated_unrolled_size 12、15 两版）、scale_loop_profile（≥13）、duplicate_loop_body_to_header_edge 的复制与 DLTHE 计数缩放、force_edge_cold、unloop + remove_path、update_ssa；basic.c g 完全展开）',
- 'tree-ivopts':'完成（`opt/ivopts.rkt`：bivs / givs（alloc_iv 的 12 / 15 两种规范化）、nonlinear / compare / address 用途与分组、候选（标准、biv、原 biv、用途派生、公共基）、force_expr_to_var_cost / get_computation_aff / 地址代价 / 消去（may_eliminate_iv、cand_value_at）、iv_ca 贪心搜索、create_iv、create_mem_ref 子集（TARGET_MEM_REF）、adjust_iv_update_pos、remove_unused_ivs；`opt/tree-affine.rkt` 仿射组合；`opt/target-costs.rkt` 实测 aarch64 代价；IVOPTS_DEBUG=1 输出 TDF_DETAILS 表；未移植：doloop、autoinc、USE_PTR_ADDRESS、地址中的符号）',
+ 'tree-ivopts':'完成（`opt/ivopts.rkt`：bivs / givs（alloc_iv 的 12 / 15 两种规范化）、nonlinear / compare / address 用途与分组、候选（标准、biv、原 biv、用途派生、公共基）、force_expr_to_var_cost / get_computation_aff / 地址代价 / 消去（may_eliminate_iv、cand_value_at）、iv_ca 贪心搜索、create_iv、create_mem_ref 子集（TARGET_MEM_REF）、adjust_iv_update_pos、remove_unused_ivs；`opt/tree-affine.rkt` 仿射组合；`opt/target-costs.rkt` aarch64 代价（expmed 代价表与 mult_by_coeff_cost 按源码移植：`opt/expmed.rkt`、`opt/aarch64-rtx-costs.rkt`）；autoinc 候选按目标宏（aarch64 关闭）；IVOPTS_DEBUG=1 输出 TDF_DETAILS 表；未移植：doloop、USE_PTR_ADDRESS、地址中的符号、用其他候选改写非线性 use）',
  'tree-lim4':'恒等（夹具循环无不变量）',
  'tree-loopdone':'完成（loop_optimizer_finalize：clean_up_loop_closed_phi（按记录出口的逆序）、loops-state 清空，TODO_cleanup_cfg 删除 forwarder 并压缩块号）',
  'tree-no_loop':'恒等（gate：函数从未进入循环流水线）',
