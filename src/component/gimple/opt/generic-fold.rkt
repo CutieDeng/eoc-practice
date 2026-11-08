@@ -34,6 +34,12 @@
 ;;   A - CST -> A + -CST (negate_expr_p)
 ;;   (A * C) +- A, (A * C1) +- (A * C2), (A * C) +- C (fold_plusminus_mult_expr)
 ;;   (A * C1) * C2 -> A * (C1 * C2)
+;;   x * -C -> -x * C, extract_muldiv for X * C (fold_binary MULT_EXPR:
+;;   constants, conversions, negations, (A +- C1) * C distributed,
+;;   (A * C1) * C and (A /[ex] C1) * C associated; MIN / MAX, ABS,
+;;   shifts and the division / modulus codes are not ported), with GCC's
+;;   static recursion limit of 3
+;;   GCC >= 15: (A * B) + (-C) -> (B - C/A) * A when C is a multiple of A
 ;;   comparisons of constants, and with operands swapped to canonical order
 ;; ============================================================
 
@@ -328,6 +334,7 @@
        ;; (minus @0 @0) -> 0
        [(and (eq? code 'minus_expr) (operand-equal? op0 op1) (ty-int? t)) (icst t 0)]
        [(and (memq code '(plus_expr minus_expr)) (assoc-constants code t op0 op1))]
+       [(and (eq? code 'plus_expr) (>= (gcc-major-version (gs)) 15) (factor-mult-negative-constant t op0 op1))]
        [else #f])]
     [(mult_expr)
      (cond
@@ -379,9 +386,145 @@
                         (gf-convert t (gf-build2 inner u (gf-convert u a) (gf-convert u c))))]))]
            [else #f]))))
 
+;; GCC >= 15 match.pd: (A * B) + (-C) -> (B - C/A) * A, if C is a multiple of A
+(define (factor-mult-negative-constant t op0 op1)
+  (and (eq? (type-code (gs) t) 'integer_type)
+       (icst? op1) (eq? (tree-code op0) 'mult_expr)
+       (let* ([prec (ty-prec t)]
+              [c2 (signed-of (icst-val op1) prec)]
+              ;; mult:c with integer_nonzerop@0: the constant factor
+              [a (tree-operand op0 0)] [b (tree-operand op0 1)]
+              [c0t (cond [(and (icst? b) (not (integer-zerop b))) b] [(and (icst? a) (not (integer-zerop a))) a] [else #f])]
+              [x (and c0t (if (eq? c0t b) a b))])
+         (and c0t (< c2 0) (not (= c2 (- (arithmetic-shift 1 (sub1 prec)))))
+              (let* ([c0 (if (ty-uns? t) (bitwise-and (icst-val c0t) (sub1 (arithmetic-shift 1 prec))) (icst-val c0t))]
+                     [c2abs (abs c2)])
+                (and (not (zero? c0)) (zero? (remainder c2abs (abs c0)))
+                     (let ([div (quotient c2 (signed-of (icst-val c0t) prec))])
+                       (gf-build2 'mult_expr t (gf-build2 'plus_expr t x (icst t div)) c0t))))))))
+(define (signed-of v prec)
+  (let ([m (bitwise-and v (sub1 (arithmetic-shift 1 prec)))])
+    (if (bitwise-bit-set? m (sub1 prec)) (- m (arithmetic-shift 1 prec)) m)))
+
+;; extract_muldiv (code MULT_EXPR): T * C rewritten so that the
+;; multiplication disappears into T, or #f; recursion stops past depth 3
+(define muldiv-depth 0)
+(define (extract-muldiv t c wide-type)
+  (cond
+    [(> muldiv-depth 3) #f]
+    [else
+     (set! muldiv-depth (add1 muldiv-depth))
+     (begin0 (with-handlers ([(lambda (e) #t) (lambda (e) (set! muldiv-depth (sub1 muldiv-depth)) (raise e))])
+               (extract-muldiv-1 t c wide-type))
+             (set! muldiv-depth (sub1 muldiv-depth)))]))
+(define (expression-class? x)
+  (and (Tree? x) (memq (tree-code-class (gs) (tree-code x)) '(tcc_comparison tcc_unary tcc_binary tcc_vl_exp tcc_expression)) #t))
+;; TREE_OVERFLOW of a constant folded in type T (unsigned arithmetic wraps silently)
+(define (cst-overflow? ovf t) (and ovf (not (ty-uns? t)) (not (ty-ptr? t))))
+(define (extract-muldiv-1 t c wide-type)
+  (define type (tree-type t))
+  (define tcode (tree-code t))
+  (define ctype (if (and wide-type (> (ty-prec wide-type) (ty-prec type))) wide-type type))
+  (define (op i) (tree-operand t i))
+  (cond
+    [(integer-zerop c) #f]
+    [else
+     (case tcode
+       [(integer_cst)
+        (define-values (tem ovf) (const-binop 'mult_expr ctype (gf-convert ctype t) (gf-convert ctype c)))
+        (and tem (not (cst-overflow? ovf ctype)) tem)]
+       [(nop_expr convert_expr non_lvalue_expr)
+        (define op0 (op 0))
+        (define it (tree-type op0))
+        (cond
+          [(not (ty-int? it)) #f]
+          [(and (expression-class? op0)
+                (or (and (ty-wraps? it) (> (ty-prec ctype) (ty-prec it)))
+                    (< (ty-prec type) (ty-prec it))
+                    (and (ty-undef? it) (not (ty-undef? type)))))
+           #f]
+          [else
+           (define cv (signed-or-unsigned (icst-val c) (tree-type c)))
+           (define t2 (gf-convert it c))
+           (and (icst? t2)
+                (not (and (not (ty-uns? it)) (not (int-fits-type? cv it))))       ; TREE_OVERFLOW of the conversion
+                (extract-muldiv op0 t2 ctype))])]
+       [(negate_expr)
+        (define t1 (extract-muldiv (op 0) c wide-type))
+        (and t1 (gf-build1 'negate_expr ctype (gf-convert ctype t1)))]
+       [(plus_expr minus_expr)
+        (define op0 (op 0)) (define op1 (op 1))
+        (define t1 (extract-muldiv op0 c wide-type))
+        (define t2 (extract-muldiv op1 c wide-type))
+        (cond
+          [(and t1 t2 (ty-wraps? ctype))
+           (gf-build2 tcode ctype (gf-convert ctype t1) (gf-convert ctype t2))]
+          [else
+           ;; a subtraction becomes an addition of the negated operand
+           (define-values (tc o0 o1)
+             (cond
+               [(eq? tcode 'minus_expr)
+                (define n1 (gf-negate op1))
+                (if (icst? op0) (values 'plus_expr n1 op0) (values 'plus_expr op0 n1))]
+               [else (values tcode op0 op1)]))
+           (cond
+             [(not (icst? o1)) #f]
+             [else
+              (define-values (m ovf) (const-binop 'mult_expr ctype (gf-convert ctype o1) (gf-convert ctype c)))
+              (cond
+                [(or (not m) (and (cst-overflow? ovf ctype) (not (ty-wraps? ctype)))) #f]
+                [(and (ty-uns? ctype) (not (eqv? ctype type))) #f]
+                [(and (ty-wraps? ctype)
+                      (let ([cv (abs (signed-or-unsigned (icst-val c) (tree-type c)))])
+                        (not (and (< cv (arithmetic-shift 1 63)) (= 1 (bit-count* cv))))))
+                 (gf-build2 tc ctype (gf-build2 'mult_expr ctype (gf-convert ctype o0) (gf-convert ctype c)) m)]
+                [else #f])])])]
+       [(mult_expr exact_div_expr)
+        (define op0 (op 0)) (define op1 (op 1))
+        (cond
+          [(and (eq? tcode 'mult_expr) (ty-wraps? ctype) (extract-muldiv op0 c wide-type))
+           => (lambda (t1) (gf-build2 tcode ctype (gf-convert ctype t1) (gf-convert ctype op1)))]
+          [(and (eq? tcode 'mult_expr) (ty-wraps? ctype) (extract-muldiv op1 c wide-type))
+           => (lambda (t1) (gf-build2 tcode ctype (gf-convert ctype op0) (gf-convert ctype t1)))]
+          [(not (icst? op1)) #f]
+          [(eq? tcode 'mult_expr)
+           ;; the same operation: associate when the product does not overflow
+           (define prec (ty-prec ctype))
+           (define uns (ty-uns? ctype))
+           (define a (if uns (icst-val op1) (signed-of (icst-val op1) prec)))
+           (define b (if uns (icst-val c) (signed-of (icst-val c) prec)))
+           (define mul (* a b))
+           (define ovf (not (if uns (< mul (arithmetic-shift 1 prec)) (and (>= mul (ty-min ctype)) (<= mul (ty-max ctype))))))
+           (if (and ovf (not uns)) #f (gf-build2 tcode ctype (gf-convert ctype op0) (icst ctype mul)))]
+          [(ty-undef? ctype)
+           ;; (A /[ex] C1) * C: one constant a multiple of the other
+           (define a (icst-val op1)) (define b (icst-val c))
+           (cond
+             [(and (not (zero? b)) (zero? (remainder a b)))
+              (gf-build2 tcode ctype (gf-convert ctype op0) (gf-convert ctype (icst (tree-type op1) (quotient a b))))]
+             [(and (not (zero? a)) (zero? (remainder b a)))
+              (gf-build2 'mult_expr ctype (gf-convert ctype op0) (gf-convert ctype (icst (tree-type c) (quotient b a))))]
+             [else #f])]
+          [else #f])]
+       [else #f])]))
+(define (signed-or-unsigned v t) (if (ty-uns? t) v (signed-of v (ty-prec t))))
+(define (bit-count* n) (let loop ([n n] [k 0]) (if (zero? n) k (loop (arithmetic-shift n -1) (+ k (bitwise-and n 1))))))
+
 ;; the fold-const.cc cases after generic_simplify
 (define (fold-binary-cases code t op0 op1 arg0 arg1)
   (case code
+    [(mult_expr)
+     (cond
+       [(ty-int? t)
+        (cond
+          ;; x * -C -> -x * C if x is easily negatable
+          [(and (icst? op1) (< (signed-or-unsigned (icst-val op1) (tree-type op1)) 0)
+                (negate-expr-p op0) (negate-expr-p op1)
+                (let ([tem (gf-negate op1)]) (and (icst? tem) (not (eq? tem op1)) tem)))
+           => (lambda (tem) (gf-build2 'mult_expr t (gf-convert t (gf-negate op0)) tem))]
+          [(and (icst? arg1) (extract-muldiv op0 arg1 #f)) => (lambda (tem) (gf-convert t tem))]
+          [else #f])]
+       [else #f])]
     [(plus_expr minus_expr)
      (cond
        ;; A - CST -> A + -CST
