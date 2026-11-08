@@ -1201,12 +1201,15 @@
 ;; at most param_avg_loop_niter (10); the bounds were recorded by cunroll
 (define (avg-loop-niter)
   (define l (D-loop (data)))
-  (define e (estimated-loop-iterations l))
+  ;; *_stmt_executions_int: the bound + 1, -1 when it does not fit a
+  ;; signed HOST_WIDE_INT
+  (define (hwi+1 n) (and n (< (add1 n) (expt 2 63)) (add1 n)))
+  (define e (hwi+1 (estimated-loop-iterations l)))
   (cond
-    [e (add1 e)]
+    [e e]
     [else
-     (define lk (likely-max-loop-iterations l))
-     (if (or (not lk) (> (add1 lk) 10)) 10 (add1 lk))]))
+     (define lk (hwi+1 (likely-max-loop-iterations l)))
+     (if (or (not lk) (> lk 10)) 10 lk)]))
 ;; adjust_setup_cost
 (define (adjust-setup-cost cost [round-up #f])
   (cond

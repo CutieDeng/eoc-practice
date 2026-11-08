@@ -57,7 +57,7 @@
          (only-in "loop-bounds.rkt" loop-bound lbnd-upper)
          "generic-fold.rkt")
 
-(provide with-loops ctx-loops ctx-cfg loop-num loop-by-num bb-loop loop-depth loop-outer nested-in? single-exit
+(provide scev-probably-wraps? with-loops ctx-loops ctx-cfg loop-num loop-by-num bb-loop loop-depth loop-outer nested-in? single-exit
          loop-exit-edges loop-preheader-src
          chrec-dont-know? auto-chrec? poly? chrec-var chrec-left chrec-right chrec-type
          build-polynomial-chrec chrec-fold-plus chrec-fold-minus chrec-fold-multiply chrec-convert chrec-convert-rhs
@@ -1186,7 +1186,8 @@
      (cond
        [(or (chrec-contains-undetermined? ev) (chrec-contains-symbols-defined-in-loop? ev (loop-num wrto))) #f]
        [(not (tree-contains-chrecs? ev))
-        (define et (if (ty-ptr? (tree-type ev)) (sizetype (gs)) (tree-type ev)))
+        ;; GCC 15 gives an invariant pointer IV a sizetype step, GCC 12 one of the pointer type
+        (define et (if (and (ty-ptr? (tree-type ev)) (>= (gcc-major-version (gs)) 15)) (sizetype (gs)) (tree-type ev)))
         (affine-iv ev (icst et 0) #t)]
        [(not (poly? ev)) #f]
        [(not (= (chrec-var ev) (loop-num wrto))) #f]
@@ -1203,7 +1204,9 @@
 
 ;; iv_can_overflow_p (GCC 15 form; GCC 12 is the same for SSA names and
 ;; constants): the base and step ranges against the loop's recorded
-;; upper bound on the number of iterations
+;; upper bound on the number of iterations.  Not ported: the range of an
+;; expression base or step (get_tree_range folds BINARY_CLASS_P /
+;; UNARY_CLASS_P operands through range-op): such an IV can overflow.
 (define (iv-can-overflow? l type base step)
   (define (range-of x)
     (cond
@@ -1229,9 +1232,11 @@
             (and (or (ty-uns? type) (>= (cdr sr) 0))
                  (let ([m (* (bitwise-and (cdr sr) mask) nit1)])
                    (or (> (integer-length m) prec) (> m (- tmax (cdr br))))))
+            ;; wi::neg (step_min) overflows for the type minimum
             (and (not (ty-uns? type)) (< (car sr) 0)
-                 (let ([m (* (- (car sr)) nit1)])
-                   (or (> (integer-length m) prec) (> m (- (car br) tmin))))))])]))
+                 (or (= (car sr) tmin)
+                     (let ([m (* (- (car sr)) nit1)])
+                       (or (> (integer-length m) prec) (> m (- (car br) tmin)))))))])]))
 
 ;; number_of_iterations_cond: niter-desc or #f
 (define (number-of-iterations-cond l type iv0* code* iv1* only-exit every-iteration)

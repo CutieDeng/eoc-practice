@@ -33,11 +33,23 @@
 ;; ... does not wrap ...", "Found better loop bound", "Reducing loop
 ;; iteration estimate by 1 ...").
 ;;
+;; Estimation is triggered where GCC asks for a bound with SCEV
+;; initialized: predict_loops (profile.rkt), finite_function_p
+;; (pure-const.rkt), ch (GCC >= 14), ivcanon and cunroll; the loops of
+;; a function in loops_list (fn, 0) preorder.  estimate-one-loop returns
+;; loop->bounds.  maybe_lower_iteration_bound treats leaving an inner
+;; loop that finite_loop_p cannot prove finite as an exit.
+;; tree_expr_nonnegative_p is the structural fold-const.cc walk (no
+;; range information).  array_ref_flexible_size_p decides whether an
+;; array bound is an upper bound.
+;;
 ;; Not ported: the profile-based estimate (a guessed profile is never
 ;; reliable), __builtin_expect_with_probability bounds,
 ;; record_control_iv / record_nonwrapping_chrec (the scev nowrap
-;; caches), array_ref_flexible_size_p beyond "no upper bound in the
-;; domain", irreducible regions.
+;; caches), loop_exits_before_overflow inside scev_probably_wraps_p
+;; (scev.rkt approximates it with the latch count), irreducible regions,
+;; the profile quality (a count of 0 is taken as profile_count::zero),
+;; tree_call_nonnegative_warnv_p (calls are not known nonnegative).
 ;; ============================================================
 
 (require racket/list
@@ -53,11 +65,12 @@
          "scev.rkt"
          "irange.rkt"
          "loop-bounds.rkt"
+         (only-in "simplify.rkt" get-addr-base-and-unit-offset)
          (only-in "range-info.rkt" gimple-range-global)
          (only-in "../print.rkt" print-expr print-type stmt->string))
 
 (provide estimate-numbers-of-iterations! max-loop-iterations likely-max-loop-iterations estimated-loop-iterations
-         estimate-all-loops estimate-one-loop)
+         estimate-all-loops estimate-one-loop single-likely-exit record-constant-niter!)
 
 ;; estimate_numbers_of_iterations for every loop of CFG, in
 ;; loops_list (fn, 0) preorder, in a fresh context: -> st
@@ -152,6 +165,12 @@
     (when (icst? nb)
       (gs! (set-loop-upper-bound (gs) (ctx-decl) (loop-num l) (icst-val nb))))))
 
+;; canonicalize_loop_induction_variables keeps a constant iteration
+;; count found for EXIT (by scev or by evaluation) as a bound, realistic
+;; when EXIT is the single likely exit
+(define (record-constant-niter! l niter exit)
+  (record-niter-bound! l niter (equal? exit (single-likely-exit l (loop-exit-edges l))) #t))
+
 ;; single_likely_exit: the single exit, else the only exit that is not
 ;; probably never executed (probably_never_executed_edge_p: its source's
 ;; count is zero or its probability never; the profile quality is not
@@ -171,6 +190,23 @@
            [else ex])))]))
 ;; profile_probability::very_unlikely: RDIV (2^27, 2000) = 67109, then m_val--
 (define VERY-UNLIKELY (sub1 (quotient (+ 134217728 1000) 2000)))
+
+;; finite_loop_p within the estimation (max_loop_iterations estimates the
+;; loop).  GCC 15 first trusts loop->finite_p for a loop with an exit
+;; (the 'finite-loops declaration flag) and records a proof in it; GCC 12
+;; looks at finite_p last (only -ffinite-loops sets it for C).
+(define (finite-loop? l2)
+  (define st (gs)) (define fn (ctx-decl))
+  (define v15? (>= (gcc-major-version st) 15))
+  (define finite-p (and v15? (memv (loop-num l2) (decl-flag st fn 'finite-loops '())) #t))
+  (define flags (decl-ecf-flags st fn))
+  (define (proved!) (when (and v15? (not finite-p)) (gs! (set-decl-flag (gs) fn 'finite-loops (cons (loop-num l2) (decl-flag (gs) fn 'finite-loops '()))))) #t)
+  (cond
+    [(and finite-p (pair? (loop-exit-edges l2))) #t]
+    [(and (not (zero? (bitwise-and flags (bitwise-ior ECF-CONST ECF-PURE)))) (zero? (bitwise-and flags ECF-LOOPING))) (proved!)]
+    [(max-loop-iterations l2) (proved!)]
+    [finite-p #f]
+    [else (estimate-numbers-of-iterations! l2) (and (max-loop-iterations l2) (proved!))]))
 
 ;; ---- undefined behavior ---------------------------------------------------
 ;; infer_loop_bounds_from_signedness
@@ -236,13 +272,63 @@
         (walk (tree-operand t 0))))))
 (define (reference-class? t) (memq (tree-code t) '(array_ref array_range_ref component_ref bit_field_ref mem_ref target_mem_ref indirect_ref realpart_expr imagpart_expr view_convert_expr)))
 (define (handled-component? t) (memq (tree-code t) '(array_ref array_range_ref component_ref bit_field_ref realpart_expr imagpart_expr view_convert_expr)))
+;; array_ref_flexible_size_p (GCC 15) / array_at_struct_end_p (GCC 12),
+;; the same at -fstrict-flex-arrays=0 (no field is DECL_NOT_FLEXARRAY):
+;; the array of AREF may extend past its domain (a trailing array not
+;; constrained by a declared object)
+(define (array-ref-flexible-size? aref)
+  (define st (gs))
+  (define atype (tree-type (tree-operand aref 0)))
+  (define ref-to-array (tree-operand aref 0))
+  (let/ec return
+    (when (eq? (tree-code ref-to-array) 'string_cst) (return #f))
+    ;; the reference chain: a following field or an outer ARRAY_REF means
+    ;; the array is not at the end of an object
+    (define ref
+      (let loop ([r ref-to-array])
+        (case (tree-code r)
+          [(component_ref)
+           (define rec (tree-type (tree-operand r 0)))
+           (when (eq? (type-code st rec) 'record_type)
+             (define fields (for/list ([f (in-pvector (type-attr st rec 'fields (pvector-empty)))] #:when (eq? (tree-code f) 'field_decl)) f))
+             (define after (let find ([fs fields]) (cond [(null? fs) '()] [(eq? (car fs) (tree-operand r 1)) (cdr fs)] [else (find (cdr fs))])))
+             (when (pair? after) (return #f)))
+           (loop (tree-operand r 0))]
+          [(array_ref) (return #f)]
+          [(array_range_ref realpart_expr imagpart_expr bit_field_ref) (loop (tree-operand r 0))]
+          [else r])))
+    (define domain (type-attr st atype 'domain #f))
+    (define dmax (and domain (type-attr st domain 'max #f)))
+    (when (or (not (type-attr st atype 'size #f)) (not domain) (not dmax)) (return #t))
+    ;; based on a declared object: its size bounds the array
+    (define base (let loop ([t ref])
+                   (cond
+                     [(and (eq? (tree-code t) 'mem_ref) (eq? (tree-code (tree-operand t 0)) 'addr_expr)) (loop (tree-operand (tree-operand t 0) 0))]
+                     [(memq (tree-code t) '(component_ref array_ref array_range_ref realpart_expr imagpart_expr bit_field_ref view_convert_expr)) (loop (tree-operand t 0))]
+                     [else t])))
+    (define base-size (and (memq (tree-code base) '(var_decl parm_decl result_decl)) (type-attr st (tree-type base) 'size-unit #f)))
+    (cond
+      [(and base-size (icst? base-size))
+       (when (memq (tree-code ref-to-array) '(var_decl parm_decl result_decl)) (return #f))
+       (define elt-size (type-attr st (tree-type atype) 'size-unit #f))
+       (define dmin (type-attr st domain 'min #f))
+       (unless (and (icst? elt-size) (icst? dmax) (icst? dmin)) (return #t))
+       (define-values (_b off) (get-addr-base-and-unit-offset st ref-to-array))
+       (unless off (return #t))
+       ;; at least one more element fits in the object
+       (<= (* (+ (- (icst-val dmax) (icst-val dmin)) 2) (icst-val elt-size)) (- (icst-val base-size) off))]
+      [else #t])))
+(define (wrap-to-type v t)
+  (define p (ty-prec t))
+  (define m (bitwise-and v (sub1 (arithmetic-shift 1 p))))
+  (if (and (not (ty-uns? t)) (bitwise-bit-set? m (sub1 p))) (- m (arithmetic-shift 1 p)) m))
 ;; idx_infer_loop_bounds
 (define (idx-infer-loop-bounds! l bb g aref record-estimate!)
   (define arr-type (tree-type (tree-operand aref 0)))
   (define domain (type-attr (gs) arr-type 'domain #f))
   (define dmin (and domain (type-attr (gs) domain 'min #f)))
   (define dmax (and domain (type-attr (gs) domain 'max #f)))
-  (define flexible? (not (and dmax (icst? dmax))))
+  (define flexible? (array-ref-flexible-size? aref))
   (define upper? (not flexible?))
   (define idx (tree-operand aref 1))
   (define dloop (bb-loop bb))
@@ -260,10 +346,16 @@
           (define low (icst type (icst-val low0)))
           (define high (icst type (icst-val dmax)))
           (define sign? (< (signed-val step) 0))
-          (define next (+ (if sign? (icst-val low) (icst-val high)) (signed-val step)))
+          ;; fold_binary (PLUS_EXPR, type, ...) wraps in TYPE
+          (define next (wrap-to-type (+ (if sign? (icst-val low) (icst-val high)) (signed-val step)) type))
           (unless (and (<= (icst-val low) next) (<= next (icst-val high)))
-            ;; an access not executed on every iteration: scev_probably_wraps_p is not ported
-            (define upper (if (dominated-by? (loop-latch l) bb) upper? #f))
+            ;; an access not executed on every iteration: the IV must not
+            ;; wrap back into the array (scev_probably_wraps_p)
+            (define upper
+              (if (or (dominated-by? (loop-latch l) bb)
+                      (not (scev-probably-wraps? #f (initial-condition-in-loop-num ev (loop-num l)) step g l #t)))
+                  upper?
+                  #f))
             (record-nonwrapping-iv! l init step bb g low high #f upper record-estimate!)))))))
 (define (int-fits-type? v t) (and (<= (ty-min t) v) (<= v (ty-max t))))
 (define (signed-val c)
@@ -282,7 +374,14 @@
     (define base-u (gf-convert utype base0))
     (define step-u (gf-convert utype step0))
     (define r (and (ssa-name? base0) (ty-int? type) (gimple-range-global (gs) (ctx-decl) base0)))
-    (define range-ok? (and r (not (ir-varying? r)) (not (ir-undefined? r))))
+    ;; GCC 15: any range that is neither varying nor undefined (its hull);
+    ;; GCC 12: a VR_RANGE (an anti-range spans the type and is left to
+    ;; get_cst_init_from_scev)
+    (define range-ok? (and r (not (ir-varying? r)) (not (ir-undefined? r))
+                           (or (>= (gcc-major-version (gs)) 15)
+                               (not (and (= (ir-lower r) (ty-min type)) (= (ir-upper r) (ty-max type)))))))
+    ;; wi::gts_p: both sides signed at the type's precision
+    (define (sx v) (let ([p (ty-prec type)]) (let ([m (bitwise-and v (sub1 (arithmetic-shift 1 p)))]) (if (bitwise-bit-set? m (sub1 p)) (- m (arithmetic-shift 1 p)) m))))
     (define latch-dom? (dominated-by? (loop-latch l) bb))
     (define-values (delta step)
       (cond
@@ -292,7 +391,7 @@
          (define extreme (u (icst-val (gf-convert utype low))))
          (define base
            (cond
-             [(and (ssa-name? base0) (icst? high) (ty-int? type) max (> (signed-val high) max)) (u max)]
+             [(and (ssa-name? base0) (icst? high) (ty-int? type) max (> (sx (icst-val high)) (sx max))) (u max)]
              [(and (not (icst? base-u)) latch-dom?) (u (icst-val (gf-convert utype high)))]
              [(icst? base-u) (icst-val base-u)]
              [else #f]))
@@ -302,7 +401,7 @@
          (define extreme (u (icst-val (gf-convert utype high))))
          (define base
            (cond
-             [(and (ssa-name? base0) (icst? low) (ty-int? type) min (> min (signed-val low))) (u min)]
+             [(and (ssa-name? base0) (icst? low) (ty-int? type) min (> (sx min) (sx (icst-val low)))) (u min)]
              [(and (not (icst? base-u)) latch-dom?) (u (icst-val (gf-convert utype low)))]
              [(icst? base-u) (icst-val base-u)]
              [else #f]))
@@ -356,7 +455,8 @@
         (cond
           [(< cst 0)
            (define c (- cst))
-           (if (<= bnd (- max c)) max (+ bnd c))]
+           ;; wi::leu_p (bnd, max - cst): unsigned, a negative difference is huge
+           (if (or (< (- max c) 0) (<= bnd (- max c))) max (+ bnd c))]
           [(< bnd cst) max]
           [(and (ty-uns? type)
                 (let ([tem (gf-binary 'ge_expr (boolean-type (gs)) op0 (icst type cst))])
@@ -373,25 +473,110 @@
          max)]
     [else max]))
 
-;; tree_expr_nonnegative_p (the cases derive_constant_upper_bound meets)
-(define (tree-expr-nonnegative? t)
+;; tree_expr_nonnegative_warnv_p (fold-const.cc, the same in 12.5 and
+;; 15.2 for integer types): structural, no range information; an SSA
+;; name is looked through its definition (gimple_stmt_nonnegative_warnv_p)
+;; while the depth is below param_max_ssa_name_query_depth (3), each
+;; operand step adding one.  Calls (tree_call_nonnegative_warnv_p) are
+;; not ported: #f.
+(define MAX-SSA-NAME-QUERY-DEPTH 3)
+(define (unsigned-type? t) (or (ty-ptr? t) (and (ty-int? t) (ty-uns? t))))
+(define (truth-value-code? code)
+  (or (eq? (tree-code-class (gs) code) 'tcc_comparison)
+      (memq code '(truth_and_expr truth_andif_expr truth_or_expr truth_orif_expr truth_xor_expr truth_not_expr))))
+;; tree_simple_nonnegative_warnv_p
+(define (simple-nonnegative? code type)
+  (and (or (not (= 1 (ty-prec type))) (unsigned-type? type)) (truth-value-code? code) #t))
+(define (tree-expr-nonnegative? t [depth 0])
   (define type (tree-type t))
+  (define code (tree-code t))
+  (define (rec x) (tree-expr-nonnegative? x (add1 depth)))
   (cond
-    [(icst? t) (>= (signed-val t) 0)]
-    [(and (ty-int? type) (ty-uns? type)) #t]
-    [(ssa-name? t)
-     (define r (and (ty-int? type) (gimple-range-global (gs) (ctx-decl) t)))
-     (and r (not (ir-undefined? r)) (>= (ir-lower r) 0))]
+    [(unsigned-type? type) #t]
+    [else
+     (case (tree-code-class (gs) code)
+       [(tcc_binary tcc_comparison) (binary-nonnegative? code type (tree-operand t 0) (tree-operand t 1) depth)]
+       [(tcc_unary) (unary-nonnegative? code type (tree-operand t 0) depth)]
+       [(tcc_constant tcc_declaration tcc_reference) (single-nonnegative? t depth)]
+       [else
+        (case code
+          [(truth_and_expr truth_or_expr truth_xor_expr) (binary-nonnegative? code type (tree-operand t 0) (tree-operand t 1) depth)]
+          [(truth_not_expr) (unary-nonnegative? code type (tree-operand t 0) depth)]
+          [(cond_expr constructor addr_expr ssa_name) (single-nonnegative? t depth)]
+          [else (simple-nonnegative? code type)])])]))
+;; tree_unary_nonnegative_warnv_p
+(define (unary-nonnegative? code type op0 depth)
+  (define (rec x) (tree-expr-nonnegative? x (add1 depth)))
+  (cond
+    [(unsigned-type? type) #t]
+    [else
+     (case code
+       [(abs_expr) (or (not (ty-int? type)) (ty-undef? type))]
+       [(non_lvalue_expr float_expr fix_trunc_expr) (rec op0)]
+       [(nop_expr convert_expr)
+        (define inner (tree-type op0))
+        (cond
+          [(and (ty-int? type) (or (ty-int? inner) (ty-ptr? inner)))
+           (and (< (ty-prec inner) (ty-prec type)) (unsigned-type? inner))]
+          [else #f])]
+       [else (simple-nonnegative? code type)])]))
+;; tree_binary_nonnegative_warnv_p
+(define (binary-nonnegative? code type op0 op1 depth)
+  (define (rec x) (tree-expr-nonnegative? x (add1 depth)))
+  (define (nop? x) (eq? (tree-code x) 'nop_expr))
+  (cond
+    [(unsigned-type? type) #t]
+    [else
+     (case code
+       [(pointer_plus_expr plus_expr)
+        ;; zero extensions of two unsigned values at least 2 bits shorter
+        (cond
+          [(and (ty-int? type) (nop? op0) (nop? op1)
+                (let ([i1 (tree-type (tree-operand op0 0))] [i2 (tree-type (tree-operand op1 0))])
+                  (and (ty-int? i1) (ty-uns? i1) (ty-int? i2) (ty-uns? i2))))
+           (< (add1 (max (ty-prec (tree-type (tree-operand op0 0))) (ty-prec (tree-type (tree-operand op1 0))))) (ty-prec type))]
+          [else #f])]
+       [(mult_expr)
+        (cond
+          [(and (ty-undef? type) (or (operand-equal? op0 op1) (and (rec op0) (rec op1)))) #t]
+          [(and (ty-int? type) (or (nop? op0) (icst? op0)) (or (nop? op1) (icst? op1)))
+           (define (inner x) (if (nop? x) (tree-type (tree-operand x 0)) (tree-type x)))
+           (define (uns? x) (or (unsigned-type? (inner x)) (and (icst? x) (>= (signed-val x) 0))))
+           (define (prec x) (if (icst? x) (max 1 (integer-length (icst-val x))) (ty-prec (inner x))))
+           (and (ty-int? (inner op0)) (uns? op0) (ty-int? (inner op1)) (uns? op1)
+                (< (+ (prec op0) (prec op1)) (ty-prec type)))]
+          [else #f])]
+       [(bit_and_expr max_expr) (or (rec op0) (rec op1))]
+       [(bit_ior_expr bit_xor_expr min_expr rdiv_expr trunc_div_expr ceil_div_expr floor_div_expr round_div_expr)
+        (and (rec op0) (rec op1))]
+       [(trunc_mod_expr) (rec op0)]
+       [(floor_mod_expr) (rec op1)]
+       [else (simple-nonnegative? code type)])]))
+;; tree_single_nonnegative_warnv_p
+(define (single-nonnegative? t depth)
+  (define (rec x) (tree-expr-nonnegative? x (add1 depth)))
+  (cond
+    [(unsigned-type? (tree-type t)) #t]
     [else
      (case (tree-code t)
-       [(nop_expr convert_expr)
-        (define inner (tree-type (tree-operand t 0)))
-        (or (and (ty-int? inner) (ty-uns? inner) (< (ty-prec inner) (ty-prec type)))
-            (tree-expr-nonnegative? (tree-operand t 0)))]
-       [(plus_expr mult_expr)
-        (and (ty-undef? type) (tree-expr-nonnegative? (tree-operand t 0)) (tree-expr-nonnegative? (tree-operand t 1)))]
-       [(cond_expr) (and (tree-expr-nonnegative? (tree-operand t 1)) (tree-expr-nonnegative? (tree-operand t 2)))]
-       [else #f])]))
+       [(integer_cst) (>= (signed-val t) 0)]
+       [(cond_expr) (and (rec (tree-operand t 1)) (rec (tree-operand t 2)))]
+       [(ssa_name) (and (< depth MAX-SSA-NAME-QUERY-DEPTH) (stmt-nonnegative? (def-stmt-of t) depth))]
+       [else (simple-nonnegative? (tree-code t) (tree-type t))])]))
+;; gimple_stmt_nonnegative_warnv_p
+(define (stmt-nonnegative? g depth)
+  (cond
+    [(not g) #f]
+    [(gassign? g)
+     (define code (gassign-code g))
+     (define type (tree-type (gassign-lhs g)))
+     (case (gimple-rhs-class (gs) code)
+       [(unary) (unary-nonnegative? code type (gassign-rhs1 g) depth)]
+       [(binary) (binary-nonnegative? code type (gassign-rhs1 g) (gassign-rhs2 g) depth)]
+       [(single) (single-nonnegative? (gassign-rhs1 g) depth)]
+       [else #f])]
+    [(gphi? g) (for/and ([a (in-pvector (gphi-args g))]) (single-nonnegative? (cdr a) (add1 depth)))]
+    [else #f]))
 
 ;; ---- discover_iteration_bound_by_body_walk ----------------------------------
 (define (discover-iteration-bound-by-body-walk! l records)
@@ -472,11 +657,14 @@
              [stmt-found (loop (cdr queue))]
              [else
               (let/ec return
+                (define father (bb-loop bb))
                 (define more
                   (for/fold ([acc '()]) ([e (in-pvector (cfg-succs cfg bb))])
                     (define d (GEdge-dest e))
                     (cond
                       [(or (not (loop-inside? l d)) (and (= bb latch) (= d (Loop-header l)))) (return #t)]
+                      ;; leaving an inner loop that may be infinite
+                      [(and father (not (loop-inside? father d)) (not (finite-loop? father))) (return #t)]
                       [(hash-ref visited d #f) acc]
                       [else (hash-set! visited d #t) (cons d acc)])))
                 (loop (append more (cdr queue))))])])))

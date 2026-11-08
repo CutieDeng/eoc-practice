@@ -52,7 +52,7 @@
          (only-in "mfn.rkt" stmt-def-names)
          (only-in "range-info.rkt" copy-range-info)
          "generic-fold.rkt"
-         (only-in "niter-bounds.rkt" estimate-all-loops)
+         (only-in "niter-bounds.rkt" estimate-all-loops record-constant-niter! max-loop-iterations)
          "scev.rkt"
          "update-ssa.rkt")
 
@@ -122,12 +122,11 @@
       [else
        (define-values (n e) (if exit0 (values niter0 exit0) (find-loop-niter l)))
        (values n (and (Tree? n) (icst? n) e))]))
-  ;; max_loop_iterations_int: the exit bounds (record_estimate)
-  (define maxiter
-    (for/fold ([m #f]) ([ex (in-list (loop-exit-edges l))])
-      (define dd (number-of-iterations-exit l ex))
-      (define mx (and dd (niter-desc-max dd)))
-      (cond [(not mx) m] [(not m) mx] [else (min m mx)])))
+  ;; a constant count is kept as a bound (record_niter_bound), then
+  ;; max_loop_iterations_int reads the recorded upper bound (the loops
+  ;; were estimated at the start of this iteration)
+  (when (and (Tree? niter) (icst? niter)) (record-constant-niter! l (icst-val niter) exit))
+  (define maxiter (max-loop-iterations l))
   ;; try_unroll_loop_completely (UL_NO_GROWTH, allow_peel)
   (define-values (n-unroll edge-to-cancel0 exit1)
     (cond

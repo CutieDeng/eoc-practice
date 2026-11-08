@@ -33,7 +33,7 @@
          "ssa-ops.rkt"
          "generic-fold.rkt"
          "scev.rkt"
-         (only-in "niter-bounds.rkt" estimate-all-loops))
+         (only-in "niter-bounds.rkt" estimate-all-loops record-constant-niter!))
 
 (provide ivcanon-pass create-iv)
 
@@ -80,6 +80,8 @@
              (let-values ([(n e) (find-loop-niter-by-eval l)]) (if (icst? n) (values n e) (values n e2)))
              (values n2 e2)))
        (values n3 (and (icst? n3) e3))]))
+  ;; a constant count is kept as a bound (record_niter_bound)
+  (when (and (Tree? niter) (icst? niter)) (record-constant-niter! l (icst-val niter) exit))
   ;; try_unroll_loop_completely (UL_SINGLE_ITER) is a no-op for N > 0
   (and exit (icst? niter) (not (and may-be-zero (icst? niter0)))
        (just-once-each-iteration? l (car exit))
