@@ -20,13 +20,19 @@
 ;;      (mark_all_reaching_defs_necessary);
 ;;   3. eliminate_unnecessary_stmts: unnecessary statements removed
 ;;      (clobbers stay unless an operand died), unused call results
-;;      dropped, dead PHIs removed, degenerate virtual PHIs propagated.
+;;      dropped (the name released at that point of the walk), dead
+;;      PHIs removed, degenerate virtual PHIs propagated (their uses in
+;;      immediate-use order).  The blocks come from a freshly computed
+;;      dominator tree (sons in block-chain order); GCC reuses the
+;;      dominators when they are available, whose son order reflects
+;;      earlier incremental updates (not modelled).
 ;; Something removed -> TODO_cleanup_cfg; GCC >= 15 also asks for
 ;; TODO_remove_unused_locals (the pass table carries that).
 ;;
 ;; Not ported: the aggressive (control dependence) mode, allocation
-;; pairs (malloc/free, new/delete), atomics, the chain-overflow
-;; heuristic, debug statements.
+;; pairs (malloc/free, new/delete; an unused malloc result is dropped
+;; here, GCC keeps it: is_removable_allocation_p), atomics, the
+;; chain-overflow heuristic, debug statements.
 ;; ============================================================
 
 (require racket/list
@@ -178,8 +184,11 @@
              (mfn-unlink-vdef! m id)
              (mfn-remove! m id))]
           [(and (gcall? g) (ssa-name? (gcall-lhs g)) (not (hash-ref processed (ssa-name-version (gcall-lhs g)) #f)))
+           ;; "Deleting LHS of call": gimple_call_set_lhs (NULL), then
+           ;; release_ssa_name at this point of the walk
            (set! something-changed #t)
-           (mfn-replace! m id (gcall (gcall-loc g) (gcall-flags g) #f (gcall-fn g) (gcall-args g) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g)))]
+           (mfn-replace! m id (gcall (gcall-loc g) (gcall-flags g) #f (gcall-fn g) (gcall-args g) (gcall-fntype g) (gcall-internal? g) (gcall-ecf g)))
+           (set! released (cons (ssa-name-version (gcall-lhs g)) released))]
           [else (void)])
         (loop prev)))
     ;; remove_dead_phis
@@ -194,7 +203,8 @@
              [(and (not keep-degenerate-vphis?) (for/and ([a (in-list (cdr args))]) (equal? a (car args))))
               ;; degenerate: its uses take the argument
               (define vuse (car args))
-              (for ([uid (in-list (mfn-use-ids m res))])
+              ;; FOR_EACH_IMM_USE_STMT order
+              (for ([uid (in-list (mfn-imm-uses m res))])
                 (define ug (mfn-stmt m uid))
                 (define (f t) (if (and (ssa-name? t) (ssa-name=? t res)) vuse t))
                 (mfn-replace! m uid

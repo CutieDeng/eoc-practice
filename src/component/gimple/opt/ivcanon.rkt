@@ -29,6 +29,7 @@
          "../tree.rkt"
          "../gimple.rkt"
          "../cfg.rkt"
+         (only-in "loops.rkt" loops-innermost-first loops-preorder)
          "ssa-ops.rkt"
          "generic-fold.rkt"
          "scev.rkt"
@@ -42,7 +43,7 @@
   (define cfg (cfg-clear-messages cfg0))
   (define headers
     (let-values ([(r s) (with-loops st fndecl cfg
-                          (lambda () (for/list ([l (in-list (sort (ctx-loops) > #:key Loop-depth))]) (Loop-header l))))])
+                          (lambda () (for/list ([l (in-list (loops-innermost-first (ctx-loops)))]) (Loop-header l))))])
       r))
   (for ([h (in-list headers)])
     (define-values (plan st1)

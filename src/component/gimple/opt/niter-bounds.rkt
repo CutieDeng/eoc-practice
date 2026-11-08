@@ -47,6 +47,7 @@
          "../tree.rkt"
          "../gimple.rkt"
          "../cfg.rkt"
+         (only-in "loops.rkt" loops-innermost-first loops-preorder)
          "ssa-ops.rkt"
          "generic-fold.rkt"
          "scev.rkt"
@@ -58,13 +59,13 @@
 (provide estimate-numbers-of-iterations! max-loop-iterations likely-max-loop-iterations estimated-loop-iterations
          estimate-all-loops)
 
-;; estimate_numbers_of_iterations for every loop of CFG, innermost
-;; first, in a fresh context: -> st
+;; estimate_numbers_of_iterations for every loop of CFG, in
+;; loops_list (fn, 0) preorder, in a fresh context: -> st
 (define (estimate-all-loops st decl cfg #:only [only (lambda (l) #t)])
   (define-values (_r st1)
     (with-loops st decl cfg
       (lambda ()
-        (for ([l (in-list (sort (sort (ctx-loops) < #:key Loop-num) > #:key Loop-depth))] #:when (only l))
+        (for ([l (in-list (loops-preorder (ctx-loops)))] #:when (only l))
           (estimate-numbers-of-iterations! l)))))
   st1)
 

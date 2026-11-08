@@ -42,6 +42,7 @@
          "../tree.rkt"
          "../gimple.rkt"
          "../cfg.rkt"
+         (only-in "loops.rkt" loops-innermost-first loops-preorder)
          (only-in "../ssa.rkt" stmt-vuse stmt-vdef)
          (only-in "../print.rkt" print-cond-rhs)
          (only-in "../gimplify.rkt" is-gimple-min-invariant)
@@ -107,7 +108,7 @@
 ;; that canonicalize_loop_induction_variables (create_iv = false,
 ;; UL_NO_GROWTH, no brute-force evaluation) decides to unroll, as a plan
 (define (unroll-plan)
-  (for/or ([l (in-list (sort (ctx-loops) > #:key Loop-depth))])
+  (for/or ([l (in-list (loops-innermost-first (ctx-loops)))])
     (try-plan l)))
 
 (define (try-plan l)

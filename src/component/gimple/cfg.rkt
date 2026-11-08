@@ -578,9 +578,10 @@
 
 ;; remove_bb + delete_basic_block
 (define (delete-basic-block c i)
-  ;; remove_bb: the PHI results, then the definitions of the statements, are released
+  ;; remove_bb: the statements from last to first (release_defs: the VDEF,
+  ;; then the LHS), then the PHI results (remove_phi_nodes) are released
+  (for* ([g (in-list (reverse (pvector->list (stmts c i))))] [d (in-list (stmt-defs-for-release g))]) (log-ssa-release! (ssa-name-version d)))
   (for ([ph (in-pvector (GBlock-phis (cfg-block c i)))]) (log-ssa-release! (ssa-name-version (gphi-result ph))))
-  (for* ([g (in-pvector (stmts c i))] [d (in-list (stmt-defs-for-release g))]) (log-ssa-release! (ssa-name-version d)))
   (let* ([c (dump c "Removing basic block ~a" i)]
          [c (set-stmts c i (pvector-empty))]
          [c (for/fold ([c c]) ([src (in-pvector (cfg-preds c i))]) (remove-edge c src i))]
@@ -1283,13 +1284,23 @@
                     (if (and a b) (hash-set h (cons a b) v) h))))))
   (GCfg blocks edges l->bb (GCfg-next-label-uid c) (GCfg-messages c) intbits-empty intbits-empty prof #f))
 
-;; cleanup_tree_cfg_noloop: (values cfg st)
+;; cleanup_tree_cfg_noloop: (values cfg st).  Not ported: the
+;; loop-header forwarder blocks created at its start
+;; (make_forwarder_block for headers with several entries) and
+;; repair_loop_structures (LOOPS_NEED_FIXUP, then LCSSA repair).
 ;; AFTER-PRE: the SSA update of the TODO flags, run once the control
-;; flow is cleaned (cleanup_tree_cfg_noloop's update_ssa): (st cfg) -> (values cfg st)
+;; flow is cleaned (cleanup_tree_cfg_noloop's update_ssa):
+;; (st cfg pre-released) -> (values cfg st), PRE-RELEASED the versions
+;; the pre phase released (removed blocks), in order
 (define (cleanup-tree-cfg st0 c cond->string #:after-pre [after-pre #f])
   (define c0 (cfg-set-altered c intbits-empty))
+  (define (logged) (let ([b (ssa-pass-log)]) (if b (hash-ref (unbox b) 'released '()) '())))
+  (define logged0 (length (logged)))
   (define-values (_changed c1a) (cleanup-control-flow-pre st0 c0 cond->string))
-  (define-values (c1 st) (if after-pre (after-pre st0 c1a) (values c1a st0)))
+  ;; the names released by the pre phase, in release order: the hook
+  ;; (update_ssa) releases the unregistered ones before its own
+  (define pre-released (let ([l (logged)]) (reverse (take l (- (length l) logged0)))))
+  (define-values (c1 st) (if after-pre (after-pre st0 c1a pre-released) (values c1a st0)))
   (define-values (c2 st2)
     (for/fold ([c c1] [st st] #:result (values c st)) ([i (in-range 2 (last-basic-block c1))])
       (cond

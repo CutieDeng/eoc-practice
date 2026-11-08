@@ -45,6 +45,7 @@
          (only-in "mfn.rkt" stmt-use-names stmt-def-names)
          (only-in "range-info.rkt" copy-range-info)
          "loops.rkt"
+         "gcc-sort.rkt"
          "update-ssa.rkt"
          (only-in "../print.rkt" print-cond-rhs))
 
@@ -126,9 +127,15 @@
   (cond
     [(zero? (hash-count names)) (values cfg st)]
     [else
-     ;; add_exit_phis: the names sorted by the number of their definition loop
+     ;; add_exit_phis: GCC >= 13 sorts the (definition loop, version) pairs
+     ;; by loop number with gcc_qsort (not stable: equal loops in a leaf of
+     ;; 4 or 5 change order); GCC 12 takes the names in version order
      (define sorted
-       (sort (sort (hash-keys names) <) < #:key (lambda (v) (Loop-num (loop-father (hash-ref def-bb v))))))
+       (if virtuals?
+           (map cdr (gcc-qsort (for/list ([v (in-list (sort (hash-keys names) <))])
+                                 (cons (Loop-num (loop-father (hash-ref def-bb v))) v))
+                               (lambda (a b) (- (car a) (car b)))))
+           (sort (hash-keys names) <)))
      (define table '())
      (define multiple? #f)
      (define stamp (cfg-next-stamp cfg))
@@ -178,7 +185,9 @@
                                                      (GBlock-phis b)
                                                      (gphi #f (hasheq 'arg-stamps (for/pvector ([p (in-pvector preds)]) (fresh-stamp!)))
                                                            (ssa-name-var var) n (for/pvector ([p (in-pvector preds)]) (cons p var)))))))))
-     (update-ssa st decl cfg (reverse table) #:phis? multiple?)]))
+     ;; GCC >= 13: TODO_update_ssa only when a name needed several LC PHIs
+     ;; (need_phis_p), else TODO_update_ssa_no_phi; GCC 12 always TODO_update_ssa
+     (update-ssa st decl cfg (reverse table) #:phis? (or (not virtuals?) multiple?))]))
 
 ;; ------------------------------------------------------------
 ;; pass_tree_loop_done
@@ -207,18 +216,23 @@
                [e (in-pvector (cfg-succs cfg bb))] #:unless (loop-inside? l (GEdge-dest e)))
      (cons bb (GEdge-dest e)))))
 
-;; clean_up_loop_closed_phi: the single-argument PHIs of the exits with a
-;; single predecessor are replaced by their argument (replace_uses_by)
-;; and removed (their results released)
+;; clean_up_loop_closed_phi: the loops in loops_list (fn, 0) preorder;
+;; the single-argument PHIs of the exits with a single predecessor are
+;; replaced by their argument (replace_uses_by) and removed (their
+;; results released).  GCC 12 keeps the virtual ones (may_propagate_copy
+;; refuses a virtual destination); GCC >= 13 rewrites their uses with
+;; SET_USE and removes them.
 (define (clean-up-loop-closed-phi st0 cfg0)
+  (define keep-virtual? (< (gcc-major-version st0) 13))
   (define-values (loops _b) (find-loops cfg0 (dom-of cfg0)))
-  (for*/fold ([cfg cfg0] [st st0]) ([l (in-list (sort loops < #:key Loop-num))]
+  (for*/fold ([cfg cfg0] [st st0]) ([l (in-list (loops-preorder loops))]
                                     [e (in-list (recorded-exits cfg0 l))])
     (define dest (cdr e))
     (cond
       [(not (= 1 (pvector-length (cfg-preds cfg dest)))) (values cfg st)]
       [else
-       (for/fold ([cfg cfg] [st st]) ([ph (in-pvector (GBlock-phis (cfg-block cfg dest)))])
+       (for/fold ([cfg cfg] [st st]) ([ph (in-pvector (GBlock-phis (cfg-block cfg dest)))]
+                                      #:unless (and keep-virtual? (ssa-virtual? (gphi-result ph))))
          (define rhs (cdr (pvector-ref (gphi-args ph) 0)))
          (define lhs (gphi-result ph))
          ;; may_propagate_copy: no abnormal PHIs here

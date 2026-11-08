@@ -46,6 +46,7 @@
          "../tree.rkt"
          "../gimple.rkt"
          "../cfg.rkt"
+         (only-in "loops.rkt" loops-innermost-first loops-preorder)
          (only-in "../ssa.rkt" virtual-operand?)
          (only-in "../gimplify.rkt" is-gimple-val is-gimple-min-invariant)
          (only-in "../print.rkt" print-expr stmt->string print-type)
@@ -2489,7 +2490,7 @@
   (define cfg (cfg-clear-messages cfg0))
   (define headers
     (let-values ([(r s) (with-loops st fndecl cfg
-                          (lambda () (for/list ([l (in-list (loops-innermost-first* (ctx-loops)))]) (Loop-header l))))])
+                          (lambda () (for/list ([l (in-list (loops-innermost-first (ctx-loops)))]) (Loop-header l))))])
       r))
   (define toremove (box '()))
   (for ([h (in-list headers)])
@@ -2503,9 +2504,6 @@
   (define-values (cfg2 st2) (release-defs! cfg st (unbox toremove)))
   (values cfg2 st2))
 
-(define (loops-innermost-first* loops)
-  (sort loops (lambda (a b) (or (> (Loop-depth a) (Loop-depth b))
-                                (and (= (Loop-depth a) (Loop-depth b)) (< (Loop-num a) (Loop-num b)))))))
 
 ;; tree_ssa_iv_optimize_loop: the new cfg or #f
 (define (optimize-loop l toremove)

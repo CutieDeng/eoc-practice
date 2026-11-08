@@ -353,7 +353,7 @@
   ;; before the analysis (a loop that never loops is not ported)
   (when (>= major 14)
     (set! st (estimate-all-loops st fndecl cfg #:only (lambda (l) (pair? (loop-exits cfg l)))))
-    (for ([l (in-list loops)] #:when (pair? (loop-exits cfg l)))
+    (for ([l (in-list (loops-preorder loops))] #:when (pair? (loop-exits cfg l)))
       (when (eqv? 0 (lbnd-upper (loop-bound st fndecl (Loop-num l))))
         (error 'ch-pass "loop ~a never loops: unlooping it is not ported" (Loop-num l)))))
 
@@ -362,7 +362,7 @@
   (define defs (def-site-map))
   (define candidates
     (filter values
-    (for/list ([l (in-list loops)]
+    (for/list ([l (in-list (loops-preorder loops))]
                #:when (and (= 1 (length (Loop-latches l))) (pair? (loop-exits cfg l)) (loop-preheader-edge cfg l))
                #:when (or (>= major 15) (not (do-while-loop? l))))
       (define bits (make-hasheqv)) (define svals (make-hasheqv))

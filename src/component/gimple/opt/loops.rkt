@@ -29,12 +29,22 @@
 ;; Loop, find-loops, loop-inside?, loop-of live in cfg.rkt (CFG cleanup
 ;; protects loop headers, latches and preheaders)
 (provide (struct-out Loop) find-loops normalize-loops dfs-back-edges loop-exits loop-of loop-latch-edge
-         loop-preheader-edge loop-inside? loops-innermost-first)
+         loop-preheader-edge loop-inside? loops-innermost-first loops-preorder)
 
-;; loops_list (LI_FROM_INNERMOST): deeper loops first, then by number
+;; loops_list walks (cfgloop.cc walk_loop_tree).  flow_loops_find adds
+;; the loops in discovery order and flow_loop_tree_node_add puts each
+;; at the head of its father's inner list, so the sons of a loop run in
+;; descending number order.
+;;   loops-preorder       : loops_list (fn, 0), a loop before its sons
+;;   loops-innermost-first: loops_list (fn, LI_FROM_INNERMOST), postorder
+(define (loop-sons loops parent)
+  (sort (for/list ([l (in-list loops)] #:when (eqv? (Loop-parent l) parent)) l) > #:key Loop-num))
+(define (loops-preorder loops)
+  (let walk ([p #f])
+    (apply append (for/list ([l (in-list (loop-sons loops p))]) (cons l (walk (Loop-num l)))))))
 (define (loops-innermost-first loops)
-  (sort loops (lambda (a b) (or (> (Loop-depth a) (Loop-depth b))
-                                (and (= (Loop-depth a) (Loop-depth b)) (< (Loop-num a) (Loop-num b)))))))
+  (let walk ([p #f])
+    (apply append (for/list ([l (in-list (loop-sons loops p))]) (append (walk (Loop-num l)) (list l))))))
 
 ;; get_loop_exit_edges: (cons src dest) for edges leaving the body, in block/edge order
 (define (loop-exits cfg l)

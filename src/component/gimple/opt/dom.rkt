@@ -1002,4 +1002,4 @@
     [else
      (define-values (cfg2 st2 table _threaded?) (thread-through-all-blocks st1 fndecl cfg1 (reverse paths) loops #:may-peel-loop-headers? may-peel-loop-headers?))
      (cleanup-tree-cfg st2 cfg2 print-cond-rhs
-                       #:after-pre (lambda (st c) (if (null? table) (values c st) (update-ssa st fndecl c table))))]))
+                       #:after-pre (lambda (st c pre) (if (null? table) (values c st) (update-ssa st fndecl c table #:released-before pre))))]))

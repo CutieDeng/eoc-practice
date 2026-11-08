@@ -30,6 +30,7 @@
          "../tree.rkt"
          "../gimple.rkt"
          "../cfg.rkt"
+         (only-in "loops.rkt" loops-innermost-first loops-preorder)
          (only-in "../ssa.rkt" virtual-operand?)
          (only-in "../gimplify.rkt" is-gimple-val)
          (only-in "../print.rkt" print-expr print-cond-rhs stmt->string)
@@ -48,7 +49,7 @@
   ;; after each replacement)
   (define headers
     (let-values ([(r s) (with-loops st fndecl cfg
-                          (lambda () (for/list ([l (in-list (sort (ctx-loops) > #:key Loop-depth))]) (Loop-header l))))])
+                          (lambda () (for/list ([l (in-list (loops-innermost-first (ctx-loops)))]) (Loop-header l))))])
       r))
   (for ([h (in-list headers)])
     (define-values (plan st1)
