@@ -226,8 +226,37 @@
         'lrotate_expr "r<<" 'rrotate_expr "r>>"))
 (define angle-ops '(min_expr max_expr abs_expr absu_expr))
 
+;; op_prio (tree-pretty-print.cc)
+(define (op-prio t)
+  (cond
+    [(not (Tree? t)) 9999]
+    [else
+     (case (tree-code t)
+       [(tree_list compound_expr bind_expr) 1]
+       [(modify_expr init_expr) 2]
+       [(cond_expr) 3]
+       [(truth_or_expr truth_orif_expr) 4]
+       [(truth_and_expr truth_andif_expr) 5]
+       [(bit_ior_expr) 6]
+       [(bit_xor_expr truth_xor_expr) 7]
+       [(bit_and_expr) 8]
+       [(eq_expr ne_expr) 9]
+       [(unlt_expr unle_expr ungt_expr unge_expr uneq_expr ltgt_expr ordered_expr unordered_expr lt_expr le_expr gt_expr ge_expr) 10]
+       [(lshift_expr rshift_expr lrotate_expr rrotate_expr widen_lshift_expr) 11]
+       [(widen_sum_expr plus_expr pointer_plus_expr pointer_diff_expr minus_expr) 12]
+       [(widen_mult_expr dot_prod_expr widen_mult_plus_expr widen_mult_minus_expr mult_expr mult_highpart_expr
+         trunc_div_expr ceil_div_expr floor_div_expr round_div_expr rdiv_expr exact_div_expr
+         trunc_mod_expr ceil_mod_expr floor_mod_expr round_mod_expr) 13]
+       [(truth_not_expr bit_not_expr postincrement_expr postdecrement_expr preincrement_expr predecrement_expr
+         negate_expr indirect_ref addr_expr float_expr nop_expr convert_expr fix_trunc_expr target_expr) 14]
+       [(save_expr) (op-prio (tree-operand t 0))]
+       [else 9999])]))
+
 (define (print-expr st e)
   (define (pe x) (print-expr st x))
+  ;; an operand in parentheses when its priority is CMP the node's
+  (define (pe-prio x node cmp)
+    (if (cmp (op-prio x) (op-prio node)) (string-append "(" (pe x) ")") (pe x)))
   (cond
     [(not e) "<null>"]
     [else
@@ -284,11 +313,11 @@
           [else (string-append (pe base) "." (decl-print-name st field))])]
        [(array_ref) (format "~a[~a]" (pe (tree-operand e 0)) (pe (tree-operand e 1)))]
        [(nop_expr convert_expr float_expr fix_trunc_expr)
-        (format "(~a) ~a" (print-type st (tree-type e)) (pe (tree-operand e 0)))]
+        (format "(~a) ~a" (print-type st (tree-type e)) (pe-prio (tree-operand e 0) e <))]
        [(view_convert_expr) (format "VIEW_CONVERT_EXPR<~a>(~a)" (print-type st (tree-type e)) (pe (tree-operand e 0)))]
-       [(negate_expr) (string-append "-" (pe (tree-operand e 0)))]
-       [(bit_not_expr) (string-append "~" (pe (tree-operand e 0)))]
-       [(truth_not_expr) (string-append "!" (pe (tree-operand e 0)))]
+       [(negate_expr) (string-append "-" (pe-prio (tree-operand e 0) e <))]
+       [(bit_not_expr) (string-append "~" (pe-prio (tree-operand e 0) e <))]
+       [(truth_not_expr) (string-append "!" (pe-prio (tree-operand e 0) e <))]
        [(min_expr max_expr) (format "~a <~a, ~a>" (string-upcase (symbol->string code)) (pe (tree-operand e 0)) (pe (tree-operand e 1)))]
        [(abs_expr absu_expr) (format "~a <~a>" (string-upcase (symbol->string code)) (pe (tree-operand e 0)))]
        [(constructor)
@@ -307,7 +336,7 @@
        [else
         (cond
           [(hash-ref binary-op code #f)
-           => (lambda (op) (format "~a ~a ~a" (pe (tree-operand e 0)) op (pe (tree-operand e 1))))]
+           => (lambda (op) (format "~a ~a ~a" (pe-prio (tree-operand e 0) e <=) op (pe-prio (tree-operand e 1) e <=)))]
           [else (format "<~a>" code)])])]))
 
 ;; ------------------------------------------------------------

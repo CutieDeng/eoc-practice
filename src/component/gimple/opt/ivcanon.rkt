@@ -16,9 +16,10 @@
 ;; ivtmp' = ivtmp - 1 before the exit test, and the test becomes
 ;; ivtmp' != 0 (== 0 when the exit is the true edge).
 ;;
+;; estimate_numbers_of_iterations (niter-bounds.rkt) runs first.
+;;
 ;; Not ported: try_unroll_loop_completely (UL_SINGLE_ITER only removes
-;; loops that never iterate), remove_redundant_iv_tests,
-;; estimate_numbers_of_iterations (the recorded bounds).
+;; loops that never iterate), remove_redundant_iv_tests.
 ;; ============================================================
 
 (require racket/list
@@ -30,12 +31,14 @@
          "../cfg.rkt"
          "ssa-ops.rkt"
          "generic-fold.rkt"
-         "scev.rkt")
+         "scev.rkt"
+         (only-in "niter-bounds.rkt" estimate-all-loops))
 
 (provide ivcanon-pass create-iv)
 
 (define (ivcanon-pass st0 fndecl cfg0)
-  (define st (gs-set-fndecl st0 fndecl))
+  ;; canonicalize_induction_variables: estimate_numbers_of_iterations (cfun) first
+  (define st (estimate-all-loops (gs-set-fndecl st0 fndecl) fndecl cfg0))
   (define cfg (cfg-clear-messages cfg0))
   (define headers
     (let-values ([(r s) (with-loops st fndecl cfg

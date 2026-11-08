@@ -54,6 +54,13 @@
 (define (o1-stage-texts tu)
   (define outs (make-hasheq))
   (define (out s) (hash-ref! outs s open-output-string))
+  ;; the loop iteration bounds of every function at the start of each
+  ;; pass (what GCC prints in the ";; Loop" headers of that pass's dump):
+  ;; stage -> function name -> hash loop number -> lbnd
+  (define bounds-log (make-hasheq))
+  (define (log-bounds! stage st decl)
+    (hash-set! (hash-ref! bounds-log stage make-hash) (tree-attr decl 'name #f)
+               (decl-flag st decl 'loop-bounds (hasheqv))))
   ;; pass_build_ssa_passes runs for every function (callee first) before
   ;; pass_local_optimization_passes: a callee's pure/const result is not
   ;; known while its callers are gimplified and put into SSA
@@ -86,6 +93,7 @@
       (define st0 (gs-set-ssa-version (gs-set-fndecl st decl) (vector-ref f 3)))
       (define-values (cfg* st* locals*)
         (for/fold ([cfg (vector-ref f 1)] [st st0] [locals (vector-ref f 2)]) ([p (in-list (o1-passes st0))])
+          (log-bounds! (pass-name p) st decl)
           (define-values (cfg1 st1) (run-pass p st decl cfg))
           (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals) locals))
           (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
@@ -110,12 +118,26 @@
     (for/fold ([cfg cfg-i] [st st-i] [locals locals-i] #:result st)
               ([p (in-list (late-passes st-i))] #:when (pass-enabled? p st decl cfg))
       ;; the local decls, for passes that dump the function (dump_function_to_file)
+      (log-bounds! (pass-name p) st decl)
       (define-values (cfg1 st1a) (run-pass p (set-decl-flag st decl 'local-decls locals) decl cfg))
       (define-values (locals0 st1) (take-added-locals st1a decl locals))
       (define locals1 (if (pass-prunes-locals? p) (remove-unused-locals st1 cfg1 locals0) locals0))
       (print-ssa-function st1 decl locals1 cfg1 (out (pass-name p)))
       (values cfg1 st1 locals1)))
-  (for/hash ([(k o) (in-hash outs)]) (values k (get-output-string o))))
+  (hash-set (for/hash ([(k o) (in-hash outs)]) (values k (get-output-string o))) 'loop-bounds bounds-log))
+
+;; the ";; Loop N" header bounds of a GCC dump: function -> loop -> (list upper likely estimate)
+(define (dump-loop-bounds text)
+  (for/fold ([acc (hash)] [fn #f] [loop #f] #:result acc) ([l (in-list (string-split text "\n"))])
+    (cond
+      [(regexp-match #px"^;; Function (\\w+)" l) => (lambda (m) (values acc (cadr m) #f))]
+      [(regexp-match #px"^;; Loop (\\d+)" l) => (lambda (m) (values acc fn (string->number (cadr m))))]
+      [(regexp-match #px"^;;\\s+(upper_bound|likely_upper_bound|estimate) (\\d+)" l)
+       => (lambda (m)
+            (define k (case (cadr m) [("upper_bound") 0] [("likely_upper_bound") 1] [else 2]))
+            (define cur (hash-ref (hash-ref acc fn (hash)) loop (list #f #f #f)))
+            (values (hash-set acc fn (hash-set (hash-ref acc fn (hash)) loop (list-set cur k (string->number (caddr m))))) fn loop))]
+      [else (values acc fn loop)])))
 
 ;; the stages compared, in dump order; a stage without a GCC dump file
 ;; for that version (a pass GCC does not run there) is skipped
@@ -127,6 +149,19 @@
       (eq? stage 'waccess2)))
 
 (module+ test
+  ;; GCC 15 prints the loops' iteration bounds in the ";; Loop" headers
+  ;; of every dump: they must equal ours at the start of that pass
+  (for ([name '("basic.c" "calls.c" "struct.c" "ccp.c" "thread.c" "sink.c")])
+    (define tu (read-gccast-file (build-path fixtures (format "~a.15.2.0.O1.dat" name))))
+    (define log (hash-ref (o1-stage-texts tu) 'loop-bounds))
+    (test-case (format "~a 15.2.0 -O1: loop iteration bounds at every pass" name)
+      (for ([(stage fns) (in-hash log)])
+        (define f (build-path fixtures (format "~a.15.2.0.O1.~a" name stage)))
+        (when (file-exists? f)
+          (for* ([(fn loops) (in-hash (dump-loop-bounds (file->string f)))] [(num g) (in-hash loops)])
+            (define b (hash-ref (hash-ref fns fn (hasheqv)) num #f))
+            (define ours (if b (list (vector-ref (struct->vector b) 1) (vector-ref (struct->vector b) 2) (vector-ref (struct->vector b) 3)) (list #f #f #f)))
+            (check-equal? ours g (format "~a ~a loop ~a" stage fn num)))))))
   (for* ([ver '("15.2.0" "12.5.0")]
          [name '("basic.c" "calls.c" "struct.c" "ccp.c" "thread.c" "sink.c")])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))

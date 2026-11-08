@@ -25,9 +25,16 @@
 ;; split, the counts are scaled as gimple_duplicate_sese_region does
 ;; (the copy gets entry / total, the region the rest).
 ;;
+;; GCC >= 14 estimates every loop's iterations first (niter-bounds.rkt)
+;; and, after a copy, decreases the bounds by one
+;; (adjust_loop_info_after_peeling): the upper bound too when all exits
+;; were copied and no other block can end the function ("Peeled all
+;; exits"), only the likely bound when the copied exits take 90% of the
+;; entry count ("Peeled likely exits").
+;;
 ;; Not ported: the ";;" loop dumps of loop_optimizer_init (the harness
-;; drops ";;" lines), unlooping loops that never loop, the iteration
-;; estimate adjustments, the general value numbering of the copied
+;; drops ";;" lines), unlooping loops that never loop (an error), inner
+;; loops' finite_p in the peeling check (treated as not precise), the general value numbering of the copied
 ;; region (statements other than PHIs and the condition are only
 ;; substituted), optimize-for-size gating.
 ;; ============================================================
@@ -51,7 +58,9 @@
          (only-in "ipa.rkt" estimate-num-insns)
          (only-in "mfn.rkt" stmt-use-names stmt-def-names)
          (only-in "range-info.rkt" copy-range-info)
-         "update-ssa.rkt")
+         "update-ssa.rkt"
+         (only-in "niter-bounds.rkt" estimate-all-loops)
+         (only-in "loop-bounds.rkt" loop-bound lbnd-upper adjust-loop-info-after-peeling))
 
 (provide ch-pass)
 
@@ -165,6 +174,17 @@
     n)
 
   ;; ---- loop queries ---------------------------------------------------
+  ;; stmt_can_terminate_bb_p (no exceptions, no asm in the IR): a call
+  ;; that is not a non-looping const / pure function and returns
+  (define (stmt-can-terminate-bb? g)
+    (cond
+      [(gcall? g)
+       (define f (call-ecf st g))
+       (cond
+         [(and (not (zero? (bitwise-and f (bitwise-ior ECF-PURE ECF-CONST)))) (zero? (bitwise-and f ECF-LOOPING))) #f]
+         [(zero? (bitwise-and f ECF-NORETURN)) #t]
+         [else #f])]
+      [else #f]))
   (define (loop-exits-from-bb? l bb) (for/or ([e (in-pvector (cfg-succs cfg bb))]) (not (loop-inside? l (GEdge-dest e)))))
   (define (do-while-loop? l)
     (define latch (car (Loop-latches l)))
@@ -329,6 +349,14 @@
                       (let ([variant? (lambda (op) (and (in-loop-def? op) (zero? (uid op))))])
                         (or (variant? (gcond-lhs last)) (variant? (gcond-rhs last)))))))]))
 
+  ;; ---- GCC >= 14: estimate_numbers_of_iterations of every loop with exits,
+  ;; before the analysis (a loop that never loops is not ported)
+  (when (>= major 14)
+    (set! st (estimate-all-loops st fndecl cfg #:only (lambda (l) (pair? (loop-exits cfg l)))))
+    (for ([l (in-list loops)] #:when (pair? (loop-exits cfg l)))
+      (when (eqv? 0 (lbnd-upper (loop-bound st fndecl (Loop-num l))))
+        (error 'ch-pass "loop ~a never loops: unlooping it is not ported" (Loop-num l)))))
+
   ;; ---- the candidates -------------------------------------------------
   ;; (list loop nheaders static-exits invariant-exits)
   (define defs (def-site-map))
@@ -403,6 +431,10 @@
     (define bbs
       (let loop ([h header] [n 0] [acc '()])
         (if (= n nheaders) (reverse acc) (loop (in-loop-succ l h) (add1 n) (cons h acc)))))
+    ;; the exits of the copied headers and their count (before the copy)
+    (define chain-exits (for*/list ([bb (in-list bbs)] [e (in-pvector (cfg-succs cfg bb))] #:unless (loop-inside? l (GEdge-dest e)))
+                          (cons bb (GEdge-dest e))))
+    (define exit-count (for/fold ([s 0]) ([e (in-list chain-exits)]) (+ s (or (edge-count (car e) (cdr e)) 0))))
     (define last-bb (last bbs))
     (define new-header0 (in-loop-succ l last-bb))
     ;; the new header must have just the latch as a predecessor inside the loop
@@ -492,6 +524,26 @@
     (when (or (< major 15) (not (single-succ-p cfg last-bb)))
       (let-values ([(_nb c) (split-edge cfg last-bb new-header)]) (set! cfg c)))
     (set! copied-regions (cons (list (hash-ref copies header) new-header l) copied-regions))
+    ;; GCC >= 14: we possibly decreased the number of iterations by 1
+    (when (>= major 14)
+      ;; the loop as it is after the copy (the split latch and header
+      ;; blocks belong to it)
+      (define-values (loops2 _b2) (find-loops cfg (dom-of cfg)))
+      (define l2 (loop-of loops2 last-bb))
+      (define precise
+        (and l2
+             (= (length chain-exits) (length (loop-exits cfg l2)))
+             (for/and ([bb (in-list (intbits->list (Loop-body l2)))]
+                       #:unless (for/or ([e (in-pvector (cfg-succs cfg bb))]) (not (loop-inside? l2 (GEdge-dest e)))))
+               ;; an inner loop's finite_p is not modelled: not precise
+               (and (eq? (loop-of loops2 bb) l2)
+                    (not (for/or ([g (in-pvector (block-stmts bb))]) (stmt-can-terminate-bb? g)))))))
+      (define upper (lbnd-upper (loop-bound st fndecl (Loop-num l))))
+      (cond
+        [(and precise (eqv? upper 1)) (error 'ch-pass "loop ~a no longer loops: unlooping it is not ported" (Loop-num l))]
+        [precise (set! st (adjust-loop-info-after-peeling st fndecl (Loop-num l) 1 #t))]
+        [(>= exit-count (rdiv (* entry-count 9) 10)) (set! st (adjust-loop-info-after-peeling st fndecl (Loop-num l) 1 #f))]
+        [else (void)]))
     (set! changed? #t))
 
 

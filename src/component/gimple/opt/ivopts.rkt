@@ -28,13 +28,14 @@
 ;; selected set) to stderr, in GCC's format, for comparison with
 ;; -fdump-tree-ivopts-details.
 ;;
+;; alloc_iv's iv_can_overflow_p and avg_loop_niter use the loop bounds
+;; cunroll left (niter-bounds.rkt / loop-bounds.rkt).
+;;
 ;; Not ported: doloop prediction (aarch64's predict_doloop_p is false),
 ;; autoincrement candidates and costs (no use on the fixtures has a step
 ;; equal to its access size), USE_PTR_ADDRESS (internal-function memory
 ;; accesses), symbols in addresses (move_fixed_address_to_symbol),
-;; iv_can_overflow_p (it only sets the printed overflow flag of non-biv
-;; IVs), max_loop_iterations (the recorded loop bounds), the debug
-;; statement fixups of remove_unused_ivs, range information in
+;; the debug statement fixups of remove_unused_ivs, range information in
 ;; tree-affine / split_constant_offset.
 ;; ============================================================
 
@@ -53,6 +54,7 @@
          "tree-affine.rkt"
          "target-costs.rkt"
          "scev.rkt"
+         (only-in "niter-bounds.rkt" estimated-loop-iterations likely-max-loop-iterations)
          "update-ssa.rkt")
 
 (provide ivopts-pass)
@@ -262,8 +264,9 @@
            (contain-complex-addr-expr expr))
        (gf-convert (tree-type base0) (aff->tree (tree->aff expr (tree-type expr))))]
       [else base0]))
-  ;; iv_can_overflow_p is not ported (see the header)
-  (iv base (determine-base-object base) step #f #f #f no-overflow #f))
+  (iv base (determine-base-object base) step #f #f #f
+      (or no-overflow (not (iv-can-overflow? (D-loop (data)) (tree-type base) base step)))
+      #f))
 
 (define (set-iv! v base step no-overflow)
   (define info (name-info v))
@@ -1193,7 +1196,16 @@
 ;; costs
 ;; ------------------------------------------------------------
 
-(define (avg-loop-niter) 10)          ; no profile-based estimate: param_avg_loop_niter
+;; avg_loop_niter: the estimate + 1, else the likely bound + 1 when it is
+;; at most param_avg_loop_niter (10); the bounds were recorded by cunroll
+(define (avg-loop-niter)
+  (define l (D-loop (data)))
+  (define e (estimated-loop-iterations l))
+  (cond
+    [e (add1 e)]
+    [else
+     (define lk (likely-max-loop-iterations l))
+     (if (or (not lk) (> (add1 lk) 10)) 10 (add1 lk))]))
 ;; adjust_setup_cost
 (define (adjust-setup-cost cost [round-up #f])
   (cond

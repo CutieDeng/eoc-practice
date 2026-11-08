@@ -25,8 +25,11 @@
 ;; copies, force_edge_cold of the removed exits and of the cancelled
 ;; edge.
 ;;
-;; Not ported: peeling (UL_ALL is never used at -O1), the bounds inferred
-;; from undefined overflow (only the exit bounds are recorded), loop
+;; estimate_numbers_of_iterations (niter-bounds.rkt) runs at entry and
+;; again at the start of every iteration, as tree_unroll_loops_completely
+;; frees and re-estimates.
+;;
+;; Not ported: peeling (UL_ALL is never used at -O1), loop
 ;; nests (the father's do_rpo_vn), LCSSA PHIs on the exit (exit blocks
 ;; with PHIs are refused), irreducible regions.
 ;; ============================================================
@@ -48,6 +51,7 @@
          (only-in "mfn.rkt" stmt-def-names)
          (only-in "range-info.rkt" copy-range-info)
          "generic-fold.rkt"
+         (only-in "niter-bounds.rkt" estimate-all-loops)
          "scev.rkt"
          "update-ssa.rkt")
 
@@ -85,9 +89,12 @@
 ;; ------------------------------------------------------------
 
 (define (cunroll-pass st0 fndecl cfg0)
-  (define st (gs-set-fndecl st0 fndecl))
+  ;; tree_unroll_loops_completely: estimate_numbers_of_iterations (cfun),
+  ;; then free and estimate again at the start of every iteration
+  (define st (estimate-all-loops (gs-set-fndecl st0 fndecl) fndecl cfg0))
   (define cfg (cfg-clear-messages cfg0))
   (let iterate ([iteration 0])
+    (set! st (estimate-all-loops st fndecl cfg))
     (define-values (plan st1) (with-loops st fndecl cfg (lambda () (unroll-plan))))
     (set! st st1)
     (when (and plan (<= iteration param-max-unroll-iterations))

@@ -23,9 +23,11 @@
 ;;    to counts (the GCC >= 14 rounding, <= 13 truncates after adding 1/2),
 ;;    "cyclic probability ..." dumped.
 ;;
+;; With loops, the iteration bounds are estimated (niter-bounds.rkt) as
+;; predict_loops does with SCEV initialized.
+;;
 ;; Not ported: fake exit edges for infinite loops, cold/hot attributes,
-;; __builtin_expect, iteration estimates from undefined behavior
-;; (estimated_stmt_executions), the irreducible-loop marking, counts
+;; __builtin_expect, the irreducible-loop marking, counts
 ;; from IPA profiles.
 ;; ============================================================
 
@@ -43,6 +45,7 @@
          "fold.rkt"
          "mfn.rkt"
          "sreal.rkt"
+         (only-in "niter-bounds.rkt" estimate-all-loops)
          "loops.rkt"
          (rename-in "niter.rkt" [simple-iv simple-iv*]))
 
@@ -850,4 +853,6 @@
   (define counts (estimate-bb-frequencies! p))
   (define probs (for/hash ([(k v) (in-hash (P-probs p))]) (values k v)))
   (define cfg1 (for/fold ([c (cfg-set-profile cfg (GProf counts probs))]) ([mm (in-list (reverse (P-msgs p)))]) (cfg-add-message c mm)))
-  (values cfg1 st0))
+  ;; predict_loops runs with SCEV initialized: the loops' iteration bounds
+  ;; are estimated (estimate_numbers_of_iterations) on this body
+  (values cfg1 (if (pair? loops) (estimate-all-loops st0 fndecl cfg) st0)))

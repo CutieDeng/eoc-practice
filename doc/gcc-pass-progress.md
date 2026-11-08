@@ -114,7 +114,7 @@ gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `lim2`, `veclower
 | 53 | 　　　`tree-switchconv` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 54 | 　　　`tree-ehcleanup1` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 55 | 　　　`tree-sccopy1` | ON | 无 | 恒等 |
-| 56 | 　　　`tree-profile_estimate` | ON | ON | 完成 |
+| 56 | 　　　`tree-profile_estimate` | ON | ON | 完成（含 estimate_numbers_of_iterations：循环迭代上界） |
 | 57 | 　　　`tree-local-pure-const1` | ON | ON | 完成 |
 | 58 | 　　　`tree-modref1` | ON | ON | 完成 |
 | 59 | 　　　`tree-fnsplit` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -202,7 +202,7 @@ gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `lim2`, `veclower
 | 141 | 　　`tree-mergephi3` | ON | ON | 恒等 |
 | 142 | 　　`tree-phiopt2` | ON | ON | 恒等 |
 | 143 | 　　`tree-tailr2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 144 | 　　`tree-ch2` | ON | ON | 完成（`opt/ch.rkt`：should_duplicate_loop_header_p 15/12 两版决策、do-while 判定、SEME 区域复制、update_profile_after_ch、按名字的增量 update_ssa 与其 dump、区域 VN 子集、TODO_cleanup_cfg） |
+| 144 | 　　`tree-ch2` | ON | ON | 完成（`opt/ch.rkt`：should_duplicate_loop_header_p 15/12 两版决策、do-while 判定、SEME 区域复制、update_profile_after_ch、按名字的增量 update_ssa 与其 dump、区域 VN 子集、TODO_cleanup_cfg；≥14 先估计迭代次数，复制后按 Peeled all / likely exits 调整上界） |
 | 145 | 　　`tree-cplxlower1` | ON | ON | 恒等 |
 | 146 | 　　`tree-bitintlower1` | ON | 无 | 恒等（gcc ≥ 14） |
 | 147 | 　　`tree-sra` | ON | ON | 恒等 |
@@ -236,7 +236,7 @@ gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `lim2`, `veclower
 | 175 | 　　　`tree-lversion` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 176 | 　　　`tree-unrolljam` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 177 | 　　　`tree-cddce2` | ON | ON | 完成（复用 dce；释放顺序按 GCC 的支配树 BFS 逆序；≥13 在 loop-closed SSA 下保留退化的虚拟 PHI） |
-| 178 | 　　　`tree-ivcanon` | ON | ON | 完成（`opt/ivcanon.rkt` create_canonical_iv；try_unroll 的 UL_SINGLE_ITER 只对不迭代的循环生效，未移植） |
+| 178 | 　　　`tree-ivcanon` | ON | ON | 完成（`opt/ivcanon.rkt` create_canonical_iv，先 estimate_numbers_of_iterations；try_unroll 的 UL_SINGLE_ITER 只对不迭代的循环生效，未移植） |
 | 179 | 　　　`tree-ldist` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 180 | 　　　`tree-crc` | OFF | 无 | gate 关闭（-O1 不执行） |
 | 181 | 　　　`tree-linterchange` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -738,5 +738,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- 最近一次实测：`o1-test.rkt` 1098 项（6 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1451/1452 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
+- 最近一次实测：`o1-test.rkt` 1104 项（6 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1457/1458 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。

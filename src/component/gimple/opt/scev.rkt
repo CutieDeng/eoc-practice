@@ -54,6 +54,7 @@
          (only-in "mfn.rkt" stmt-def-names)
          (only-in "range-info.rkt" gimple-range-global)
          (only-in "irange.rkt" ir-varying? ir-undefined? ir-lower ir-upper)
+         (only-in "loop-bounds.rkt" loop-bound lbnd-upper)
          "generic-fold.rkt")
 
 (provide with-loops ctx-loops ctx-cfg loop-num loop-by-num bb-loop loop-depth loop-outer nested-in? single-exit
@@ -68,7 +69,10 @@
          expression-expensive-p scev-reset!
          find-loop-niter find-loop-niter-by-eval just-once-each-iteration? loop-latch
          expand-simple-operations def-stmt-of def-bb-of dominated-by? superloop-at-depth convert-affine-scev
-         min-invariant?)
+         min-invariant?
+         ctx-decl current-loop-ctx loop-body-blocks number-of-iterations-exit-assumptions
+         initial-condition evolution-part-in-loop-num initial-condition-in-loop-num stmt-loop-of-name
+         iv-can-overflow?)
 
 ;; ------------------------------------------------------------
 ;; the context
@@ -98,6 +102,23 @@
 (define (scev-reset!) (set-lctx-scev! (C) (make-hash)) (set-lctx-niters! (C) (make-hasheqv)))
 
 (define (ctx-loops) (lctx-loops (C)))
+(define (ctx-decl) (lctx-decl (C)))
+(define (current-loop-ctx) (C))
+;; get_loop_body: dfs_enumerate_from (header, reverse) inside the loop
+(define (loop-body-blocks l)
+  (define cfg (lctx-cfg (C)))
+  (define visited (make-hasheqv))
+  (hash-set! visited (Loop-header l) #t)
+  (let walk ([stack (list (Loop-header l))] [acc (list (Loop-header l))])
+    (cond
+      [(null? stack) (reverse acc)]
+      [else
+       (define-values (st2 acc2)
+         (for/fold ([st (cdr stack)] [acc acc]) ([p (in-pvector (cfg-preds cfg (car stack)))]
+                                                 #:when (and (not (hash-ref visited p #f)) (loop-inside? l p)))
+           (hash-set! visited p #t)
+           (values (cons p st) (cons p acc))))
+       (walk st2 acc2)])))
 (define (ctx-cfg) (lctx-cfg (C)))
 ;; loops: a Loop or #f for the function (loop 0)
 (define (loop-num l) (if l (Loop-num l) 0))
@@ -202,6 +223,24 @@
       [else (for/or ([i (in-range (tree-operand-length e))]) (walk (tree-operand e i)))])))
 
 (define (initial-condition c) (if (poly? c) (initial-condition (chrec-left c)) c))
+;; chrec_component_in_loop_num: #f for NULL_TREE
+(define (chrec-component-in-loop-num c loop-nb right?)
+  (define l (loop-by-num loop-nb))
+  (cond
+    [(auto-chrec? c) c]
+    [(poly? c)
+     (define cl (chrec-loop c))
+     (cond
+       [(same-loop? cl l)
+        (define component (if right? (chrec-right c) (chrec-left c)))
+        (if (or (not (poly? (chrec-left c))) (not (= (chrec-var (chrec-left c)) (chrec-var c))))
+            component
+            (build-polynomial-chrec loop-nb (chrec-component-in-loop-num (chrec-left c) loop-nb right?) component))]
+       [(nested-in? cl l) #f]
+       [else (chrec-component-in-loop-num (chrec-left c) loop-nb right?)])]
+    [else (if right? #f c)]))
+(define (evolution-part-in-loop-num c n) (chrec-component-in-loop-num c n #t))
+(define (initial-condition-in-loop-num c n) (chrec-component-in-loop-num c n #f))
 
 (define (hide-evolution-in-other-loops-than-loop c loop-nb)
   (define l (loop-by-num loop-nb))
@@ -1157,9 +1196,42 @@
           [(or (and (not allow-nonconstant-step) (not (icst? step))) (tree-contains-chrecs? step)) #f]
           [(tree-contains-chrecs? (chrec-left ev)) #f]
           [else
-           (define no-ovf (and (not folded) (nowrap-type-p type)))
-           ;; iv_can_overflow_p and the (signed T)((unsigned T)base + step) rewrite are not ported
+           (define no-ovf0 (and (not folded) (nowrap-type-p type)))
+           (define no-ovf (or no-ovf0 (not (iv-can-overflow? wrto type (chrec-left ev) step))))
+           ;; the (signed T)((unsigned T)base + step) rewrite of the base is not ported
            (affine-iv (chrec-left ev) step no-ovf)])])]))
+
+;; iv_can_overflow_p (GCC 15 form; GCC 12 is the same for SSA names and
+;; constants): the base and step ranges against the loop's recorded
+;; upper bound on the number of iterations
+(define (iv-can-overflow? l type base step)
+  (define (range-of x)
+    (cond
+      [(icst? x) (let* ([t (tree-type x)] [p (ty-prec t)] [v (icst-val x)])
+                   (define sv (if (and (not (ty-uns? t)) (bitwise-bit-set? v (sub1 p))) (- v (arithmetic-shift 1 p)) v))
+                   (cons sv sv))]
+      [(and (ssa-name? x) (ty-int? (tree-type x))) (global-range x)]
+      [else #f]))                                ; get_tree_range of an expression: not ported
+  (cond
+    [(integer-zerop step) #f]
+    [else
+     (define br (and (ty-int? (tree-type base)) (range-of base)))
+     (define sr (and br (ty-int? (tree-type step)) (range-of step)))
+     (define nit (and sr l (lbnd-upper (loop-bound (gs) (lctx-decl (C)) (Loop-num l)))))
+     (cond
+       [(not nit) #t]
+       [else
+        (define prec (ty-prec type))
+        (define nit1 (add1 nit))
+        (define tmin (ty-min type)) (define tmax (ty-max type))
+        (define mask (sub1 (arithmetic-shift 1 prec)))
+        (or (> (integer-length nit1) prec)
+            (and (or (ty-uns? type) (>= (cdr sr) 0))
+                 (let ([m (* (bitwise-and (cdr sr) mask) nit1)])
+                   (or (> (integer-length m) prec) (> m (- tmax (cdr br))))))
+            (and (not (ty-uns? type)) (< (car sr) 0)
+                 (let ([m (* (- (car sr)) nit1)])
+                   (or (> (integer-length m) prec) (> m (- (car br) tmin))))))])]))
 
 ;; number_of_iterations_cond: niter-desc or #f
 (define (number-of-iterations-cond l type iv0* code* iv1* only-exit every-iteration)
