@@ -57,7 +57,7 @@
          (only-in "../print.rkt" print-expr print-type stmt->string))
 
 (provide estimate-numbers-of-iterations! max-loop-iterations likely-max-loop-iterations estimated-loop-iterations
-         estimate-all-loops)
+         estimate-all-loops estimate-one-loop)
 
 ;; estimate_numbers_of_iterations for every loop of CFG, in
 ;; loops_list (fn, 0) preorder, in a fresh context: -> st
@@ -68,6 +68,20 @@
         (for ([l (in-list (loops-preorder (ctx-loops)))] #:when (only l))
           (estimate-numbers-of-iterations! l)))))
   st1)
+
+;; estimate_numbers_of_iterations (loop) for the loop of CFG whose header
+;; is HEADER, in a fresh context: -> (values st records), RECORDS the
+;; loop's loop->bounds (newest first) as (vector bound bb stmt is-exit?)
+(define (estimate-one-loop st decl cfg header)
+  (define-values (r st1)
+    (with-loops st decl cfg
+      (lambda ()
+        (define l (for/first ([l (in-list (ctx-loops))] #:when (= (Loop-header l) header)) l))
+        (cond
+          [l (estimate-numbers-of-iterations! l)
+             (hash-ref (hash-ref bound-records (current-loop-ctx) (hasheqv)) (loop-num l) '())]
+          [else '()]))))
+  (values st1 r))
 
 ;; ---- storage (loop-bounds.rkt) ------------------------------------------
 (define (bounds-of l) (loop-bound (gs) (ctx-decl) (loop-num l)))
@@ -89,6 +103,7 @@
 
 ;; ---- estimate_numbers_of_iterations -------------------------------------
 (define estimated (make-weak-hasheq))           ; context -> loop number -> #t (estimate_state)
+(define bound-records (make-weak-hasheq))       ; context -> loop number -> loop->bounds
 
 (define (estimate-numbers-of-iterations! l)
   (define done (hash-ref! estimated (current-loop-ctx) make-hasheqv))
@@ -132,12 +147,16 @@
           (infer-loop-bounds-from-pointer-arith l bb g record-estimate!))))
     (discover-iteration-bound-by-body-walk! l records)
     (maybe-lower-iteration-bound! l records)
+    (hash-set! (hash-ref! bound-records (current-loop-ctx) make-hasheqv) (loop-num l) records)
     ;; a constant number of iterations is the upper bound
     (when (icst? nb)
       (gs! (set-loop-upper-bound (gs) (ctx-decl) (loop-num l) (icst-val nb))))))
 
 ;; single_likely_exit: the single exit, else the only exit that is not
-;; probably never executed (probability above very_unlikely)
+;; probably never executed (probably_never_executed_edge_p: its source's
+;; count is zero or its probability never; the profile quality is not
+;; modelled, a count of 0 is taken as profile_count::zero) and whose
+;; probability is above very_unlikely
 (define (single-likely-exit l exits)
   (cond
     [(= 1 (length exits)) (car exits)]
@@ -146,10 +165,12 @@
        (for/fold ([found #f]) ([ex (in-list exits)])
          (define p (prof-prob (ctx-cfg) (car ex) (cdr ex)))
          (cond
+           [(eqv? (prof-count (ctx-cfg) (car ex)) 0) found]
            [(and p (<= p VERY-UNLIKELY)) found]
            [found (return #f)]
            [else ex])))]))
-(define VERY-UNLIKELY (quotient (+ 134217728 1999) 2000))      ; profile_probability::very_unlikely: 1/2000, rounded up
+;; profile_probability::very_unlikely: RDIV (2^27, 2000) = 67109, then m_val--
+(define VERY-UNLIKELY (sub1 (quotient (+ 134217728 1000) 2000)))
 
 ;; ---- undefined behavior ---------------------------------------------------
 ;; infer_loop_bounds_from_signedness

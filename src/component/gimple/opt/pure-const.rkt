@@ -52,7 +52,9 @@
          "ssa-ops.rkt"
          "mfn.rkt"
          "loops.rkt"
-         "niter.rkt")
+         "niter.rkt"
+         (only-in "niter-bounds.rkt" estimate-one-loop)
+         (only-in "loop-bounds.rkt" loop-bound lbnd-upper))
 
 (provide local-pure-const
          dump-name walk-stmt-loads-stores refs-local-or-readonly? points-to-local-or-readonly? auto-var? get-base-address*
@@ -153,7 +155,18 @@
     (if (>= major 15)
         (set-decl-flag st fndecl 'finite-loops (cons (Loop-num l) (decl-flag st fndecl 'finite-loops '())))
         st))
-  (let loop ([ls loops] [st st])
+  ;; loop->any_upper_bound || max_loop_iterations (SCEV is initialized:
+  ;; estimate_numbers_of_iterations runs on this body): (values bounded? st)
+  (define (bounded st l previously)
+    (cond
+      [(lbnd-upper (loop-bound st fndecl (Loop-num l))) (values #t st)]
+      ;; GCC 15: no max_loop_iterations for a loop already finite_p
+      [previously (values #f st)]
+      [else
+       (define-values (st1 _records) (estimate-one-loop st fndecl cfg (Loop-header l)))
+       (values (and (lbnd-upper (loop-bound st1 fndecl (Loop-num l))) #t) st1)]))
+  ;; loops_list (cfun, 0)
+  (let loop ([ls (loops-preorder loops)] [st st])
     (cond
       [(null? ls) (values #t st)]
       [else
@@ -161,15 +174,17 @@
        ;; loop->finite_p lives in the loop structure, which keeps its
        ;; number while the passes change the blocks
        (define previously (and (>= major 15) (memv (Loop-num l) (decl-flag st fndecl 'finite-loops '()))))
+       (define (fail st)
+         (msg! "    cannot prove finiteness of loop ~a" (Loop-num l))
+         (values #f st))
        (cond
          [(and previously (pair? (loop-exits cfg l)))
           (msg! "Assume loop ~a to be finite: it has an exit and -ffinite-loops is on or loop was previously finite." (Loop-num l))
           (loop (cdr ls) st)]
          [flags-finite? (loop (cdr ls) (record st l))]
-         [(loop-finite? st m cfg l) (loop (cdr ls) (record st l))]
          [else
-          (msg! "    cannot prove finiteness of loop ~a" (Loop-num l))
-          (values #f st)])])))
+          (define-values (ok? st1) (bounded st l previously))
+          (if ok? (loop (cdr ls) (record st1 l)) (fail st1))])])))
 
 ;; ------------------------------------------------------------
 ;; ipa_make_function_const / ipa_make_function_pure (local = true):

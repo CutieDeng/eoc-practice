@@ -45,7 +45,8 @@
          "fold.rkt"
          "mfn.rkt"
          "sreal.rkt"
-         (only-in "niter-bounds.rkt" estimate-all-loops)
+         (only-in "niter-bounds.rkt" estimate-one-loop)
+         (only-in "loop-bounds.rkt" loop-bound lbnd-estimate lbnd-likely)
          "loops.rkt"
          (rename-in "niter.rkt" [simple-iv simple-iv*]))
 
@@ -478,8 +479,35 @@
 (define (predict-loops! p)
   (define cfg (P-cfg p)) (define m (P-m p)) (define st (P-st p))
   (define loops (P-loops p))
+  (define fndecl (GS-fndecl st))
   (define max-iter 100)
+  (define (outer l) (and (Loop-parent l) (findf (lambda (o) (= (Loop-num o) (Loop-parent l))) loops)))
+  ;; with_recursion: the loops (and their outer loops) holding a recursive call
+  (define with-recursion
+    (for*/fold ([s (hasheqv)]) ([bb (in-pvector (cfg-bbs cfg))] [id (in-list (mfn-stmts m bb))]
+                                #:when (let ([g (mfn-stmt m id)])
+                                         (and (gcall? g) (let ([d (call-fndecl g)]) (and d (decl-eq? d fndecl))))))
+      (let up ([l (loop-of loops bb)] [s s]) (if (and l (not (hash-ref s (Loop-num l) #f))) (up (outer l) (hash-set s (Loop-num l) #t)) s))))
+  ;; estimated_stmt_executions / likely_max_stmt_executions run
+  ;; estimate_numbers_of_iterations (loop) with SCEV initialized, on the
+  ;; CFG as determine_unlikely_bbs left it (the unlikely blocks' count
+  ;; zero, the edges into them never; the other probabilities as they
+  ;; came in)
+  (define estimated (make-hasheqv))              ; loop number -> loop->bounds
+  (define (estimate! l)
+    (hash-ref! estimated (Loop-num l)
+               (lambda ()
+                 (define pf (GCfg-profile cfg))
+                 (define view
+                   (cfg-set-profile cfg (GProf (for/fold ([c (if pf (GProf-counts pf) intmap-empty)]) ([(bb _) (in-hash (P-zero p))]) (intmap-set c bb 0))
+                                               (for/fold ([h (if pf (GProf-probs pf) (hash))]) ([(e _) (in-hash (P-never p))]) (hash-set h e 0)))))
+                 (define-values (st1 records) (estimate-one-loop (P-st p) fndecl view (Loop-header l)))
+                 (set-P-st! p st1)
+                 records)))
+  (define (bounds l) (loop-bound (P-st p) fndecl (Loop-num l)))
   (for ([l (in-list (loops-innermost-first loops))])
+    (define recursion? (hash-ref with-recursion (Loop-num l) #f))
+    (define exit-predictor (if recursion? 'loop-exit-with-recursion 'loop-exit))
     (define exits (loop-exits cfg l))
     (define n-exits (for/sum ([e (in-list exits)]) (if (unlikely-edge? p (car e) (cdr e)) 0 1)))
     (when (> n-exits 0)
@@ -488,24 +516,33 @@
         (unless (or (unlikely-edge? p src dest) (predicted-by-loop-heuristics? p src))
           (predict-extra-loop-exits! p l src dest)
           (define niter (or (number-of-iterations p l src dest) (loop-niter-by-eval p l src dest)))
-          (cond
-            [niter
-             (define nitercst (if (< niter (sub1 max-iter)) (add1 niter) max-iter))
-             (unless (zero? nitercst)
-               (predict-edge! p src dest 'loop-iterations (rdiv BASE nitercst)))]
-            [else (void)])))
-      ;; the bound statement: the header's condition
-      (define hg (last-stmt p (Loop-header l)))
+          (define-values (nitercst predictor)
+            (cond
+              [niter (values (if (< niter (sub1 max-iter)) (add1 niter) max-iter) 'loop-iterations)]
+              ;; one exit: the iteration estimate of the statements, + 1
+              [(and (= n-exits 1) (begin (estimate! l) (lbnd-estimate (bounds l))))
+               => (lambda (est) (values (min (add1 est) max-iter) 'loop-iterations-guessed))]
+              ;; a likely upper bound below the loop-exit predictor's reach
+              [(and (= n-exits 1) (lbnd-likely (bounds l))
+                    (< (add1 (lbnd-likely (bounds l))) (rdiv BASE (- BASE (pred-hitrate exit-predictor)))))
+               (values (add1 (lbnd-likely (bounds l))) 'loop-iterations-max)]
+              [else (values #f #f)]))
+          (when (and nitercst (not (zero? nitercst)))
+            (predict-edge! p src dest predictor (rdiv BASE nitercst)))))
+      ;; the bound statement: the first condition of loop->bounds, else
+      ;; the header's last statement
+      (define hg (or (for/first ([r (in-list (hash-ref estimated (Loop-num l) '()))] #:when (gcond? (vector-ref r 2))) (vector-ref r 2))
+                     (last-stmt p (Loop-header l))))
       (define-values (bound-var bound-code bound-step iv-base)
         (if (and hg (gcond? hg)) (comparison-with-loop-invariant p l hg) (values #f #f #f #f)))
       (for ([bb (in-list (intbits->list (Loop-body l)))])
         (unless (predicted-by? p bb 'continue)
           (unless (predicted-by-loop-heuristics? p bb)
-            (define probability (max (hitrate 2) (quotient (- BASE (pred-hitrate 'loop-exit)) n-exits)))
+            (define probability (max (hitrate 2) (quotient (- BASE (pred-hitrate exit-predictor)) n-exits)))
             (for ([e (in-pvector (cfg-succs cfg bb))])
               (define d (GEdge-dest e))
               (when (or (< d 2) (not (loop-inside? l d)))
-                (predict-edge! p bb d 'loop-exit probability))))
+                (predict-edge! p bb d exit-predictor probability))))
           (when bound-var (predict-iv-comparison! p l bb bound-var iv-base bound-code bound-step))))
       ;; loop guard of a nested loop
       (when (Loop-parent l)
@@ -853,6 +890,6 @@
   (define counts (estimate-bb-frequencies! p))
   (define probs (for/hash ([(k v) (in-hash (P-probs p))]) (values k v)))
   (define cfg1 (for/fold ([c (cfg-set-profile cfg (GProf counts probs))]) ([mm (in-list (reverse (P-msgs p)))]) (cfg-add-message c mm)))
-  ;; predict_loops runs with SCEV initialized: the loops' iteration bounds
-  ;; are estimated (estimate_numbers_of_iterations) on this body
-  (values cfg1 (if (pair? loops) (estimate-all-loops st0 fndecl cfg) st0)))
+  ;; the bounds predict_loops estimated (without TDF_DETAILS, only for
+  ;; single-exit loops whose exit count is not a constant)
+  (values cfg1 (P-st p)))
