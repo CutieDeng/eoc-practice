@@ -17,7 +17,7 @@
 ;;   convert_cost (SI <- DI)      0    group 0 cost of the sizetype biv: 0
 ;;   mult_by_coeff_cost 1         0    (synth_mult: alg_m)
 ;;   mult_by_coeff_cost 12, -12   8 (gcc 15) / 12 (gcc 12)
-;;   address_cost [r], [r+imm], [r+r]   0
+;;   address_cost: aarch64_address_cost ported (below)
 ;;   force_expr_to_var_cost: integer 4, symbol 25 (speed) / 13 (size),
 ;;     address 5, target_spill_cost 16 (speed) / 4 (size),
 ;;     target_reg_cost 4 (speed), 29 available, 19 call-clobbered,
@@ -40,7 +40,7 @@
          add-cost shift-cost shiftadd-cost shiftsub0-cost shiftsub1-cost convert-cost mult-by-coeff-cost
          integer-cost symbol-cost address-const-cost target-spill-cost target-reg-cost
          target-avail-regs target-clobbered-regs target-res-regs
-         memory-address-valid? address-cost preferred-mem-scale-factor)
+         memory-address-valid? address-cost preferred-mem-scale-factor use-autoinc?)
 
 ;; the parts of an address (struct mem_address): SYMBOL BASE INDEX are
 ;; present or not, STEP is #f or the index multiplier, OFFSET #f or an integer
@@ -76,6 +76,13 @@
     [(and (equal? mode "DI") (memv coef '(12 -12))) (if (>= (major) 13) 8 12)]
     [else (unmeasured (format "mult_by_coeff_cost (~a, ~a)" coef mode))]))
 
+;; USE_{LOAD,STORE}_{PRE,POST}_{INCREMENT,DECREMENT} (MODE): aarch64.h
+;; defines all eight as 0 in 12.5 and 15.2 ("Disable auto-increment in
+;; move_by_pieces et al."), although HAVE_{PRE,POST}_{IN,DE}CREMENT are 1;
+;; ivopts therefore adds no autoincrement candidate and
+;; get_address_cost_ainc is infinite.  KIND: 'pre-inc 'pre-dec 'post-inc 'post-dec
+(define (use-autoinc? kind mode) #f)
+
 (define (integer-cost speed) 4)
 (define (symbol-cost speed) (if speed 25 13))
 (define (address-const-cost speed) 5)
@@ -103,12 +110,26 @@
     [off (imm-ok? off)]
     [else #t]))
 
+;; address_cost (rtlanal.cc): 1000 for an address the target refuses,
+;; else aarch64_address_cost (the same in 12.5 and 15.2): the
+;; classify_address type's cost plus, for a scaled index, the
+;; addr_scale_costs entry of the access size.  The tables of the two
+;; tunings apple-m1 selects (12.5 darwin: cortexa73_tunings ->
+;; generic_addrcost_table; 15.2: generic_armv8_a_addrcost_table) are equal.
+(define addrcost-scale-hi 1) (define addrcost-scale-si 0) (define addrcost-scale-di 0) (define addrcost-scale-ti 1)
+(define addrcost-register-offset 0) (define addrcost-imm-offset 0)
 (define (address-cost mode p speed)
   (cond
-    [(not (memory-address-valid? mode p)) (error 'address-cost "invalid address ~a" p)]
-    [(and (mem-parts-index p) (mem-parts-step p) (not (= 1 (mem-parts-step p))))
-     (unmeasured "address_cost (base + index * scale)")]
-    [else 0]))
+    [(not (memory-address-valid? mode p)) 1000]
+    ;; ADDRESS_REG_REG: base + index, shifted when the index is scaled
+    [(and (mem-parts-base p) (mem-parts-index p))
+     (define shifted? (and (mem-parts-step p) (not (= 1 (mem-parts-step p)))))
+     (+ addrcost-register-offset
+        (if shifted?
+            (case (mode-bits mode) [(16) addrcost-scale-hi] [(32) addrcost-scale-si] [(64) addrcost-scale-di] [else addrcost-scale-ti])
+            0))]
+    ;; ADDRESS_REG_IMM: a register (an index alone is one) with an offset, possibly 0
+    [else addrcost-imm-offset]))
 
 ;; preferred_mem_scale_factor: a scaled index is not cheaper
 (define (preferred-mem-scale-factor mode) 1)

@@ -32,8 +32,9 @@
 ;; cunroll left (niter-bounds.rkt / loop-bounds.rkt).
 ;;
 ;; Not ported: doloop prediction (aarch64's predict_doloop_p is false),
-;; autoincrement candidates and costs (no use on the fixtures has a step
-;; equal to its access size), USE_PTR_ADDRESS (internal-function memory
+;; the autoincrement rewriting (IP_BEFORE_USE / IP_AFTER_USE positions:
+;; aarch64 sets every USE_*_INCREMENT to 0, so no such candidate exists),
+;; USE_PTR_ADDRESS (internal-function memory
 ;; accesses), symbols in addresses (move_fixed_address_to_symbol),
 ;; the debug statement fixups of remove_unused_ivs, range information in
 ;; tree-affine / split_constant_offset.
@@ -1141,17 +1142,29 @@
          [else
           (define-values (sb so) (strip-offset b1))
           (unless (zero? so) (record-common-cand! sb step u))]))
-     ;; add_autoinc_candidates: no access size equals a step on the fixtures
+     ;; at last the autoincrement candidates (important)
      (when (address-p (use-type u)) (add-autoinc-candidates! (iv-base x) (iv-step x) u))]))
 
+;; add_autoinc_candidates: an increment once per iteration (the use in
+;; the loop itself, dominating the latch), a constant step equal to the
+;; access size (or its negation), and the target's USE_*_INCREMENT /
+;; USE_*_DECREMENT for the access mode (target-costs.rkt; all false on
+;; aarch64, so no candidate is added there)
 (define (add-autoinc-candidates! base step u)
   (define l (D-loop (data)))
   (define ubb (stmt-bb (use-stmt u)))
   (when (and (eq? (bb-loop ubb) l) (dominated-by? (latch) ubb) (icst? step))
-    (define size (mode-size (machine-mode-of (use-mem-type u))))
+    (define mode (machine-mode-of (use-mem-type u)))
+    (define size (mode-size mode))
     (define s (int-cst-value step))
-    (when (or (= size s) (= size (- s)))
-      (error 'ivopts "autoincrement candidates are not ported"))))
+    (when (or (and (use-autoinc? 'pre-inc mode) (= size s)) (and (use-autoinc? 'pre-dec mode) (= size (- s))))
+      (define new-base
+        (if (ty-ptr? (tree-type base))
+            (gf-build2 'pointer_plus_expr (tree-type base) base (gf-build1 'negate_expr (tree-type step) step))
+            (gf-build2 'minus_expr (tree-type base) base (gf-convert (tree-type base) step))))
+      (add-candidate-1! new-base step #t 'before-use u (use-stmt u)))
+    (when (or (and (use-autoinc? 'post-inc mode) (= size s)) (and (use-autoinc? 'post-dec mode) (= size (- s))))
+      (add-candidate-1! base step #t 'after-use u (use-stmt u)))))
 
 (define (add-iv-candidate-for-groups!)
   (for ([g (in-list (D-groups (data)))]) (add-iv-candidate-for-use! (car (group-uses g))))
@@ -1169,8 +1182,9 @@
   (add-standard-iv-candidates!)
   (add-iv-candidate-for-bivs!)
   (add-iv-candidate-for-groups!)
-  ;; set_autoinc_for_original_candidates: no address use next to an
-  ;; original biv increment can autoincrement on the fixtures
+  ;; set_autoinc_for_original_candidates: autoinc_possible_for_pair needs
+  ;; can_autoinc from get_address_cost_ainc, never set when the target has
+  ;; no autoincrement (use-autoinc? is false for every mode on aarch64)
   (record-important-candidates!)
   (unless (D-consider-all (data))
     (for ([g (in-list (D-groups (data)))] #:when (eq? (group-type g) 'compare))
@@ -1435,7 +1449,9 @@
         (void)]
        [else (set! parts (struct-copy mem-parts parts [index #f]))])]
     [else
-     ;; get_address_cost_ainc: the steps never equal the access size on the fixtures
+     ;; get_address_cost_ainc: infinite when the target has no
+     ;; USE_*_INCREMENT / DECREMENT for the mode (aarch64), so can_autoinc
+     ;; stays false and the plain address cost is used
      (unless (aff-zero? aff-inv)
        (define p2 (struct-copy mem-parts parts [offset (aff-offset aff-inv)]))
        (when (memory-address-valid? mem-mode p2)
@@ -2313,7 +2329,9 @@
        (case (cand-pos c)
          [(normal) (let ([bb (ip-normal-pos l)]) (values bb (last (rw-stmts bb)) #f))]
          [(end) (values (ip-end-pos l) #f #t)]
-         [else (error 'ivopts "autoincrement positions are not ported")]))
+         ;; IP_BEFORE_USE / IP_AFTER_USE exist only with autoincrement
+         ;; addressing (use-autoinc?), which aarch64 does not enable
+         [else (error 'ivopts "autoincrement positions: the target enables no autoincrement")]))
      (define-values (vb va) (create-iv! (iv-base (cand-iv c)) (iv-step (cand-iv c)) var bb before after?))
      (set-cand-var-before! c vb) (set-cand-var-after! c va)]))
 
