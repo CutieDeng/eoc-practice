@@ -315,13 +315,21 @@
          [c (set-preds c new (pvector-cons-right (cfg-preds c new) src))])
     c))
 
-;; redirect_edge_succ_nodup
+;; redirect_edge_succ_nodup: an existing edge to NEW takes E's flags and
+;; probability (profile_probability operator+: never is the identity,
+;; uninitialized absorbs, the sum is capped)
 (define (redirect-edge-succ-nodup c src old new)
   (define s (find-edge c src new))
   (cond
     [(and s (not (= old new)))
      (define e (find-edge c src old))
-     (remove-edge (or-edge-flags c src new (GEdge-flags e)) src old)]
+     (define pf (GCfg-profile c))
+     (define ps (prof-prob c src new)) (define pe (prof-prob c src old))
+     (define sum (cond [(eqv? pe 0) ps] [(eqv? ps 0) pe] [(not (and ps pe)) #f] [else (min (+ ps pe) 134217728)]))
+     (define c1 (if pf
+                    (cfg-set-profile c (GProf (GProf-counts pf) (if sum (hash-set (GProf-probs pf) (cons src new) sum) (hash-remove (GProf-probs pf) (cons src new)))))
+                    c))
+     (remove-edge (or-edge-flags c1 src new (GEdge-flags e)) src old)]
     [else (redirect-edge-succ c src old new)]))
 
 (define (single-succ-p c i) (= 1 (pvector-length (cfg-succs c i))))

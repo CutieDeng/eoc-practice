@@ -3,8 +3,8 @@
 ;; ============================================================
 ;; opt: pass_dominator (gcc/tree-ssa-dom.cc) with the forward jump
 ;; threader of tree-ssa-threadedge.cc and the path registry checks of
-;; tree-ssa-threadupdate.cc, GCC 15 (the GCC 12 dump differs only in
-;; the range export, which GCC 12's DOM does not have)
+;; tree-ssa-threadupdate.cc, GCC 15, with the GCC 12-14 differences
+;; listed below
 ;; ============================================================
 ;;
 ;; (dom-pass st fndecl cfg) -> (values cfg st)
@@ -33,9 +33,30 @@
 ;; hybrid_jt_simplifier's path range query over the jt_state blocks
 ;; (ranger.rkt rg-path-range-of-cond; switches are not resolved that
 ;; way).  cancel_invalid_paths stops after the loop exit check once
-;; PROP_loop_opts_done is set (dom3).  The surviving threads go to
-;; threadupdate.rkt.  Not ported: test_for_singularity, the alias walk of lookup_avail_expr (a load
-;; with a different VUSE is a miss), EH and noreturn fixups.
+;; PROP_loop_opts_done is set (dom3).  When a condition was folded
+;; (cfg_altered), the edges leaving a block with a non-executable
+;; successor edge go to remove_jump_threads_including.  The surviving
+;; threads go to threadupdate.rkt.
+;;
+;; register_equivs_stmt propagates SSA_NAME_VALUE into all uses, the
+;; VUSE included, and restoring them relinks the statement's uses
+;; (mfn-relink!).  __builtin_constant_p stops a thread;
+;; __builtin_object_size records no equivalence.
+;;
+;; Version differences: GCC <= 14 simplify_control_stmt_condition_1
+;; looks through (A & B) CMP 0, (A | B) CMP 0 and (A CMP B) CMP 0
+;; (recursion limit 4); param_max_jump_thread_paths (64) is GCC 15 only.
+;;
+;; Not ported: test_for_singularity, the alias walk of lookup_avail_expr
+;; (a load with a different VUSE is a miss), EH and noreturn fixups;
+;; GCC 12's dom_jt_simplifier range queries (vr_values:
+;; vrp_evaluate_conditional, find_case_label_range, the singleton of
+;; extract_range_from_stmt, the ranges dom_jt_state records), so a GCC 12
+;; thread that needs a range is missed; fold_binary on the comparison
+;; is reduced to two integer constants or the same integral name
+;; (pointers, ADDR_EXPRs and reals are not folded); computed gotos;
+;; EDGE_COMPLEX / abnormal edges (none are built for C here); unique
+;; internal calls and volatile asm (not in the IL).
 ;; ============================================================
 
 (require racket/list
@@ -65,6 +86,9 @@
 (provide dom-pass dom-pass*)
 
 (define PARAM-MAX-JUMP-THREAD-PATHS 64)
+;; tcc_comparison
+(define COMPARISON-CODES '(lt_expr le_expr gt_expr ge_expr eq_expr ne_expr unordered_expr ordered_expr
+                           unlt_expr unle_expr ungt_expr unge_expr uneq_expr ltgt_expr))
 (define PARAM-MAX-JUMP-THREAD-DUPLICATION-STMTS 15)
 
 (define (icst? t) (and (Tree? t) (eq? (tree-code t) 'integer_cst)))
@@ -104,6 +128,7 @@
     (define i (dom-index dom bb))
     (if i (for/list ([k (in-list (sort (pvector->list (dom-children dom i)) <))]) (dom-node dom k)) '()))
   (define non-exec (make-hash))                 ; (src . dest) -> #t
+  (define cfg-altered #f)                       ; a condition was folded
   (define (executable? s d) (not (hash-ref non-exec (cons s d) #f)))
   (define (last-id bb) (mfn-last m bb))
   (define (last-stmt bb) (let ([id (last-id bb)]) (and id (mfn-stmt m id))))
@@ -484,6 +509,7 @@
                (cond-make id (not (= v 0)))
                (define-values (te fe) (true-false-edges bb))
                (hash-set! non-exec (cons bb (if (= v 0) te fe)) #t)
+               (set! cfg-altered #t)
                (return (if (= v 0) fe te)))]))
         (eliminate-redundant-computations! id)
         (define g2 (mfn-stmt m id))
@@ -506,6 +532,7 @@
            (when (and v (icst? v))
              (cond-make id (not (integer-zerop v)))
              (define-values (te fe) (true-false-edges bb))
+             (set! cfg-altered #t)
              (return (if (integer-zerop v) fe te)))]
           [else (void)]))
       #f))
@@ -616,8 +643,9 @@
   (define (jt-append! bb) (set! jt-blocks (append jt-blocks (list bb))))
   (define paths '())
 
+;; empty_block_with_phis_p: gsi_start_nondebug_bb, a label is a statement
   (define (empty-block-with-phis? bb)
-    (and (null? (filter (lambda (id) (not (glabel? (mfn-stmt m id)))) (mfn-stmts m bb))) (pair? (mfn-phis m bb))))
+    (and (null? (mfn-stmts m bb)) (pair? (mfn-phis m bb))))
   (define (control-stmt? g) (and g (or (gcond? g) (ggoto? g) (gswitch? g))))
   (define (potentially-threadable? bb)
     (cond
@@ -692,6 +720,8 @@
       (for ([id (in-list (mfn-stmts m d))])
         (define g (mfn-stmt m id))
         (set! last id)
+        ;; __builtin_constant_p: constant on each path, not after the merge
+        (when (builtin-call? g "__builtin_constant_p") (return #f))
         (unless (glabel? g)
           (set! stmt-count (add1 stmt-count))
           (when (> stmt-count max-count)
@@ -699,10 +729,13 @@
               (set! max-count (+ max-count (estimate-killed d)))
               (msg! "threading bb ~a up to ~a stmts" d max-count))
             (when (> stmt-count max-count) (return #f)))
-          (when (or (and (gassign? g) (ssa-name? (gassign-lhs g)))
-                    (and (gcall? g) (gcall-lhs g) (ssa-name? (gcall-lhs g))))
+          (when (and (or (and (gassign? g) (ssa-name? (gassign-lhs g)))
+                         (and (gcall? g) (gcall-lhs g) (ssa-name? (gcall-lhs g))))
+                     (not (builtin-call? g "__builtin_object_size")))
             (register-equivs-stmt! id))))
       last))
+  (define (builtin-call? g name)
+    (and (gcall? g) (let ([d (call-fndecl g)]) (and d (call-fndecl-builtin? d) (equal? (decl-name d) name)))))
 
   (define (register-equivs-stmt! id)
     (define g (mfn-stmt m id))
@@ -715,9 +748,14 @@
       (cond
         [(and (pair? (stmt-use-names g))
               (or (not cached0) (and (not (ssa-name? cached0)) (not (is-gimple-min-invariant st cached0)))))
-         ;; temporarily copy-propagate the operands and look the statement up
-         (define g* (stmt-map-uses st g (lambda (t) (or (ssa-value t) t))))
-         (lookup-avail-expr g* #f)]
+         ;; temporarily copy-propagate the operands, the VUSE included
+         ;; (SSA_OP_ALL_USES), and look the statement up; restoring the
+         ;; operands with SET_USE relinks every use of the statement
+         (define g0* (stmt-map-uses st g (lambda (t) (or (ssa-value t) t))))
+         (define v (stmt-vuse g))
+         (define g* (if (and v (ssa-name? v) (ssa-value v)) (stmt-set-flag g0* 'vuse (ssa-value v)) g0*))
+         (begin0 (lookup-avail-expr g* #f)
+                 (mfn-relink! m id))]
         [else cached0]))
     (when (and cached (or (ssa-name? cached) (is-gimple-min-invariant st cached)))
       (record-const-or-copy! lhs cached)))
@@ -749,8 +787,45 @@
                  idx)])]
          [else #f])]
       [else #f]))
-  (define (simplify-condition-1 code0 a0 b0)
+  ;; simplify_control_stmt_condition_1 (LIMIT = 4 from the caller)
+  (define (simplify-condition-1 code0 a0 b0 [limit 4])
     (define-values (code a b) (if (tree-swap-operands-p st a0 b0) (values (swap-tree-comparison code0) b0 a0) (values code0 a0 b0)))
+    (cond
+      [(= limit 0) #f]
+      [(and (< major 15) (simplify-condition-recurse code a b limit)) => values]
+      [else (simplify-condition-fold code a b)]))
+  ;; GCC <= 14: (A & B) CMP 0, (A | B) CMP 0 and (A CMP B) CMP 0 for
+  ;; CMP = EQ / NE look into A and B (or A CMP B) through op0's definition
+  (define (simplify-condition-recurse code a b limit)
+    (define def (and (memq code '(eq_expr ne_expr)) (ssa-name? a) (icst? b) (integer-zerop b) (mfn-def-stmt m a)))
+    (define (t) (bool-cst 1)) (define (f) (bool-cst 0))
+    (define (zero? r) (and r (icst? r) (integer-zerop r)))
+    (define (nonzero? r) (and r (icst? r) (not (integer-zerop r))))
+    (cond
+      [(not (and def (gassign? def))) #f]
+      [(memq (gassign-code def) '(bit_and_expr bit_ior_expr))
+       (define and? (eq? (gassign-code def) 'bit_and_expr))
+       (define ne? (eq? code 'ne_expr))
+       (let/ec return
+         (define (check r)
+           (cond
+             [(and and? (zero? r)) (return (if ne? (f) (t)))]
+             [(and (not and?) (nonzero? r)) (return (if ne? (t) (f)))]
+             [else (void)]))
+         (define r1 (simplify-condition-1 'ne_expr (gassign-rhs1 def) b (sub1 limit)))
+         (check r1)
+         (define r2 (simplify-condition-1 'ne_expr (gassign-rhs2 def) b (sub1 limit)))
+         (check r2)
+         (cond
+           [(and r1 r2 and? (= 1 (type-precision* st (tree-type a))) (nonzero? r1) (nonzero? r2)) (if ne? (t) (f))]
+           [(and r1 r2 (not and?) (zero? r1) (zero? r2)) (if ne? (f) (t))]
+           [else #f]))]
+      [(memq (gassign-code def) COMPARISON-CODES)
+       (define nc (if (eq? code 'eq_expr) (invert-tree-comparison (gassign-code def)) (gassign-code def)))
+       (define r (and nc (simplify-condition-1 nc (gassign-rhs1 def) (gassign-rhs2 def) (sub1 limit))))
+       (and r (is-gimple-min-invariant st r) r)]
+      [else #f]))
+  (define (simplify-condition-fold code a b)
     (define res
       (cond
         [(and (icst? a) (icst? b)) (fold-const-compare st code bool a b)]
@@ -824,7 +899,9 @@
        (cond
          [(pair? (mfn-phis m d)) #f]
          [else
-          (define real (filter (lambda (id) (not (glabel? (mfn-stmt m id)))) (mfn-stmts m d)))
+          ;; gsi_start_nondebug_bb: a label stops the walk like any
+          ;; statement other than a control statement
+          (define real (mfn-stmts m d))
           (cond
             [(null? real)
              (cond
@@ -871,7 +948,7 @@
                                                  (and (ssa-name? v2) (mfn-single-use? m v2) (mfn-def-stmt m v2)))
                                                def)])
                                 (and def* (gassign? def*)
-                                     (memq (gassign-code def*) '(lt_expr le_expr gt_expr ge_expr eq_expr ne_expr))))))))))))
+                                     (memq (gassign-code def*) COMPARISON-CODES)))))))))))
 
   ;; jt_path_registry::cancel_invalid_paths -> #t when cancelled
   (define (cancel-invalid-path? path)
@@ -908,7 +985,8 @@
     (define path (box '()))
     (define visited (make-hasheqv))
     (hash-set! visited s #t) (hash-set! visited d #t)
-    (define limit (box PARAM-MAX-JUMP-THREAD-PATHS))
+    ;; param_max_jump_thread_paths exists in GCC >= 15
+    (define limit (box (if (>= major 15) PARAM-MAX-JUMP-THREAD-PATHS +inf.0)))
     (define threaded (if (dfs-back? s d) 0 (thread-through-normal-block! path s d visited limit)))
     (cond
       [(> threaded 0) (register-jump-thread! (unbox path)) (jt-pop!)]
@@ -1000,6 +1078,15 @@
   (cond
     [(null? paths) (cleanup-tree-cfg st1 cfg1 print-cond-rhs)]
     [else
-     (define-values (cfg2 st2 table _threaded?) (thread-through-all-blocks st1 fndecl cfg1 (reverse paths) loops #:may-peel-loop-headers? may-peel-loop-headers?))
+     ;; remove_jump_threads_including: when a condition was folded, every
+     ;; edge leaving a block with a non-executable successor edge
+     (define removed
+       (and cfg-altered
+            (for*/hash ([bb (in-pvector (cfg-bbs cfg))]
+                        #:when (for/or ([d (in-list (succs bb))]) (not (executable? bb d)))
+                        [d (in-list (succs bb))])
+              (values (cons bb d) #t))))
+     (define-values (cfg2 st2 table _threaded?) (thread-through-all-blocks st1 fndecl cfg1 (reverse paths) loops #:may-peel-loop-headers? may-peel-loop-headers?
+                                                                           #:removed-edges removed))
      (cleanup-tree-cfg st2 cfg2 print-cond-rhs
                        #:after-pre (lambda (st c pre) (if (null? table) (values c st) (update-ssa st fndecl c table #:released-before pre))))]))

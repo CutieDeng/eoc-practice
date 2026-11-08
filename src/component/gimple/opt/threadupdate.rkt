@@ -48,11 +48,26 @@
 ;; two targets, an empty latch target, a target not dominating the
 ;; latch) cancel every thread into the header.
 ;;
+;; update_cfg first drops the paths using an edge in m_removed_edges
+;; (REMOVED-EDGES, from DOM); m_paths removals are unordered_remove.
+;; duplicate_blocks lives for one thread_block_1 call.  The redirection
+;; hash table shrinks before a traverse when it is too empty.
+;;
+;; Version gates (12.5, 13.3, 14.2, 15.2): the "Non-empty
+;; EDGE_NO_COPY_SRC_BLOCK" cancel and the can_duplicate_block_p check of
+;; the removed-edge filter >= 13; a joiner copy whose on-path edge
+;; already reaches the final destination keeps that edge for update_profile
+;; >= 14 (before, redirect_edge_and_branch returns NULL and the profile
+;; update of the duplicate is skipped).
+;;
 ;; Not ported: the header peeling of thread_through_loop_header (an
-;; error when a thread passes all its checks), the removed-edge filter of update_cfg
-;; (m_removed_edges), debug statements.  Edges are identified by their
-;; (src . dest) pair, so a path whose later edge was redirected by an
-;; earlier thread (GCC follows the edge object) is not followed.
+;; error when a thread passes all its checks), debug statements, the
+;; optimize_function_for_size_p pruning of mark_threaded_blocks (-Os and
+;; cold functions), the profile quality: a count of 0 is taken as
+;; precise (update_profile's early return), probability_in /
+;; operator+ ignore quality.  Edges are identified by their (src . dest)
+;; pair, so a path whose later edge was redirected by an earlier thread
+;; (GCC follows the edge object) is not followed.
 ;; ============================================================
 
 (require racket/list
@@ -100,8 +115,10 @@
 (define (c< a b) (and a b (< a b)))
 (define (p> a b) (and a b (> a b)))
 
-(define (thread-through-all-blocks st0 fndecl cfg0 paths0 loops #:may-peel-loop-headers? [may-peel-loop-headers? #t])
+(define (thread-through-all-blocks st0 fndecl cfg0 paths0 loops #:may-peel-loop-headers? [may-peel-loop-headers? #t]
+                                   #:removed-edges [removed-edges #f])
   (define st st0)
+  (define major (gcc-major-version st0))
   (define cfg cfg0)
   (define stamp (cfg-next-stamp cfg0))
   (define (fresh-stamp!) (begin0 stamp (set! stamp (add1 stamp))))
@@ -214,26 +231,41 @@
   (define (thread-path e) (hash-ref aux e #f))
   (define duplicate-blocks (make-hasheqv))
 
+  ;; m_paths: removals are vec::unordered_remove (the last path moves
+  ;; into the slot and is examined next)
+  (define pv (list->vector paths0))
+  (define np (vector-length pv))
+  (define (unordered-remove! i) (set! np (sub1 np)) (vector-set! pv i (vector-ref pv np)))
+  (define (walk-paths! f)                        ; F: path -> 'keep | 'remove
+    (let loop ([i 0])
+      (when (< i np)
+        (if (eq? (f (vector-ref pv i)) 'remove) (begin (unordered-remove! i) (loop i)) (loop (add1 i))))))
+  ;; update_cfg: the paths through an edge of a block where DOM folded a
+  ;; condition (m_removed_edges), and GCC >= 13 paths copying a block
+  ;; can_duplicate_block_p refuses (always allowed here)
+  (when removed-edges
+    (walk-paths! (lambda (p) (if (for/or ([pe (in-list p)]) (hash-ref removed-edges (e-of pe) #f)) 'remove 'keep))))
   ;; mark_threaded_blocks
-  (define paths paths0)
   (define tmp (make-hasheqv))
   (define (joiner-path? p) (and (> (length p) 1) (eq? (type-of (cadr p)) 'copy-joiner)))
-  (for ([p (in-list paths)] #:when (and (> (length p) 1) (not (joiner-path? p))))
-    (hash-set! aux (e-of (car p)) p)
-    (hash-set! tmp (cadr (car p)) #t))
-  (set! paths
-        (for/list ([p (in-list paths)]
-                   #:unless (and (joiner-path? p) (thread-path (e-of (car p)))
-                                 (not (eq? (thread-path (e-of (car p))) p))))
-          (when (and (joiner-path? p) (not (thread-path (e-of (car p))))) (hash-set! aux (e-of (car p)) p))
-          p))
-  (set! paths
-        (for/list ([p (in-list paths)]
-                   #:unless (and (joiner-path? p) (eq? (thread-path (e-of (car p))) p)
-                                 (for/or ([pe (in-list (cdr p))]) (thread-path (e-of pe)))
-                                 (begin (hash-remove! aux (e-of (car p))) #t)))
-          (when (and (joiner-path? p) (eq? (thread-path (e-of (car p))) p)) (hash-set! tmp (cadr (car p)) #t))
-          p))
+  (for ([i (in-range np)])
+    (define p (vector-ref pv i))
+    (when (and (> (length p) 1) (not (joiner-path? p)))
+      (hash-set! aux (e-of (car p)) p)
+      (hash-set! tmp (cadr (car p)) #t)))
+  ;; the joiner paths on a start edge without a path
+  (walk-paths! (lambda (p)
+                 (cond
+                   [(not (joiner-path? p)) 'keep]
+                   [(not (thread-path (e-of (car p)))) (hash-set! aux (e-of (car p)) p) 'keep]
+                   [else 'remove])))
+  ;; then those whose later edges carry no other path
+  (walk-paths! (lambda (p)
+                 (define e (e-of (car p)))
+                 (cond
+                   [(not (and (joiner-path? p) (eq? (thread-path e) p))) 'keep]
+                   [(for/or ([pe (in-list (cdr p))]) (thread-path (e-of pe))) (hash-remove! aux e) 'remove]
+                   [else (hash-set! tmp (cadr (car p)) #t) 'keep])))
   (define threaded-blocks (hash-copy tmp))
   ;; a joiner's final destination must see the same PHI arguments
   (for* ([bb (in-list (sort (hash-keys tmp) <))] [p (in-list (preds bb))])
@@ -363,36 +395,41 @@
     (define-values (has-joiner path-in path-out) (compute-path-counts rd need-correction?))
     (for/fold ([cnt 0]) ([pe (in-list (cdr path))] [i (in-naturals 1)])
       (define epath (e-of pe))
-      (define dup (vector-ref (rd-dups rd) cnt))
+      (define (dup) (vector-ref (rd-dups rd) cnt))   ; dup_blocks[count], copied elements only
       (define idx (if multi? 0 i))
       (case (type-of pe)
         [(copy-joiner)
-         (update-destination-phis! local-bb dup path idx)
+         (update-destination-phis! local-bb (dup) path idx)
          (define e2
            (cond
              [(not (any-remaining-duplicated? path i))
               (cond
                 [(not (= (cdr epath) (cdr elast)))
-                 (define-values (e2 created?) (redirect-and-branch! dup (cdr epath) (cdr elast)))
+                 (define-values (e2 created?) (redirect-and-branch! (dup) (cdr epath) (cdr elast)))
                  (when created? (copy-phi-args! (cdr e2) elast e2 path idx))
                  e2]
-                [else (cons dup (cdr epath))])]
+                ;; GCC >= 14 keeps the victim; before, redirect_edge_and_branch
+                ;; to the same destination returns NULL
+                [(>= major 14) (cons (dup) (cdr epath))]
+                [else #f])]
              [else
-              (define-values (e2 _c) (redirect-and-branch! dup (cdr epath) (vector-ref (rd-dups rd) (add1 cnt))))
+              (define-values (e2 _c) (redirect-and-branch! (dup) (cdr epath) (vector-ref (rd-dups rd) (add1 cnt))))
               (for/first ([j (in-range (add1 i) (length path))] #:when (eq? (type-of (list-ref path j)) 'copy-src))
                 (copy-phi-arg-into-existing-phi! (e-of (list-ref path (sub1 j))) e2))
               e2]))
          (update-profile! epath e2 path-in path-out)]
         [(copy-src)
-         (remove-ctrl-stmt-and-useless-edges! dup #f)
-         (create-edge-and-update-destination-phis! rd dup idx)
-         (update-profile! epath (cons dup (cdr elast)) path-out path-out)]
+         (remove-ctrl-stmt-and-useless-edges! (dup) #f)
+         (create-edge-and-update-destination-phis! rd (dup) idx)
+         (update-profile! epath (cons (dup) (cdr elast)) path-out path-out)]
         [else (update-profile! epath #f path-out path-out)])
       (if (memq (type-of pe) '(copy-joiner copy-src)) (add1 cnt) cnt))
     (void))
 
   ;; thread_block_1
   (define (thread-block-1! bb joiners?)
+    ;; local_info.duplicate_blocks lives for one thread_block_1 call
+    (hash-clear! duplicate-blocks)
     (define rds (htab-new (length (succ-dests bb)) (lambda (rd) (rd-hash (rd-path rd)))))
     (define need-correction? #f)
     (define last-e2 #f)
@@ -404,8 +441,8 @@
         (define e2 (e-of (last path)))
         (define l (loop-father bb))
         (cond
-          ;; a NO_COPY_SRC block that became non-empty
-          [(and (eq? (type-of (last path)) 'no-copy)
+          ;; a NO_COPY_SRC block that became non-empty (GCC >= 13)
+          [(and (>= major 13) (eq? (type-of (last path)) 'no-copy)
                 (let ([ss (GBlock-stmts (block (car e2)))])
                   (and (not (pvector-empty? ss))
                        (let ([g (pvector-ref ss 0)]) (not (or (gcond? g) (ggoto? g) (gswitch? g)))))))
@@ -456,9 +493,11 @@
       (hash-remove! aux e))
     (pair? (htab-entries rds)))
 
-  ;; redirection_block_p: only labels before the control statement (or nothing)
+  ;; redirection_block_p: only labels, nops and clobbers before the
+  ;; control statement (or nothing)
   (define (redirection-block? bb)
-    (define real (for/list ([g (in-pvector (GBlock-stmts (block bb)))] #:unless (glabel? g)) g))
+    (define (clobber? g) (and (gassign? g) (tree-clobber-p (gassign-rhs1 g))))
+    (define real (for/list ([g (in-pvector (GBlock-stmts (block bb)))] #:unless (or (glabel? g) (clobber? g))) g))
     (or (null? real) (let ([g (car real)]) (or (gcond? g) (ggoto? g) (gswitch? g)))))
   (define (empty-block? bb)
     (and (pvector-empty? (phis bb)) (for/and ([g (in-pvector (GBlock-stmts (block bb)))]) (glabel? g))))
@@ -538,10 +577,11 @@
   (let loop ([i (modulo h size)])
     (define x (vector-ref slots i))
     (if (or (not x) (same? x)) i (loop (let ([j (+ i h2)]) (if (>= j size) (- j size) j))))))
+(define (htab-too-empty? t) (and (< (* (htab-n t) 8) (vector-length (htab-slots t))) (> (vector-length (htab-slots t)) 32)))
 (define (htab-expand! t)
   (define old (htab-slots t))
   (define elts (htab-n t))
-  (define nsize (if (> (* elts 2) (vector-length old)) (higher-prime (* elts 2)) (vector-length old)))
+  (define nsize (if (or (> (* elts 2) (vector-length old)) (htab-too-empty? t)) (higher-prime (* elts 2)) (vector-length old)))
   (define new (make-vector nsize #f))
   (for ([x (in-vector old)] #:when x)
     (vector-set! new (htab-probe new ((htab-hash-of t) x) (lambda (y) #f)) x))
@@ -554,8 +594,11 @@
   (cond
     [x (update! x)]
     [else (vector-set! (htab-slots t) i (make)) (set-htab-n! t (add1 (htab-n t)))]))
-;; traverse: slot order
-(define (htab-entries t) (for/list ([x (in-vector (htab-slots t))] #:when x) x))
+;; traverse: slot order, after shrinking a table that is too empty
+;; (elements * 8 < size and size > 32)
+(define (htab-entries t)
+  (when (htab-too-empty? t) (htab-expand! t))
+  (for/list ([x (in-vector (htab-slots t))] #:when x) x))
 
 ;; redirection_data
 (struct rdata (path [incoming #:mutable] dups))
