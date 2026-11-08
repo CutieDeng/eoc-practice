@@ -15,7 +15,8 @@
 ;;   before: record_equivalences_from_incoming_edge (edge equivalences
 ;;     and condition equivalences of the single non-loop predecessor),
 ;;     record_equivalences_from_phis (a PHI whose executable arguments
-;;     agree is a copy), redundant PHIs, optimize_stmt for every
+;;     agree is a copy; a virtual one is propagated into its uses and
+;;     removed), redundant PHIs, optimize_stmt for every
 ;;     statement (cprop_into_stmt from SSA_NAME_VALUE or a ranger
 ;;     singleton, fold_stmt after a change, GIMPLE_COND through the
 ;;     ranger, eliminate_redundant_computations, the redundant store
@@ -606,7 +607,20 @@
                   [else (values rhs #f)])])])))
       (when complete?
         (define r (or rhs lhs))
-        (when (may-propagate-copy st lhs r) (set-ssa-value! lhs r)))))
+        (cond
+          [(may-propagate-copy st lhs r) (set-ssa-value! lhs r)]
+          [(ssa-virtual? lhs)
+           ;; a virtual PHI cannot get a value (overlapping life ranges): its
+           ;; uses take R at once and the PHI is removed
+           (for ([uid (in-list (mfn-imm-uses m lhs))])
+             (define ug (mfn-stmt m uid))
+             (define (f t) (if (and (ssa-name? t) (ssa-name=? t lhs)) r t))
+             (mfn-replace! m uid (if (gphi? ug)
+                                     (phi-set-args ug (for/pvector ([a (in-pvector (gphi-args ug))]) (cons (car a) (f (cdr a)))))
+                                     (stmt-set-flag ug 'vuse (f (stmt-vuse ug))))))
+           (log-ssa-release! (ssa-name-version lhs))
+           (mfn-remove! m pid)]
+          [else (void)]))))
 
   ;; cprop_into_successor_phis
   (define (cprop-into-successor-phis! bb)

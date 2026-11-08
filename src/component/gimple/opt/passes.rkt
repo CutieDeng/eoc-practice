@@ -172,8 +172,6 @@
   (define (lp name fn [locals? #f]) (p name fn locals? #:gate in-loop-pipeline?))
   (define (has-loops? st decl cfg) (function-has-loops? cfg))
   (define (ccp2 st fndecl cfg) (ccp st fndecl cfg #:nonzero? #t))
-  ;; pass_rebuild_frequencies (GCC >= 14): the profile is consistent on the fixtures
-  (define (rebuild-frequencies st fndecl cfg) (values (cfg-add-message (cfg-clear-messages cfg) "Profile is consistent") st))
   (append
    (list (p 'fixup_cfg3 fixup-cfg-pass) (p 'adjust_alignment identity-pass) (p 'ccp2 ccp2) (p 'objsz1 identity-pass)
          (p 'waccess2 identity-pass))

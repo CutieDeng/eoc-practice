@@ -59,7 +59,7 @@
       (define key (car p)) (define val (cdr p))
       (case key
         [(ops) (let-values ([(v c*) (res c nodes val)]) (values v attrs c*))]
-        [(context mode) (values ops (hash-set attrs key val) c)]     ; (code . uid) / "DI": not refs
+        [(context mode attributes) (values ops (hash-set attrs key val) c)] ; (code . uid) / "DI" / ("cold" ...): not refs
         [(end-locus) (values ops (hash-set attrs key val) c)]        ; ("file" line col), a location like Node-loc
         [else (let-values ([(v c*) (res c nodes val)]) (values ops (hash-set attrs key v) c*))])))
   (define attrs*

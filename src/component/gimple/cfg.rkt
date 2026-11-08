@@ -38,7 +38,7 @@
          (only-in "gimplify.rkt" tree-swap-operands-p))
 
 (provide stmt-defs-for-release build-cfg cleanup-tree-cfg find-taken-edge stmt-ends-bb? cfg-next-stamp cfg-clear-messages cfg-add-message
-         cfg-set-profile prof-count prof-prob split-edge label-to-block make-edge remove-edge create-bb
+         cfg-set-profile prof-count prof-count-zero? prof-prob split-edge label-to-block make-edge remove-edge create-bb
          EDGE-FALLTHRU EDGE-TRUE-VALUE EDGE-FALSE-VALUE
          cfg-bbs cfg-block cfg-succs cfg-preds bb-last-stmt find-fallthru-edge extract-true-false-edges
          set-block block-set-phis block-set-stmts ENTRY EXIT
@@ -80,7 +80,14 @@
 (define (altered c i) (cfg-set-altered c (intbits-set (GCfg-altered c) i)))
 (define (cfg-add-message c m) (dump c "~a" m))
 (define (cfg-set-profile c pf) (GCfg (GCfg-blocks c) (GCfg-edges c) (GCfg-label->bb c) (GCfg-next-label-uid c) (GCfg-messages c) (GCfg-altered c) (GCfg-touched c) pf (GCfg-last-bb c)))
-(define (prof-count c bb) (let ([pf (GCfg-profile c)]) (and pf (intmap-ref (GProf-counts pf) bb #f))))
+;; a block count is an integer (a guessed local count) or 'zero, the
+;; precise profile_count::zero () (determine_unlikely_bbs), printed
+;; "[count: 0]"; prof-count reads 'zero as 0
+(define (prof-count c bb)
+  (let* ([pf (GCfg-profile c)] [v (and pf (intmap-ref (GProf-counts pf) bb #f))])
+    (if (eq? v 'zero) 0 v)))
+(define (prof-count-zero? c bb)
+  (let ([pf (GCfg-profile c)]) (and pf (eq? (intmap-ref (GProf-counts pf) bb #f) 'zero))))
 (define (prof-prob c src dest) (let ([pf (GCfg-profile c)]) (and pf (hash-ref (GProf-probs pf) (cons src dest) #f))))
 ;; edge probabilities follow their edge
 (define (prof-remove-edge c src dest)
@@ -1013,7 +1020,9 @@
       [pf
        (define src-count (intmap-ref (GProf-counts pf) src #f))
        (define pr (hash-ref (GProf-probs pf) (cons src nb) #f))   ; moved there by prof-move-edge
-       (define cnt (and src-count pr (quotient (+ (* src-count pr) (quotient 134217728 2)) 134217728)))
+       ;; apply_probability keeps a precise zero
+       (define cnt (cond [(eq? src-count 'zero) 'zero]
+                         [else (and src-count pr (quotient (+ (* src-count pr) (quotient 134217728 2)) 134217728))]))
        (cfg-set-profile c3 (GProf (if cnt (intmap-set (GProf-counts pf) nb cnt) (GProf-counts pf))
                                   (hash-set (GProf-probs pf) (cons nb dest) 134217728)))]
       [else c3]))

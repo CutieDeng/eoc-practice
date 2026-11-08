@@ -11,20 +11,20 @@
     int i = 0;
 
         int i = 0;
-    goto <D.3617>;
-    <D.3616>:;
+    goto <D.3619>;
+    <D.3618>:;
     s = *(a + (sizetype) ((long unsigned int) (i * 2) * 4)) + s;
     i++ ;
-    <D.3617>:;
-    if (i < n) goto <D.3616>; else goto <D.3614>;
-    <D.3614>:;
+    <D.3619>:;
+    if (i < n) goto <D.3618>; else goto <D.3616>;
+    <D.3616>:;
   }
   {
     int j = 0;
 
         int j = 0;
-    goto <D.3621>;
-    <D.3620>:;
+    goto <D.3623>;
+    <D.3622>:;
     {
       int v = g (*(a + (sizetype) ((long unsigned int) (j * 2) * 4)));
 
@@ -32,9 +32,37 @@
       s = s + v;
     }
     j++ ;
-    <D.3621>:;
-    if (j < n) goto <D.3620>; else goto <D.3618>;
-    <D.3618>:;
+    <D.3623>:;
+    if (j < n) goto <D.3622>; else goto <D.3620>;
+    <D.3620>:;
+  }
+  return s;
+}
+
+
+;; Function au_abort (null)
+;; enabled by -tree-original
+
+
+{
+  int s = 0;
+
+    int s = 0;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.3633>;
+    <D.3632>:;
+    if (*(a + (sizetype) ((long unsigned int) (i * 2) * 4)) < 0)
+      {
+        abort ();
+      }
+    s = *(a + (sizetype) ((long unsigned int) (i * 2) * 4)) + s;
+    i++ ;
+    <D.3633>:;
+    if (i < n) goto <D.3632>; else goto <D.3630>;
+    <D.3630>:;
   }
   return s;
 }
@@ -52,15 +80,44 @@
     int i = 0;
 
         int i = 0;
-    goto <D.3633>;
-    <D.3632>:;
+    goto <D.3645>;
+    <D.3644>:;
     t = s->d[i * 2] + t;
     i++ ;
-    <D.3633>:;
-    if (s->n > i) goto <D.3632>; else goto <D.3630>;
-    <D.3630>:;
+    <D.3645>:;
+    if (s->n > i) goto <D.3644>; else goto <D.3642>;
+    <D.3642>:;
   }
   return t;
+}
+
+
+;; Function au_rec (null)
+;; enabled by -tree-original
+
+
+{
+  int s = 0;
+
+    int s = 0;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.3655>;
+    <D.3654>:;
+    {
+      int v = au_rec (i + -1);
+
+            int v = au_rec (i + -1);
+      s = s + v;
+    }
+    i++ ;
+    <D.3655>:;
+    if (i < n) goto <D.3654>; else goto <D.3652>;
+    <D.3652>:;
+  }
+  return s;
 }
 
 

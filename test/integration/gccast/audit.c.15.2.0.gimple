@@ -1,6 +1,6 @@
 int au_two (int n, int * a)
 {
-  int D.4496;
+  int D.4518;
   int s;
 
   s = 0;
@@ -8,8 +8,8 @@ int au_two (int n, int * a)
     int i;
 
     i = 0;
-    goto <D.4474>;
-    <D.4473>:
+    goto <D.4476>;
+    <D.4475>:
     _1 = i * 2;
     _2 = (long unsigned int) _1;
     _3 = _2 * 4;
@@ -17,16 +17,16 @@ int au_two (int n, int * a)
     _5 = *_4;
     s = s + _5;
     i = i + 1;
-    <D.4474>:
-    if (i < n) goto <D.4473>; else goto <D.4471>;
-    <D.4471>:
+    <D.4476>:
+    if (i < n) goto <D.4475>; else goto <D.4473>;
+    <D.4473>:
   }
   {
     int j;
 
     j = 0;
-    goto <D.4478>;
-    <D.4477>:
+    goto <D.4480>;
+    <D.4479>:
     {
       int v;
 
@@ -39,21 +39,21 @@ int au_two (int n, int * a)
       s = s + v;
     }
     j = j + 1;
-    <D.4478>:
-    if (j < n) goto <D.4477>; else goto <D.4475>;
-    <D.4475>:
+    <D.4480>:
+    if (j < n) goto <D.4479>; else goto <D.4477>;
+    <D.4477>:
   }
-  D.4496 = s;
-  return D.4496;
+  D.4518 = s;
+  return D.4518;
 }
 
 
-int au_trail (struct au_s * s)
+int au_abort (int * a, int n)
 {
-  int D.4498;
-  int t;
+  int D.4522;
+  int s;
 
-  t = 0;
+  s = 0;
   {
     int i;
 
@@ -61,16 +61,82 @@ int au_trail (struct au_s * s)
     goto <D.4490>;
     <D.4489>:
     _1 = i * 2;
+    _2 = (long unsigned int) _1;
+    _3 = _2 * 4;
+    _4 = a + _3;
+    _5 = *_4;
+    if (_5 < 0) goto <D.4520>; else goto <D.4521>;
+    <D.4520>:
+    abort ();
+    <D.4521>:
+    _6 = i * 2;
+    _7 = (long unsigned int) _6;
+    _8 = _7 * 4;
+    _9 = a + _8;
+    _10 = *_9;
+    s = s + _10;
+    i = i + 1;
+    <D.4490>:
+    if (i < n) goto <D.4489>; else goto <D.4487>;
+    <D.4487>:
+  }
+  D.4522 = s;
+  return D.4522;
+}
+
+
+int au_trail (struct au_s * s)
+{
+  int D.4524;
+  int t;
+
+  t = 0;
+  {
+    int i;
+
+    i = 0;
+    goto <D.4502>;
+    <D.4501>:
+    _1 = i * 2;
     _2 = s->d[_1];
     t = t + _2;
     i = i + 1;
-    <D.4490>:
+    <D.4502>:
     _3 = s->n;
-    if (i < _3) goto <D.4489>; else goto <D.4487>;
-    <D.4487>:
+    if (i < _3) goto <D.4501>; else goto <D.4499>;
+    <D.4499>:
   }
-  D.4498 = t;
-  return D.4498;
+  D.4524 = t;
+  return D.4524;
+}
+
+
+int au_rec (int n)
+{
+  int D.4526;
+  int s;
+
+  s = 0;
+  {
+    int i;
+
+    i = 0;
+    goto <D.4512>;
+    <D.4511>:
+    {
+      int v;
+
+      _1 = i + -1;
+      v = au_rec (_1);
+      s = s + v;
+    }
+    i = i + 1;
+    <D.4512>:
+    if (i < n) goto <D.4511>; else goto <D.4509>;
+    <D.4509>:
+  }
+  D.4526 = s;
+  return D.4526;
 }
 
 

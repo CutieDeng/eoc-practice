@@ -372,10 +372,10 @@ ccp1 移植记录：
 
 - 范围：sink、update_ssa / LCSSA / DCE / CFG cleanup、jump threading（threadedge / threadupdate / dom）、循环迭代界（niter / scev / ivcanon / cunroll / profile 触发点）、GENERIC 折叠（fold-const / match.pd）。逐函数对照 GCC 12.5 / 13.3 / 14.2 / 15.2 源码；版本门限按源码定位到具体主版本。
 - 修正与文档化的条目见 beta 上 2026-11-08 的 FIX 提交；未移植项记在各模块头部 "Not ported"。
-- 新夹具 `audit.c`（兄弟循环、结构尾数组、未用调用结果）只比较 ivopts 之前的阶段（`o1-test.rkt` 的 `fixture-stop`，ivopts 以恒等运行）。夹具暴露、尚未移植的三处：
-  1. ivopts 的自增地址候选（访问步长等于访问大小时 `add_autoinc_candidates`），以及未测的目标代价（`mult_by_coeff_cost (8, DI)`）；
-  2. `determine_unlikely_bbs` 的 cold 调用（`abort ()` 的块计数为 0、出口概率 never）：插件数据不含 cold 属性；
-  3. GCC 15 估频中递归调用块的频率封顶（"Dropping frequency of recursive call"）。
+- 新夹具 `audit.c`（兄弟循环、noreturn/cold 出口、结构尾数组、循环内自递归、未用调用结果）只比较 ivopts 之前的阶段（`o1-test.rkt` 的 `fixture-stop`，ivopts 以恒等运行）。夹具暴露的未移植处：
+  1. （未做）ivopts 的自增地址候选（访问步长等于访问大小时 `add_autoinc_candidates`），以及未测的目标代价（`mult_by_coeff_cost (8, DI)`）；
+  2. （已做，2026-11-08）`determine_unlikely_bbs`：插件导出 `DECL_ATTRIBUTES` / `TYPE_ATTRIBUTES` 的属性名与 builtin 编码，`abort` 的 cold 使其块计数为精确 0（`[count: 0]`）；
+  3. （已做，2026-11-08）估频中自递归调用块的频率封顶（12.5 与 15.2 都有），以及 `pass_rebuild_frequencies` 的一致性检查与重估（原为恒打印 "Profile is consistent" 的桩）。
 - 未改的模型限制：每条语句只有一个 use stamp（GCC 的 SET_USE 只重链一个操作数）；forwprop 的删除顺序仍按"未记录名字降序"入释放队列。
 
 ## 6. 执行顺序与依赖

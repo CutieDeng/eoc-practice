@@ -1,5 +1,5 @@
 
-;; Function au_unused (au_unused, funcdef_no=2, decl_uid=3635, cgraph_uid=3, symbol_order=2)
+;; Function au_unused (au_unused, funcdef_no=4, decl_uid=3657, cgraph_uid=5, symbol_order=4)
 
 void au_unused (int x)
 {

@@ -26,9 +26,19 @@
 ;; With loops, the iteration bounds are estimated (niter-bounds.rkt) as
 ;; predict_loops does with SCEV initialized.
 ;;
-;; Not ported: fake exit edges for infinite loops, cold/hot attributes,
-;; __builtin_expect, the irreducible-loop marking, counts
-;; from IPA profiles.
+;; determine_unlikely_bbs (cold callees by the plugin's attribute list,
+;; forward / backward propagation, never / always edges) runs before the
+;; predictions and again at the start of estimate_bb_frequencies; an
+;; unlikely block's count is the precise zero ('zero, "[count: 0]").  A
+;; block with a self-recursive call has its frequency capped at 9/10
+;; ("Dropping frequency of recursive call").  rebuild-frequencies is
+;; pass_rebuild_frequencies (GCC >= 14).
+;;
+;; Not ported: fake exit edges for infinite loops, the hot attribute and
+;; the cgraph frequency of analyzed callees (NODE_FREQUENCY_UNLIKELY_EXECUTED
+;; when not from the cold attribute), __builtin_expect, the
+;; irreducible-loop marking, counts from IPA profiles, the profile quality
+;; beyond the precise zero.
 ;; ============================================================
 
 (require racket/list racket/string
@@ -50,7 +60,7 @@
          "loops.rkt"
          (rename-in "niter.rkt" [simple-iv simple-iv*]))
 
-(provide profile-estimate)
+(provide profile-estimate rebuild-frequencies)
 
 (define (icst? t) (and (Tree? t) (eq? (tree-code t) 'integer_cst)))
 (define BASE REG-BR-PROB-BASE)
@@ -199,6 +209,109 @@
 ;; ------------------------------------------------------------
 
 (define (call-noreturn? p g) (and (gcall? g) (not (zero? (bitwise-and (call-ecf (P-st p) g) ECF-NORETURN)))))
+
+;; ------------------------------------------------------------
+;; determine_unlikely_bbs (12.5 and 15.2 alike): blocks with a call to a
+;; cold function are unlikely, the property is propagated forward (blocks
+;; reachable only through unlikely edges) and backward (blocks all of
+;; whose successors are unlikely, unless a statement may terminate the
+;; block or is a noreturn call); edges into unlikely blocks become
+;; never, the single other successor edge always.  Unlikely blocks get
+;; the precise count zero.
+;; ------------------------------------------------------------
+
+(define (attr-names x) (let ([a (and x (tree-attr x 'attributes #f))]) (if (list? a) a '())))
+;; unlikely_executed_stmt_p: a call whose function type or declaration is
+;; cold, unless the current function is cold itself.  The cgraph frequency
+;; of an analyzed callee (NODE_FREQUENCY_UNLIKELY_EXECUTED) is not modelled.
+(define (unlikely-executed-stmt? p g)
+  (define st (P-st p))
+  (define cur-cold? (member "cold" (attr-names (GS-fndecl st))))
+  (and (gcall? g) (not cur-cold?)
+       (or (let ([ft (gcall-fntype g)])
+             (and ft (let ([a (type-attr st ft 'attributes #f)]) (and (list? a) (member "cold" a)))))
+           (let ([d (call-fndecl g)]) (and d (member "cold" (attr-names d)))))
+       #t))
+;; stmt_can_terminate_bb_p without exceptions or asm: a call that is not a
+;; nothrow builtin, not a non-looping const / pure function, and returns
+;; (a noreturn call has no successor edge here)
+(define (stmt-can-terminate-bb? p g bb)
+  (cond
+    [(gcall? g)
+     (define d (call-fndecl g))
+     (define f (call-ecf (P-st p) g))
+     (cond
+       [(and d (call-fndecl-builtin? d) (member "nothrow" (attr-names d)) (zero? (bitwise-and f ECF-RETURNS-TWICE))) #f]
+       [(and (not (zero? (bitwise-and f (bitwise-ior ECF-PURE ECF-CONST)))) (zero? (bitwise-and f ECF-LOOPING))) #f]
+       [(zero? (bitwise-and f ECF-NORETURN)) #t]
+       [else (pair? (succ-dests p bb))])]
+    [else #f]))
+
+(define (determine-unlikely-bbs! p)
+  (define cfg (P-cfg p)) (define m (P-m p))
+  (define zero (P-zero p)) (define never (P-never p))
+  (define (zero? bb) (hash-ref zero bb #f))
+  (define (never? s d) (hash-ref never (cons s d) #f))
+  (define (stmts bb) (for/list ([id (in-list (mfn-stmts m bb))]) (mfn-stmt m id)))
+  ;; unlikely_executed_bb_p
+  (define (unlikely-bb? bb)
+    (let loop ([gs (stmts bb)])
+      (cond
+        [(null? gs) #f]
+        [(unlikely-executed-stmt? p (car gs)) #t]
+        [(stmt-can-terminate-bb? p (car gs) bb) #f]
+        [else (loop (cdr gs))])))
+  (define bbs (pvector->list (cfg-bbs cfg)))
+  (define all-bbs (append (list ENTRY) bbs (list EXIT)))
+  ;; the locally unlikely blocks and edges
+  (for ([bb (in-list bbs)])
+    (when (and (not (zero? bb)) (unlikely-bb? bb)) (hash-set! zero bb #t))
+    (for ([d (in-list (succ-dests p bb))])
+      (when (and (not (never? bb d)) (or (zero? bb) (never? bb d))) (hash-set! never (cons bb d) #t))))
+  ;; propagate_unlikely_bbs_forward: what ENTRY reaches through edges
+  ;; whose count is not zero
+  (define reached (make-hasheqv))
+  (unless (zero? ENTRY)
+    (hash-set! reached ENTRY #t)
+    (let loop ([work (list ENTRY)])
+      (unless (null? work)
+        (define bb (car work))
+        (define more
+          (for/fold ([acc '()]) ([d (in-list (succ-dests p bb))])
+            (cond
+              [(or (zero? bb) (never? bb d) (zero? d) (hash-ref reached d #f)) acc]
+              [else (hash-set! reached d #t) (cons d acc)])))
+        (loop (append (reverse more) (cdr work))))))
+  (for ([bb (in-list all-bbs)] #:unless (hash-ref reached bb #f)) (hash-set! zero bb #t))
+  ;; backward: a block whose successors are all unlikely
+  (define nsuccs (make-hasheqv))
+  (define worklist '())
+  (for ([bb (in-list all-bbs)] #:unless (or (zero? bb) (= bb EXIT)))
+    (define n (for/sum ([d (in-list (succ-dests p bb))]) (if (or (never? bb d) (zero? d)) 0 1)))
+    (hash-set! nsuccs bb n)
+    (when (= n 0) (set! worklist (cons bb worklist))))
+  (let loop ()
+    (unless (null? worklist)
+      (define bb (car worklist)) (set! worklist (cdr worklist))
+      (unless (or (zero? bb)
+                  (and (not (= bb ENTRY))
+                       (for/or ([g (in-list (stmts bb))])
+                         (or (stmt-can-terminate-bb? p g bb)
+                             (and (gcall? g) (not (zero? (bitwise-and (call-ecf (P-st p) g) ECF-NORETURN))))))))
+        (hash-set! zero bb #t)
+        (for ([s (in-pvector (cfg-preds cfg bb))] #:unless (never? s bb))
+          (unless (zero? s)
+            (hash-update! nsuccs s sub1 0)
+            (when (= 0 (hash-ref nsuccs s)) (set! worklist (cons s worklist))))))
+      (loop)))
+  ;; edges into unlikely blocks are never; a single remaining edge always
+  (for ([bb (in-list all-bbs)])
+    (unless (zero? bb)
+      (for ([d (in-list (succ-dests p bb))])
+        (when (and (not (never? bb d)) (zero? d)) (hash-set! never (cons bb d) #t))))
+    (define others (for/list ([d (in-list (succ-dests p bb))] #:unless (never? bb d)) d))
+    (when (and (= 1 (length others)) (not (eqv? (prob-of p bb (car others)) prob-always)))
+      (set-prob! p bb (car others) prob-always))))
 
 (define (tree-bb-level-predictions! p)
   (define st (P-st p)) (define cfg (P-cfg p)) (define m (P-m p))
@@ -499,7 +612,7 @@
                (lambda ()
                  (define pf (GCfg-profile cfg))
                  (define view
-                   (cfg-set-profile cfg (GProf (for/fold ([c (if pf (GProf-counts pf) intmap-empty)]) ([(bb _) (in-hash (P-zero p))]) (intmap-set c bb 0))
+                   (cfg-set-profile cfg (GProf (for/fold ([c (if pf (GProf-counts pf) intmap-empty)]) ([(bb _) (in-hash (P-zero p))]) (intmap-set c bb 'zero))
                                                (for/fold ([h (if pf (GProf-probs pf) (hash))]) ([(e _) (in-hash (P-never p))]) (hash-set h e 0)))))
                  (define-values (st1 records) (estimate-one-loop (P-st p) fndecl view (Loop-header l)))
                  (set-P-st! p st1)
@@ -785,6 +898,7 @@
   (format "~a~a.~a" (if neg? "-" "") (quotient a 1000000) (let ([s (number->string (remainder a 1000000))]) (string-append (make-string (- 6 (string-length s)) #\0) s))))
 
 (define (estimate-bb-frequencies! p)
+  (determine-unlikely-bbs! p)
   (define cfg (P-cfg p)) (define st (P-st p))
   (define dfs-back (dfs-back-edges cfg))
   (define all-bbs (append (list ENTRY) (pvector->list (cfg-bbs cfg)) (list EXIT)))
@@ -858,14 +972,27 @@
       (if (sreal< mx f) f mx)))
   (define freq-max1 (sreal/ (sreal-shift sreal-one 30) freq-max0))
   (define freq-max (if (sreal< freq-max1 (make-sreal 16)) (make-sreal 16) freq-max1))
+  ;; a self-recursive call caps its block's frequency at 9/10
+  (define (recursive-call-in? bb)
+    (and (not (memv bb (list ENTRY EXIT)))
+         (for/or ([id (in-list (mfn-stmts (P-m p) bb))])
+           (define g (mfn-stmt (P-m p) id))
+           (and (gcall? g) (let ([d (call-fndecl g)]) (and d (decl-eq? d (GS-fndecl st))))))))
   (define counts
     (for/fold ([m intmap-empty]) ([bb (in-list all-bbs)])
-      (define f (hash-ref freq bb sreal-zero))
+      (define f0 (hash-ref freq bb sreal-zero))
+      (define f
+        (cond
+          [(and (not (sreal< f0 sreal-one)) (recursive-call-in? bb))
+           (msg! p "Dropping frequency of recursive call in bb ~a from ~a" bb (fmt6 f0))
+           (sreal/ (make-sreal 9) (make-sreal 10))]
+          [else f0]))
       (define n
         (if (>= (gcc-major-version st) 14)
             (sreal->nearest-int (sreal* f freq-max))
             (sreal->int (sreal+ (sreal* f freq-max) (make-sreal 1 -1)))))
-      (if (hash-ref (P-zero p) bb #f) (intmap-set m bb 0) (intmap-set m bb n))))
+      ;; a block whose count is the precise zero keeps it
+      (if (hash-ref (P-zero p) bb #f) (intmap-set m bb 'zero) (intmap-set m bb n))))
   counts)
 
 ;; ------------------------------------------------------------
@@ -882,6 +1009,7 @@
   (define pdom (compute-post-dom nodes EXIT succs))
   (define-values (loops back) (find-loops cfg dom))
   (define p (P st0 m cfg dom pdom loops back (make-hasheqv) (make-hash) (make-hash) (make-hasheqv) '()))
+  (determine-unlikely-bbs! p)
   (tree-bb-level-predictions! p)
   (when (pair? loops) (predict-loops! p))
   (for ([bb (in-pvector (cfg-bbs cfg))]) (tree-estimate-probability-bb! p bb))
@@ -893,3 +1021,85 @@
   ;; the bounds predict_loops estimated (without TDF_DETAILS, only for
   ;; single-exit loops whose exit count is not a constant)
   (values cfg1 (P-st p)))
+
+;; ------------------------------------------------------------
+;; pass_rebuild_frequencies (GCC >= 14, predict.cc rebuild_frequencies):
+;; every block's count against the sum of its incoming edge counts
+;; (profile_count::differs_from_p: off by >= 100 and by more than 1%);
+;; when one differs or a count is uninitialized, estimate_bb_frequencies
+;; runs again on the existing edge probabilities
+;; (loop_optimizer_init without CFG changes).  The uninitialized
+;; probability check only prints: GCC never sets its flag.
+;; ------------------------------------------------------------
+
+(define (rebuild-frequencies st0 fndecl cfg0)
+  (define st (gs-set-fndecl st0 fndecl))
+  (define cfg (cfg-clear-messages cfg0))
+  (define pf (GCfg-profile cfg))
+  (define msgs '())
+  (define (note! fmt . args) (set! msgs (cons (apply format fmt args) msgs)))
+  (define (finish c) (for/fold ([c c]) ([l (in-list (reverse msgs))]) (cfg-add-message c l)))
+  (cond
+    [(not pf) (values cfg st)]
+    [else
+     (define all-bbs (append (list ENTRY) (pvector->list (cfg-bbs cfg)) (list EXIT)))
+     (define (raw-count bb) (intmap-ref (GProf-counts pf) bb #f))
+     ;; profile_count values: 'zero (precise), an integer, #f (uninitialized)
+     (define (edge-count s d)
+       (define c (raw-count s)) (define pr (hash-ref (GProf-probs pf) (cons s d) #f))
+       (cond
+         [(eq? c 'zero) 'zero]
+         [(eqv? pr prob-always) c]
+         [(eqv? pr 0) 'zero]
+         [(not (and c pr)) #f]
+         [else (quotient (+ (* c pr) (quotient prob-always 2)) prob-always)]))
+     (define (c+ a b)
+       (cond [(eq? a 'zero) b] [(eq? b 'zero) a] [(not (and a b)) #f] [else (+ a b)]))
+     (define (val x) (if (eq? x 'zero) 0 x))
+     (define (differs? a b)
+       (cond
+         [(not (and a b)) (not (eq? (and a #t) (and b #t)))]
+         [else
+          (define x (val a)) (define y (val b))
+          (cond
+            [(or (< (abs (- x y)) 100)) #f]
+            [(zero? y) #t]
+            [else (let ([ratio (quotient (+ (* x 100) (quotient y 2)) y)]) (or (< ratio 99) (> ratio 101)))])]))
+     (define uninitialized-count? #f)
+     (define inconsistent? #f)
+     (for ([bb (in-list all-bbs)])
+       (unless (raw-count bb)
+         (set! uninitialized-count? #t)
+         (note! "BB ~a has uninitialized count" bb))
+       (unless (= bb ENTRY)
+         (define sum
+           (for/fold ([sum 'zero]) ([s (in-pvector (cfg-preds cfg bb))])
+             (unless (hash-ref (GProf-probs pf) (cons s bb) #f)
+               (note! "Edge ~a->~a has uninitialized probability" s bb))
+             (c+ sum (edge-count s bb))))
+         (when (differs? sum (raw-count bb))
+           (note! "BB ~a has invalid sum of incomming counts" bb)
+           (set! inconsistent? #t))))
+     (cond
+       [(and (not inconsistent?) (not uninitialized-count?))
+        (note! "Profile is consistent")
+        (values (finish cfg) st)]
+       [else
+        (define m (gcfg->mfn cfg))
+        (define nodes (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY))
+        (define succs (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e))))
+        (define dom (compute-dom nodes ENTRY succs))
+        (define pdom (compute-post-dom nodes EXIT succs))
+        (define-values (loops back) (find-loops cfg dom))
+        (define probs (make-hash))
+        (for ([(k v) (in-hash (GProf-probs pf))]) (hash-set! probs k v))
+        (define never (make-hash))
+        (for ([(k v) (in-hash (GProf-probs pf))] #:when (eqv? v 0)) (hash-set! never k #t))
+        (define zero (make-hasheqv))
+        (for ([bb (in-list all-bbs)] #:when (eq? (raw-count bb) 'zero)) (hash-set! zero bb #t))
+        (define p (P st m cfg dom pdom loops back (make-hasheqv) probs never zero '()))
+        (define counts (estimate-bb-frequencies! p))
+        (for ([l (in-list (reverse (P-msgs p)))]) (note! "~a" l))
+        (note! "Rebuilt basic block counts")
+        (define new-probs (for/hash ([(k v) (in-hash (P-probs p))]) (values k v)))
+        (values (finish (cfg-set-profile cfg (GProf counts new-probs))) (P-st p))])]))

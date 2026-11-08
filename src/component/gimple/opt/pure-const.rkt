@@ -53,6 +53,7 @@
          "mfn.rkt"
          "loops.rkt"
          "niter.rkt"
+         (only-in "fixup-cfg.rkt" fixup-cfg*)
          (only-in "niter-bounds.rkt" estimate-one-loop)
          (only-in "loop-bounds.rkt" loop-bound lbnd-upper))
 
@@ -212,22 +213,10 @@
      (msg! "Declaration updated to be ~apure: ~a" (if looping "looping " "") (dump-name st fndecl))
      (values #t (set-decl-flag (set-decl-flag st fndecl 'pure #t) fndecl 'looping-const-or-pure looping))]))
 
-;; execute_fixup_cfg: calls to const/pure functions get update_stmt (a
-;; fresh use-list stamp) and TODO_cleanup_cfg
-(define (fixup-cfg st cfg)
-  (define n0 (cfg-next-stamp cfg))
-  (define-values (cfg1 n1 any?)
-    (for/fold ([c cfg] [n n0] [any? #f]) ([bb (in-pvector (cfg-bbs cfg))])
-      (define b (cfg-block c bb))
-      (define-values (stmts n* any*)
-        (for/fold ([acc (pvector-empty)] [n n] [any? any?]) ([g (in-pvector (GBlock-stmts b))])
-          (cond
-            [(and (gcall? g) (call-fndecl g)
-                  (not (zero? (bitwise-and (call-ecf st g) (bitwise-ior ECF-CONST ECF-PURE ECF-LOOPING)))))
-             (values (pvector-cons-right acc (stmt-set-flag g 'stamp n)) (add1 n) #t)]
-            [else (values (pvector-cons-right acc g) n any?)])))
-      (values (if any* (set-block c (block-set-stmts b stmts)) c) n* any*)))
-  (if any? (cleanup-tree-cfg st cfg1 print-cond-rhs) (values cfg1 st)))
+;; execute_fixup_cfg (fixup-cfg.rkt): calls to const / pure functions
+;; get update_stmt (virtual operands rebuilt, a dropped VDEF released,
+;; a fresh use-list stamp) and TODO_cleanup_cfg
+(define (fixup-cfg st cfg) (fixup-cfg* st (GS-fndecl st) cfg))
 
 ;; ------------------------------------------------------------
 ;; the pass

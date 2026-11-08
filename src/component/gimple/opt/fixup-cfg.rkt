@@ -26,11 +26,14 @@
          "ssa-ops.rkt"
          "mfn.rkt")
 
-(provide fixup-cfg-pass)
+(provide fixup-cfg-pass fixup-cfg*)
 
 (define (fixup-cfg-pass st fndecl cfg0)
+  (fixup-cfg* st fndecl (cfg-clear-messages cfg0)))
+;; execute_fixup_cfg keeping CFG's messages (the pass that changed a
+;; declaration returns it: local-pure-const, modref)
+(define (fixup-cfg* st fndecl cfg)
   (define st0 (gs-set-fndecl st fndecl))
-  (define cfg (cfg-clear-messages cfg0))
   (define m (gcfg->mfn cfg))
   (define todo #f)
   (for* ([bb (in-pvector (cfg-bbs cfg))] [id (in-list (mfn-stmts m bb))])

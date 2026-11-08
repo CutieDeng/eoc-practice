@@ -1,5 +1,5 @@
 
-;; Function au_two (au_two, funcdef_no=0, decl_uid=3608, cgraph_uid=1, symbol_order=0)
+;; Function au_two (au_two, funcdef_no=0, decl_uid=3610, cgraph_uid=1, symbol_order=0)
 
 Removing basic block 5
 int au_two (int n, int * a)
@@ -66,7 +66,67 @@ int au_two (int n, int * a)
 
 
 
-;; Function au_trail (au_trail, funcdef_no=1, decl_uid=3626, cgraph_uid=2, symbol_order=1)
+;; Function au_abort (au_abort, funcdef_no=1, decl_uid=3626, cgraph_uid=2, symbol_order=1)
+
+int au_abort (int * a, int n)
+{
+  int i;
+  int s;
+  int _1;
+  long unsigned int _2;
+  long unsigned int _3;
+  int * _4;
+  int _5;
+  int _6;
+  long unsigned int _7;
+  long unsigned int _8;
+  int * _9;
+  int _10;
+  int _16;
+
+  <bb 2> :
+  goto <bb 6>; [INV]
+
+  <bb 3> :
+  _1 = i_12 * 2;
+  _2 = (long unsigned int) _1;
+  _3 = _2 * 4;
+  _4 = a_18(D) + _3;
+  _5 = *_4;
+  if (_5 < 0)
+    goto <bb 4>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 4> :
+  abort ();
+
+  <bb 5> :
+  _6 = i_12 * 2;
+  _7 = (long unsigned int) _6;
+  _8 = _7 * 4;
+  _9 = a_18(D) + _8;
+  _10 = *_9;
+  s_19 = s_11 + _10;
+  i_20 = i_12 + 1;
+
+  <bb 6> :
+  # s_11 = PHI <0(2), s_19(5)>
+  # i_12 = PHI <0(2), i_20(5)>
+  if (i_12 < n_15(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 7>; [INV]
+
+  <bb 7> :
+  _16 = s_11;
+  return _16;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=2, decl_uid=3638, cgraph_uid=3, symbol_order=2)
 
 int au_trail (struct au_s * s)
 {
@@ -103,7 +163,42 @@ int au_trail (struct au_s * s)
 
 
 
-;; Function au_unused (au_unused, funcdef_no=2, decl_uid=3635, cgraph_uid=3, symbol_order=2)
+;; Function au_rec (au_rec, funcdef_no=3, decl_uid=3647, cgraph_uid=4, symbol_order=3)
+
+int au_rec (int n)
+{
+  int v;
+  int i;
+  int s;
+  int _1;
+  int _9;
+
+  <bb 2> :
+  goto <bb 4>; [INV]
+
+  <bb 3> :
+  _1 = i_3 + -1;
+  v_11 = au_rec (_1);
+  s_12 = s_2 + v_11;
+  i_13 = i_3 + 1;
+
+  <bb 4> :
+  # s_2 = PHI <0(2), s_12(3)>
+  # i_3 = PHI <0(2), i_13(3)>
+  if (i_3 < n_8(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 5> :
+  _9 = s_2;
+  return _9;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=4, decl_uid=3657, cgraph_uid=5, symbol_order=4)
 
 void au_unused (int x)
 {

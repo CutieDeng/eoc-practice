@@ -30,6 +30,8 @@
 //             constants/exceptional nodes carry named entries.  Decl
 //             chains are materialized only where a construct owns them
 //             (BIND_EXPR vars, TYPE_FIELDS, DECL_ARGUMENTS, BLOCK vars).
+//             Decls and types with attributes carry
+//             (attributes "name" ...) (DECL_ATTRIBUTES / TYPE_ATTRIBUTES).
 
 #include <map>
 #include <string>
@@ -41,6 +43,8 @@
 #include "real.h"
 #include "calls.h"
 #include "cgraph.h"
+#include "stringpool.h"
+#include "attribs.h"
 
 #include <cstdio>
 #include <cstring>
@@ -123,6 +127,21 @@ struct Serializer {
   void field_bool(std::string &o, const char *key, bool b) { field(o, key); put_bool(o, b); o += ')'; }
   void field_str(std::string &o, const char *key, const char *s) { field(o, key); put_string(o, s ? s : ""); o += ')'; }
   void field_chain(std::string &o, const char *key, tree t) { field(o, key); refs_chain(o, t); o += ')'; }
+  // DECL_ATTRIBUTES / TYPE_ATTRIBUTES: the attribute names, in list order
+  // (the arguments are not emitted); nothing when the list is empty
+  void field_attrs(std::string &o, const char *key, tree attrs) {
+    if (!attrs) return;
+    field(o, key); o += '(';
+    bool first = true;
+    for (tree a = attrs; a; a = TREE_CHAIN(a)) {
+      tree n = get_attribute_name(a);
+      if (!n || TREE_CODE(n) != IDENTIFIER_NODE) continue;
+      if (!first) o += ' ';
+      put_string(o, IDENTIFIER_POINTER(n));
+      first = false;
+    }
+    o += "))";
+  }
 
   void put_location(std::string &o, location_t loc) {
     if (loc == UNKNOWN_LOCATION) { o += "#f"; return; }
@@ -213,12 +232,21 @@ struct Serializer {
     }
     field_ref(o, "size", DECL_SIZE(t));
     field_ref(o, "size-unit", DECL_SIZE_UNIT(t));
+    field_attrs(o, "attributes", DECL_ATTRIBUTES(t));
     switch (code) {
       case VAR_DECL:
       case CONST_DECL:
         field_ref(o, "initial", DECL_INITIAL(t));
         break;
       case FUNCTION_DECL:
+        // fndecl_built_in_p: the code name of a normal builtin
+        // ("BUILT_IN_ABORT"), else the class ("md" / "frontend")
+        if (fndecl_built_in_p(t)) {
+          if (DECL_BUILT_IN_CLASS(t) == BUILT_IN_NORMAL)
+            field_str(o, "built-in", built_in_names[(int) DECL_FUNCTION_CODE(t)]);
+          else
+            field_str(o, "built-in", DECL_BUILT_IN_CLASS(t) == BUILT_IN_MD ? "md" : "frontend");
+        }
         field_chain(o, "arguments", DECL_ARGUMENTS(t));
         field_ref(o, "result", DECL_RESULT(t));
         if (DECL_STRUCT_FUNCTION(t)) {
@@ -253,6 +281,7 @@ struct Serializer {
     if (code == ARRAY_TYPE) field_bool(o, "string-flag", TYPE_STRING_FLAG(t));
     if (code == FUNCTION_TYPE || code == METHOD_TYPE) field_bool(o, "prototype", prototype_p(t));
     field_ref(o, "size-unit", TYPE_SIZE_UNIT(t));
+    field_attrs(o, "attributes", TYPE_ATTRIBUTES(t));
     if (TYPE_MAIN_VARIANT(t) != t) field_ref(o, "main-variant", TYPE_MAIN_VARIANT(t));
     if (INTEGRAL_TYPE_P(t) || SCALAR_FLOAT_TYPE_P(t)) {
       field_int(o, "precision", TYPE_PRECISION(t));

@@ -1,12 +1,12 @@
 
-;; Function au_two (au_two, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+;; Function au_two (au_two, funcdef_no=0, decl_uid=4467, cgraph_uid=1, symbol_order=0)
 
 Global Exported: _28 = [irange] unsigned long [0, +INF] MASK 0x7fffffff VALUE 0x0
 Global Exported: _29 = [irange] unsigned long [0, 0][8, +INF] MASK 0x3fffffff8 VALUE 0x0
 int au_two (int n, int * a)
 {
-  unsigned long ivtmp.15;
-  unsigned long ivtmp.9;
+  unsigned long ivtmp.17;
+  unsigned long ivtmp.11;
   int v;
   int j;
   int i;
@@ -28,19 +28,19 @@ int au_two (int n, int * a)
     goto <bb 7>; [11.00%]
 
   <bb 3> [local count: 105119324]:
-  ivtmp.15_40 = (unsigned long) a_18(D);
+  ivtmp.17_40 = (unsigned long) a_18(D);
   _42 = (unsigned long) n_16(D);
   _43 = _42 * 8;
-  _45 = ivtmp.15_40 + _43;
+  _45 = ivtmp.17_40 + _43;
 
   <bb 4> [local count: 955630224]:
   # s_30 = PHI <s_23(9), 0(3)>
-  # ivtmp.15_38 = PHI <ivtmp.15_39(9), ivtmp.15_40(3)>
-  _41 = (void *) ivtmp.15_38;
+  # ivtmp.17_38 = PHI <ivtmp.17_39(9), ivtmp.17_40(3)>
+  _41 = (void *) ivtmp.17_38;
   _5 = MEM[(int *)_41];
   s_23 = _5 + s_30;
-  ivtmp.15_39 = ivtmp.15_38 + 8;
-  if (ivtmp.15_39 != _45)
+  ivtmp.17_39 = ivtmp.17_38 + 8;
+  if (ivtmp.17_39 != _45)
     goto <bb 9>; [89.00%]
   else
     goto <bb 5>; [11.00%]
@@ -54,13 +54,13 @@ int au_two (int n, int * a)
 
   <bb 6> [local count: 955630224]:
   # s_32 = PHI <s_21(8), s_23(5)>
-  # ivtmp.9_14 = PHI <ivtmp.9_12(8), ivtmp.15_40(5)>
-  _11 = (void *) ivtmp.9_14;
+  # ivtmp.11_14 = PHI <ivtmp.11_12(8), ivtmp.17_40(5)>
+  _11 = (void *) ivtmp.11_14;
   _10 = MEM[(int *)_11];
   v_20 = g (_10);
   s_21 = v_20 + s_32;
-  ivtmp.9_12 = ivtmp.9_14 + 8;
-  if (ivtmp.9_12 != _45)
+  ivtmp.11_12 = ivtmp.11_14 + 8;
+  if (ivtmp.11_12 != _45)
     goto <bb 8>; [89.00%]
   else
     goto <bb 7>; [11.00%]
@@ -76,11 +76,68 @@ int au_two (int n, int * a)
 
 
 
-;; Function au_trail (au_trail, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+;; Function au_abort (au_abort, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+
+int au_abort (int * a, int n)
+{
+  unsigned long ivtmp.24;
+  int i;
+  int s;
+  int _5;
+  void * _19;
+  unsigned long _20;
+  unsigned long _21;
+  unsigned long _23;
+
+  <bb 2> [local count: 118111600]:
+  if (n_8(D) > 0)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 3> [local count: 105119324]:
+  ivtmp.24_15 = (unsigned long) a_10(D);
+  _20 = (unsigned long) n_8(D);
+  _21 = _20 * 8;
+  _23 = ivtmp.24_15 + _21;
+
+  <bb 4> [local count: 955630224]:
+  # s_16 = PHI <s_11(8), 0(3)>
+  # ivtmp.24_6 = PHI <ivtmp.24_14(8), ivtmp.24_15(3)>
+  _19 = (void *) ivtmp.24_6;
+  _5 = MEM[(int *)_19];
+  if (_5 < 0)
+    goto <bb 5>; [0.00%]
+  else
+    goto <bb 6>; [100.00%]
+
+  <bb 5> [count: 0]:
+  abort ();
+
+  <bb 6> [local count: 955630224]:
+  s_11 = _5 + s_16;
+  ivtmp.24_14 = ivtmp.24_6 + 8;
+  if (ivtmp.24_14 != _23)
+    goto <bb 8>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 8> [local count: 850510900]:
+  goto <bb 4>; [100.00%]
+
+  <bb 7> [local count: 118111600]:
+  # s_17 = PHI <s_11(6), 0(2)>
+  return s_17;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=2, decl_uid=4495, cgraph_uid=3, symbol_order=2)
 
 int au_trail (struct au_s * s)
 {
-  unsigned long ivtmp.23;
+  unsigned long ivtmp.32;
   int i;
   int t;
   int _2;
@@ -98,19 +155,19 @@ int au_trail (struct au_s * s)
     goto <bb 5>; [33.33%]
 
   <bb 3> [local count: 238597363]:
-  ivtmp.23_10 = (unsigned long) s_7(D);
+  ivtmp.32_10 = (unsigned long) s_7(D);
   _16 = (unsigned long) _12;
   _17 = _16 * 8;
-  _19 = ivtmp.23_10 + _17;
+  _19 = ivtmp.32_10 + _17;
 
   <bb 4> [local count: 715863672]:
   # t_13 = PHI <t_8(6), 0(3)>
-  # ivtmp.23_5 = PHI <ivtmp.23_4(6), ivtmp.23_10(3)>
-  _11 = (void *) ivtmp.23_5;
+  # ivtmp.32_5 = PHI <ivtmp.32_4(6), ivtmp.32_10(3)>
+  _11 = (void *) ivtmp.32_5;
   _2 = MEM[(int *)_11 + 4B];
   t_8 = _2 + t_13;
-  ivtmp.23_4 = ivtmp.23_5 + 8;
-  if (ivtmp.23_4 != _19)
+  ivtmp.32_4 = ivtmp.32_5 + 8;
+  if (ivtmp.32_4 != _19)
     goto <bb 6>; [66.67%]
   else
     goto <bb 5>; [33.33%]
@@ -126,7 +183,52 @@ int au_trail (struct au_s * s)
 
 
 
-;; Function au_unused (au_unused, funcdef_no=2, decl_uid=4492, cgraph_uid=3, symbol_order=2)
+;; Function au_rec (au_rec, funcdef_no=3, decl_uid=4504, cgraph_uid=4, symbol_order=3)
+
+int au_rec (int n)
+{
+  unsigned int ivtmp.39;
+  int v;
+  int i;
+  int s;
+  int _1;
+  unsigned int _2;
+  unsigned int _3;
+
+  <bb 2> [local count: 236223200]:
+  if (n_6(D) > 0)
+    goto <bb 3>; [78.00%]
+  else
+    goto <bb 5>; [22.00%]
+
+  <bb 3> [local count: 184254096]:
+  _3 = (unsigned int) n_6(D);
+  _2 = _3 + 4294967295;
+
+  <bb 4> [local count: 837518624]:
+  # s_13 = PHI <s_8(6), 0(3)>
+  # ivtmp.39_16 = PHI <ivtmp.39_4(6), 4294967295(3)>
+  _1 = (int) ivtmp.39_16;
+  v_7 = au_rec (_1);
+  s_8 = v_7 + s_13;
+  ivtmp.39_4 = ivtmp.39_16 + 1;
+  if (ivtmp.39_4 != _2)
+    goto <bb 6>; [78.00%]
+  else
+    goto <bb 5>; [22.00%]
+
+  <bb 6> [local count: 653264528]:
+  goto <bb 4>; [100.00%]
+
+  <bb 5> [local count: 236223200]:
+  # s_14 = PHI <s_8(4), 0(2)>
+  return s_14;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=4, decl_uid=4514, cgraph_uid=5, symbol_order=4)
 
 void au_unused (int x)
 {

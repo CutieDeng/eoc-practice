@@ -134,7 +134,10 @@
 (define (prof-to-reg-br-prob-base p) (quotient (+ (* p 10000) 67108864) 134217728))
 (define (block-header-string c bb)
   (define n (prof-count c bb))
-  (if n (format "  <bb ~a> [local count: ~a]:\n" bb n) (format "  <bb ~a> :\n" bb)))
+  (cond
+    [(prof-count-zero? c bb) (format "  <bb ~a> [count: 0]:\n" bb)]   ; dump_profile: ipa_p
+    [n (format "  <bb ~a> [local count: ~a]:\n" bb n)]
+    [else (format "  <bb ~a> :\n" bb)]))
 ;; -vops: "# .MEM_N = VDEF <.MEM_M>" / "# VUSE <.MEM_M>" before a statement
 (define print-vops? (make-parameter #f))
 

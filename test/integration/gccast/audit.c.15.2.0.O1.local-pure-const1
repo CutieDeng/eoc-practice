@@ -1,5 +1,5 @@
 
-;; Function au_two (au_two, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+;; Function au_two (au_two, funcdef_no=0, decl_uid=4467, cgraph_uid=1, symbol_order=0)
 
 
 
@@ -90,11 +90,78 @@ int au_two (int n, int * a)
 
 
 
-;; Function au_trail (au_trail, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+;; Function au_abort (au_abort, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
 
 
 
- local analysis of au_trail/2
+ local analysis of au_abort/2
+   scanning: _1 = i_12 * 2;
+  scanning: _2 = (long unsigned int) _1;
+  scanning: _3 = _2 * 4;
+  scanning: _4 = a_18(D) + _3;
+  scanning: _5 = *_4;
+    Indirect ref read is not const
+  scanning: if (_5 < 0)
+  scanning: abort ();
+  scanning: s_19 = _5 + s_11;
+  scanning: i_20 = i_12 + 1;
+  scanning: if (i_12 < n_15(D))
+  scanning: return s_11;
+Function is locally looping.
+Function is locally pure.
+Function found to be looping pure: au_abort/2
+Declaration updated to be looping pure: au_abort/2
+int au_abort (int * a, int n)
+{
+  int i;
+  int s;
+  int _1;
+  long unsigned int _2;
+  long unsigned int _3;
+  int * _4;
+  int _5;
+
+  <bb 2> [local count: 118111600]:
+  goto <bb 6>; [100.00%]
+
+  <bb 3> [local count: 955630224]:
+  _1 = i_12 * 2;
+  _2 = (long unsigned int) _1;
+  _3 = _2 * 4;
+  _4 = a_18(D) + _3;
+  _5 = *_4;
+  if (_5 < 0)
+    goto <bb 4>; [0.00%]
+  else
+    goto <bb 5>; [100.00%]
+
+  <bb 4> [count: 0]:
+  abort ();
+
+  <bb 5> [local count: 955630224]:
+  s_19 = _5 + s_11;
+  i_20 = i_12 + 1;
+
+  <bb 6> [local count: 1073741824]:
+  # s_11 = PHI <0(2), s_19(5)>
+  # i_12 = PHI <0(2), i_20(5)>
+  if (i_12 < n_15(D))
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 7> [local count: 118111600]:
+  return s_11;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=2, decl_uid=4495, cgraph_uid=3, symbol_order=2)
+
+
+
+ local analysis of au_trail/3
    scanning: _1 = i_5 * 2;
   scanning: _2 = s_9(D)->d[_1];
     Indirect ref read is not const
@@ -123,8 +190,8 @@ int au_two (int n, int * a)
 ;; 4 succs { 3 5 }
 ;; 5 succs { 1 }
 Function is locally pure.
-Function found to be pure: au_trail/2
-Declaration updated to be pure: au_trail/2
+Function found to be pure: au_trail/3
+Declaration updated to be pure: au_trail/3
 int au_trail (struct au_s * s)
 {
   int i;
@@ -158,11 +225,58 @@ int au_trail (struct au_s * s)
 
 
 
-;; Function au_unused (au_unused, funcdef_no=2, decl_uid=4492, cgraph_uid=3, symbol_order=2)
+;; Function au_rec (au_rec, funcdef_no=3, decl_uid=4504, cgraph_uid=4, symbol_order=3)
 
 
 
- local analysis of au_unused/3
+ local analysis of au_rec/4
+   scanning: _1 = i_3 + -1;
+  scanning: v_11 = au_rec (_1);
+    Recursive call can loop.
+  scanning: s_12 = s_2 + v_11;
+  scanning: i_13 = i_3 + 1;
+  scanning: if (i_3 < n_8(D))
+  scanning: return s_2;
+Function is locally looping.
+Function is locally const.
+Function found to be looping const: au_rec/4
+Declaration updated to be looping const: au_rec/4
+int au_rec (int n)
+{
+  int v;
+  int i;
+  int s;
+  int _1;
+
+  <bb 2> [local count: 236223200]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 212600880]:
+  _1 = i_3 + -1;
+  v_11 = au_rec (_1);
+  s_12 = s_2 + v_11;
+  i_13 = i_3 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # s_2 = PHI <0(2), s_12(3)>
+  # i_3 = PHI <0(2), i_13(3)>
+  if (i_3 < n_8(D))
+    goto <bb 3>; [78.00%]
+  else
+    goto <bb 5>; [22.00%]
+
+  <bb 5> [local count: 236223200]:
+  return s_2;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=4, decl_uid=4514, cgraph_uid=5, symbol_order=4)
+
+
+
+ local analysis of au_unused/5
    scanning: g (x_2(D));
   scanning: return;
 Function is locally looping.

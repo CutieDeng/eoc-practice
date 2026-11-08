@@ -1,5 +1,5 @@
 
-;; Function au_two (au_two, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+;; Function au_two (au_two, funcdef_no=0, decl_uid=4467, cgraph_uid=1, symbol_order=0)
 
 ;; 3 loops found
 ;;
@@ -95,7 +95,75 @@ int au_two (int n, int * a)
 
 
 
-;; Function au_trail (au_trail, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+;; Function au_abort (au_abort, funcdef_no=1, decl_uid=4483, cgraph_uid=2, symbol_order=1)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5 6 7
+;;
+;; Loop 1
+;;  header 6, latch 5
+;;  depth 1, outer 0, finite_p
+;;  upper_bound 1073741824
+;;  likely_upper_bound 1073741824
+;;  iterations by profile: 8.090909 (unreliable, maybe flat) entry count:118111600 (estimated locally, freq 1.0000)
+;;  nodes: 6 5 3
+;; 2 succs { 6 }
+;; 3 succs { 4 5 }
+;; 4 succs { }
+;; 5 succs { 6 }
+;; 6 succs { 3 7 }
+;; 7 succs { 1 }
+int au_abort (int * a, int n)
+{
+  int i;
+  int s;
+  int _1;
+  long unsigned int _2;
+  long unsigned int _3;
+  int * _4;
+  int _5;
+
+  <bb 2> [local count: 118111600]:
+  goto <bb 6>; [100.00%]
+
+  <bb 3> [local count: 955630224]:
+  _1 = i_7 * 2;
+  _2 = (long unsigned int) _1;
+  _3 = _2 * 4;
+  _4 = a_10(D) + _3;
+  _5 = *_4;
+  if (_5 < 0)
+    goto <bb 4>; [0.00%]
+  else
+    goto <bb 5>; [100.00%]
+
+  <bb 4> [count: 0]:
+  abort ();
+
+  <bb 5> [local count: 955630224]:
+  s_11 = _5 + s_6;
+  i_12 = i_7 + 1;
+
+  <bb 6> [local count: 1073741824]:
+  # s_6 = PHI <0(2), s_11(5)>
+  # i_7 = PHI <0(2), i_12(5)>
+  if (i_7 < n_8(D))
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 7> [local count: 118111600]:
+  return s_6;
+
+}
+
+
+
+;; Function au_trail (au_trail, funcdef_no=2, decl_uid=4495, cgraph_uid=3, symbol_order=2)
 
 ;; 2 loops found
 ;;
@@ -148,7 +216,58 @@ int au_trail (struct au_s * s)
 
 
 
-;; Function au_unused (au_unused, funcdef_no=2, decl_uid=4492, cgraph_uid=3, symbol_order=2)
+;; Function au_rec (au_rec, funcdef_no=3, decl_uid=4504, cgraph_uid=4, symbol_order=3)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5
+;;
+;; Loop 1
+;;  header 4, latch 3
+;;  depth 1, outer 0, finite_p
+;;  upper_bound 2147483647
+;;  likely_upper_bound 2147483647
+;;  iterations by profile: 3.545455 (unreliable, maybe flat) entry count:236223200 (estimated locally, freq 1.0000)
+;;  nodes: 4 3
+;; 2 succs { 4 }
+;; 3 succs { 4 }
+;; 4 succs { 3 5 }
+;; 5 succs { 1 }
+int au_rec (int n)
+{
+  int v;
+  int i;
+  int s;
+  int _1;
+
+  <bb 2> [local count: 236223200]:
+  goto <bb 4>; [100.00%]
+
+  <bb 3> [local count: 212600880]:
+  _1 = i_3 + -1;
+  v_7 = au_rec (_1);
+  s_8 = s_2 + v_7;
+  i_9 = i_3 + 1;
+
+  <bb 4> [local count: 1073741824]:
+  # s_2 = PHI <0(2), s_8(3)>
+  # i_3 = PHI <0(2), i_9(3)>
+  if (i_3 < n_6(D))
+    goto <bb 3>; [78.00%]
+  else
+    goto <bb 5>; [22.00%]
+
+  <bb 5> [local count: 236223200]:
+  return s_2;
+
+}
+
+
+
+;; Function au_unused (au_unused, funcdef_no=4, decl_uid=4514, cgraph_uid=5, symbol_order=4)
 
 ;; 1 loops found
 ;;
