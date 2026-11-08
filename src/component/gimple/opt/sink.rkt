@@ -42,9 +42,23 @@
 ;; the PHI's result moves to the store and the PHI gets a new virtual
 ;; name.  It asks for TODO_cleanup_cfg.
 ;;
-;; Not ported (an error when reached): infinite loops
-;; (connect_infinite_loops_to_exit), irreducible regions, abnormal edges,
-;; EH.
+;; connect_infinite_loops_to_exit is modelled for the post-dominators
+;; and the block order (fake edges to EXIT from blocks without
+;; successors and from a dead end of each region that cannot reach EXIT).
+;;
+;; Version gates (checked in the GCC 12, 13.3, 14.2 and 15.2 sources):
+;; ECF_RETURNS_TWICE >= 13; the inverted reverse post order and
+;; virtual_operand_live >= 14; do_not_sink, the post-dominance
+;; select_best_block, the store post-dominance check on the PHI path and
+;; the dominance filter of the VUSE rewiring >= 15 (before, a single use
+;; in the best block puts the statement right before that use).
+;;
+;; Not ported: irreducible regions (not detected; the BB_IRREDUCIBLE_LOOP
+;; conditions of the GCC 12 load walk are taken as false), abnormal and
+;; EH edges (never built for C here), the -O2 vectorization check of
+;; do_not_sink (flag_tree_loop_vectorize is off at -O1), local explicit
+;; register variables (has_local_explicit_reg_vars), the
+;; "sinking common stores" optinfo line.
 ;; ============================================================
 
 (require racket/list
@@ -76,14 +90,61 @@
   (define-values (cfg3 st3 commoned?) (sink-code st2 cfg2))
   (if (or unsplit? commoned?) (cleanup-tree-cfg st3 cfg3 print-cond-rhs) (values cfg3 st3)))
 
+;; connect_infinite_loops_to_exit: the sources of the fake edges to EXIT,
+;; in creation order (add_noreturn_fake_exit_edges first; then a reverse
+;; depth-first walk from EXIT, and for the next unvisited block in
+;; reverse chain order a dead end found by dfs_find_deadend)
+(define (connect-infinite-loops-to-exit cfg)
+  (define bbs (pvector->list (cfg-bbs cfg)))
+  (define noreturn (for/list ([b (in-list bbs)] #:when (pvector-empty? (cfg-succs cfg b))) b))
+  (define visited (make-hasheqv))
+  (define (walk! start)
+    (let loop ([stack (list start)])
+      (unless (null? stack)
+        (define b (car stack))
+        (define more (for/list ([p (in-pvector (cfg-preds cfg b))] #:unless (or (hash-ref visited p #f) (= p ENTRY)))
+                       (hash-set! visited p #t) p))
+        (loop (append more (cdr stack))))))
+  (hash-set! visited EXIT #t)
+  (for ([b (in-list noreturn)]) (hash-set! visited b #t))
+  (walk! EXIT)
+  (for ([b (in-list noreturn)]) (walk! b))
+  (define-values (loops _lb) (find-loops cfg (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
+                                                          (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e))))))
+  ;; dfs_find_deadend: follow the first successor (or the first exit of
+  ;; the block's loop) until a block without successors or a repeat
+  (define (find-deadend bb0)
+    (let loop ([bb bb0] [next bb0] [seen (hasheqv)])
+      (cond
+        [(pvector-empty? (cfg-succs cfg next)) next]
+        [(hash-ref seen next #f) bb]
+        [else
+         (define l (loop-of loops next))
+         (define exits (if l (loop-exits cfg l) '()))
+         (loop next (if (pair? exits) (cdr (car exits)) (GEdge-dest (pvector-first (cfg-succs cfg next))))
+               (hash-set seen next #t))])))
+  (let loop ([fakes noreturn])
+    (define unvisited (for/first ([b (in-list (reverse bbs))] #:unless (hash-ref visited b #f)) b))
+    (cond
+      [(not unvisited) fakes]
+      [else
+       (define d (find-deadend unvisited))
+       (hash-set! visited d #t)
+       (walk! d)
+       (loop (append fakes (list d)))])))
+
 (define (sink-code st0 cfg)
   (define st st0)
   (define major (gcc-major-version st))
   (define nodes (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY))
   (define dom (compute-dom nodes ENTRY (lambda (i) (for/pvector ([e (in-pvector (cfg-succs cfg i))]) (GEdge-dest e)))))
-  (define pdom (compute-dom nodes EXIT (lambda (i) (cfg-preds cfg i))))
-  (for ([bb (in-pvector (cfg-bbs cfg))] #:unless (dom-index pdom bb))
-    (error 'sink-pass "bb ~a does not reach the exit: connect_infinite_loops_to_exit is not ported" bb))
+  ;; connect_infinite_loops_to_exit: fake edges to EXIT from the blocks
+  ;; without successors (add_noreturn_fake_exit_edges) and from a dead end
+  ;; of every region the reverse walk from EXIT does not reach
+  (define fake-srcs (connect-infinite-loops-to-exit cfg))
+  (define pdom (compute-dom nodes EXIT (lambda (i) (if (= i EXIT)
+                                                       (pvector-append (cfg-preds cfg i) (list->pvector fake-srcs))
+                                                       (cfg-preds cfg i)))))
   (define-values (loops _lb) (find-loops cfg dom))
   (define back (dfs-back-edges cfg))
   (define m (gcfg->mfn cfg))
@@ -167,7 +228,7 @@
   (define (do-not-sink? g early best)
     (and (eqv? best (loop-latch early)) (empty-block? best)))
   (define (select-best-block early late g)
-    (if (>= major 13) (select-best-block-15 early late g) (select-best-block-12 early late g)))
+    (if (>= major 15) (select-best-block-15 early late g) (select-best-block-12 early late g)))
   (define (select-best-block-15 early late0 g)
     (define late (let loop ([l late0]) (if (and (not (= l early)) (do-not-sink? g early l)) (loop (idom l)) l)))
     (let loop ([best late] [temp late])
@@ -231,7 +292,7 @@
              (for/fold ([use #f]) ([uid (in-list (mfn-imm-uses m def))])
                (define ug (mfn-stmt m uid))
                (cond
-                 [(or (and (not (gphi? ug)) (stmt-get-lhs ug) (equal? (stmt-get-lhs ug) lhs))
+                 [(or (and (not (gphi? ug)) (stmt-get-lhs ug) (operand-eq? (stmt-get-lhs ug) lhs))
                       (and (not (gphi? ug)) (stmt-kills-ref? st ug r)))
                   (when (and (not (= uid id)) (ref-maybe-used-by-stmt? st ug r)) (return #f))
                   use]
@@ -248,7 +309,7 @@
                [(stmt-vuse g)
                 (when (and (gassign? g) (gassign-single-p st g) (eq? (tree-code (gassign-rhs1 g)) 'var_decl) (decl-flag st (gassign-rhs1 g) 'hard-register #f))
                   (return #f))
-                (if (>= major 13) (load-limit-15 g frombb commondom0) (load-limit-12 g frombb commondom0))]
+                (if (>= major 14) (load-limit-15 g frombb commondom0) (load-limit-12 g frombb commondom0))]
                [else commondom0]))
            (when (= commondom frombb) (return #f))
            (unless (dominated-by? commondom frombb) (return #f))
@@ -264,7 +325,7 @@
               (define ubb (mfn-bb m uid))
               (define best (select-best-block frombb ubb g))
               (when (= best frombb) (return #f))
-              (return (if (and (< major 13) (= best ubb)) (cons 'before uid) (after-labels best)))])]))
+              (return (if (and (< major 15) (= best ubb)) (cons 'before uid) (after-labels best)))])]))
       ;; a PHI use
       (define phi (mfn-stmt m use))
       (define sinkbb (bb-for-arg phi def))
@@ -272,8 +333,8 @@
       (define best (select-best-block frombb sinkbb g))
       (cond
         [(= best frombb) #f]
-        [(and (>= major 13) (stmt-vdef g) (not (= best sinkbb)) (not (post-dominated-by? best sinkbb))) #f]
-        [(and (< major 13) (eqv? best (loop-latch frombb)) (empty-block? best)) #f]
+        [(and (>= major 15) (stmt-vdef g) (not (= best sinkbb)) (not (post-dominated-by? best sinkbb))) #f]
+        [(and (< major 15) (eqv? best (loop-latch frombb)) (empty-block? best)) #f]
         [else (after-labels best)])))
   ;; GCC >= 13: walk up while the live virtual operand differs from the load's
   (define (load-limit-15 g frombb commondom)
@@ -364,8 +425,10 @@
                (define-values (new-vop st2) (make-ssa-name st (ssa-name-var old-result))) (set! st st2)
                (define phi* (mfn-stmt m pid))
                (mfn-replace! m pid (gphi (gphi-loc phi*) (gphi-flags phi*) (gphi-var phi*) new-vop (gphi-args phi*)))
+               ;; gimple_assign_set_rhs1 keeps the subcode; a single rhs's code is
+               ;; the code of the rhs (gimple_assign_rhs_code)
                (define store (stmt-set-flag (stmt-set-flag (gassign (gassign-loc first) (gassign-flags first) (gassign-lhs first)
-                                                                    (gassign-code first) from #f #f)
+                                                                    (tree-code from) from #f #f)
                                                            'vdef old-result)
                                             'vuse new-vop))
                (define target (for/first ([id (in-list (mfn-stmts m bb))] #:unless (glabel? (mfn-stmt m id))) id))
@@ -394,7 +457,7 @@
            (when (stmt-vdef g)
              (for ([uid (in-list (mfn-imm-uses m (stmt-vdef g)))])
                (define ug (mfn-stmt m uid))
-               (unless (or (gphi? ug) (and (>= major 13) (dominated-by? (mfn-bb m uid) tbb)))
+               (unless (or (gphi? ug) (and (>= major 15) (dominated-by? (mfn-bb m uid) tbb)))
                  (mfn-replace! m uid (stmt-set-flag ug 'vuse (stmt-vuse g))))))
            (if (eq? (car target) 'end) (mfn-move-to-end! m id tbb) (mfn-move-before! m id (cdr target)))]))))
   (define (vops-prefix g)
@@ -404,13 +467,20 @@
       [else ""]))
 
   ;; the block order
+  ;; GCC >= 14: inverted_rev_post_order_compute; before: the
+  ;; post-dominator tree from EXIT, a block's sons in reverse block-chain
+  ;; order (calculate_dominance_info links them in chain order and
+  ;; et_set_father makes the newest son the first)
+  (define chain-pos (for/hasheqv ([b (in-pvector (cfg-bbs cfg))] [i (in-naturals)]) (values b i)))
   (define order
-    (if (>= major 13)
+    (if (>= major 14)
         (for/list ([b (in-pvector (dom-rpo pdom))] #:unless (memv b (list ENTRY EXIT))) b)
         (let walk ([i 0])
           (define b (dom-node pdom i))
+          (define sons (sort (pvector->list (dom-children pdom i)) >
+                             #:key (lambda (k) (hash-ref chain-pos (dom-node pdom k) -1))))
           (append (if (memv b (list ENTRY EXIT)) '() (list b))
-                  (append* (for/list ([k (in-pvector (dom-children pdom i))]) (walk k)))))))
+                  (append* (for/list ([k (in-list sons)]) (walk k)))))))
   (for ([bb (in-list order)]) (sink-code-in-bb! bb))
   (define cfg1 (for/fold ([c (mfn->gcfg m)]) ([l (in-list (reverse messages))]) (cfg-add-message c l)))
   (values cfg1 (for/fold ([st st]) ([v (in-list released)]) (ssa-queue-release st v)) cleanup?))
