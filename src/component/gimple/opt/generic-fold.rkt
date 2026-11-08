@@ -31,16 +31,33 @@
 ;;   (A +- CST1) +- CST2 -> A + CST3 (also through a nop conversion)
 ;;   (T)(A +- B) for nested conversions (the "two conversions in a row"
 ;;   rules), (T)x with T the type of x
-;;   A - CST -> A + -CST (negate_expr_p)
+;;   A - B -> A + (-B) and (-A) - B -> (-B) - A for negate_expr_p B
 ;;   (A * C) +- A, (A * C1) +- (A * C2), (A * C) +- C (fold_plusminus_mult_expr)
-;;   (A * C1) * C2 -> A * (C1 * C2)
+;;   MULT_EXPR rules of match.pd in their order: (A * C1) * C2 (kept on
+;;   overflow when the type wraps), GCC 15 (A * C1 + C2) * C3 for
+;;   wrapping types, (-A) * negatable B, (X /[ex] A) * A, GCC 15
+;;   (X /[ex] C1) * (C1 * C2), ((X /[ex] A) +- B) * A (GCC 12) /
+;;   ((X /[ex] C1) +- C2) * (C1 * C3) (GCC 15), X * -1 -> -X,
+;;   (X * C) * Y -> (X * Y) * C (single_use is true on GENERIC)
 ;;   x * -C -> -x * C, extract_muldiv for X * C (fold_binary MULT_EXPR:
 ;;   constants, conversions, negations, (A +- C1) * C distributed,
-;;   (A * C1) * C and (A /[ex] C1) * C associated; MIN / MAX, ABS,
-;;   shifts and the division / modulus codes are not ported), with GCC's
-;;   static recursion limit of 3
+;;   (A * C1) * C and (A /[ex] C1) * C associated), with GCC's static
+;;   recursion limit of 3; ctype by mode size
 ;;   GCC >= 15: (A * B) + (-C) -> (B - C/A) * A when C is a multiple of A
+;;   negate_expr_p and negate_expr / fold_negate_expr_1 (integer cases)
 ;;   comparisons of constants, and with operands swapped to canonical order
+;;
+;; Not ported: TREE_OVERFLOW (constants carry no overflow flag, so
+;; extract_muldiv's overflow refusals see only the arithmetic of the
+;; current step); extract_muldiv's MIN / MAX (GCC 12 distributes them
+;; over MULT, GCC 15 does not), ABS, shifts and the division / modulus
+;; codes; fold_binary_op_with_conditional_arg and the COMPOUND_EXPR
+;; hoisting; the PLUS / MINUS rules X + (X / C) * -C -> X % C, the
+;; (plus (plus mult foo) mult) reassociation and the associate:
+;; split_tree block; get_range_pos_neg beyond constants and narrower
+;; unsigned conversions; const_binop computes in the result type (GCC:
+;; the first operand's type), which differs only for divisions and
+;; shifts of mixed signedness.
 ;; ============================================================
 
 (require racket/list
@@ -228,18 +245,86 @@
         (loop (tree-operand e 0))
         e)))
 
-;; negate_expr_p (the integer subset)
+;; negate_expr_p (fold-const.cc, the integer cases; the same in 12.5 and
+;; 15.2): TYPE is the type before STRIP_SIGN_NOPS
 (define (negate-expr-p e)
-  (define t (tree-type e))
-  (case (tree-code e)
+  (define type (tree-type e))
+  (define t (gf-strip-sign-nops e))
+  (define tt (tree-type t))
+  (define (op i) (tree-operand t i))
+  (define (non-pow2-cst? x) (and (icst? x) (not (= 1 (bit-count* (abs (signed-or-unsigned (icst-val x) (tree-type x))))))))
+  (case (tree-code t)
     [(integer_cst)
-     (or (ty-uns? t) (not (ty-undef? t)) (not (= (icst-val e) (ty-min t))))]
-    [(negate_expr) (not (ty-undef? t))]
-    [(minus_expr) (not (ty-undef? t))]
+     (or (and (ty-int? type) (ty-uns? type))
+         ;; may_negate_without_overflow_p
+         (and (not (ty-uns? tt)) (not (= (signed-or-unsigned (icst-val t) tt) (ty-min tt)))))]
+    [(bit_not_expr) (and (ty-int? type) (ty-wraps? type))]
+    [(negate_expr) #t]                                  ; !TYPE_OVERFLOW_SANITIZED
+    [(plus_expr)
+     (and (not (and (ty-int? type) (not (ty-wraps? type))))
+          (or (negate-expr-p (op 1)) (negate-expr-p (op 0))))]
+    [(minus_expr) (or (not (ty-int? type)) (ty-wraps? type))]
+    [(mult_expr)
+     (cond
+       [(ty-uns? type) #f]
+       ;; INT_MIN/n * n: negating one operand overflows unless an operand
+       ;; is a constant that is not a power of two
+       [(and (ty-int? tt) (not (ty-wraps? tt)) (not (or (non-pow2-cst? (op 0)) (non-pow2-cst? (op 1))))) #f]
+       [else (or (negate-expr-p (op 1)) (negate-expr-p (op 0)))])]
+    [(trunc_div_expr round_div_expr exact_div_expr)
+     (cond
+       [(ty-uns? type) #f]
+       [(and (icst? (op 0)) (negate-expr-p (op 0))) #t]
+       [(or (not (ty-int? tt)) (ty-wraps? tt) (and (icst? (op 1)) (not (integer-onep (op 1))))) (negate-expr-p (op 1))]
+       [else #f])]
+    [(rshift_expr) (and (icst? (op 1)) (= (icst-val (op 1)) (sub1 (ty-prec type))))]
     [else #f]))
 
-;; negate_expr: fold_build1 NEGATE_EXPR
-(define (gf-negate e) (gf-build1 'negate_expr (tree-type e) e))
+;; negate_expr: STRIP_SIGN_NOPS, fold_negate_expr or a NEGATE_EXPR,
+;; converted back to the original type
+(define (gf-negate e)
+  (define type (tree-type e))
+  (define t (gf-strip-sign-nops e))
+  (gf-convert type (or (fold-negate-expr t) (mk1 'negate_expr (tree-type t) t))))
+;; fold_negate_expr
+(define (fold-negate-expr e)
+  (define type (tree-type e))
+  (define tem (fold-negate-expr-1 (gf-strip-sign-nops e)))
+  (and tem (gf-convert type tem)))
+;; fold_negate_expr_1 (integer cases; TREE_OVERFLOW is not modelled, and
+;; without -fsanitize the negated constant is always returned)
+(define (fold-negate-expr-1 t)
+  (define type (tree-type t))
+  (define (op i) (tree-operand t i))
+  (case (tree-code t)
+    [(bit_not_expr) (and (ty-int? type) (gf-build2 'plus_expr type (op 0) (icst type 1)))]
+    [(integer_cst) (icst type (- (icst-val t)))]
+    [(negate_expr) (op 0)]
+    [(plus_expr)
+     (cond
+       [(negate-expr-p (op 1)) (gf-build2 'minus_expr type (gf-negate (op 1)) (op 0))]
+       [(negate-expr-p (op 0)) (gf-build2 'minus_expr type (gf-negate (op 0)) (op 1))]
+       [else #f])]
+    [(minus_expr) (gf-build2 'minus_expr type (op 1) (op 0))]
+    [(mult_expr)
+     (cond
+       [(ty-uns? type) #f]
+       [(negate-expr-p (op 1)) (gf-build2 'mult_expr type (op 0) (gf-negate (op 1)))]
+       [(negate-expr-p (op 0)) (gf-build2 'mult_expr type (gf-negate (op 0)) (op 1))]
+       [else #f])]
+    [(trunc_div_expr round_div_expr exact_div_expr)
+     (cond
+       [(ty-uns? type) #f]
+       [(and (icst? (op 0)) (negate-expr-p (op 0))) (gf-build2 (tree-code t) type (gf-negate (op 0)) (op 1))]
+       [(and (or (not (ty-int? type)) (ty-wraps? type) (and (icst? (op 1)) (not (integer-onep (op 1)))))
+             (negate-expr-p (op 1)))
+        (gf-build2 (tree-code t) type (op 0) (gf-negate (op 1)))]
+       [else #f])]
+    [(rshift_expr)
+     (and (icst? (op 1)) (= (icst-val (op 1)) (sub1 (ty-prec type)))
+          (let ([nt (if (ty-uns? type) (stype-for type) (utype-for type))])
+            (gf-convert type (gf-build2 'rshift_expr nt (gf-convert nt (op 0)) (op 1)))))]
+    [else #f]))
 
 ;; ------------------------------------------------------------
 ;; builders
@@ -277,11 +362,8 @@
        [(eqv? t (tree-type a)) a]                               ; strip-useless (GENERIC: identical type)
        [(nop? a) (convert-of-convert t a)]
        [else #f])]
-    [(negate_expr)
-     (cond
-       [(icst? arg0) (icst t (- (icst-val arg0)))]
-       [(eq? (tree-code a) 'negate_expr) (tree-operand a 0)]
-       [else #f])]
+    ;; fold_negate_expr of the sign-stripped operand
+    [(negate_expr) (let ([tem (fold-negate-expr arg0)]) (and tem (gf-convert t tem)))]
     [else #f]))
 
 ;; match.pd "Handle cases of two conversions in a row"
@@ -336,16 +418,111 @@
        [(and (memq code '(plus_expr minus_expr)) (assoc-constants code t op0 op1))]
        [(and (eq? code 'plus_expr) (>= (gcc-major-version (gs)) 15) (factor-mult-negative-constant t op0 op1))]
        [else #f])]
-    [(mult_expr)
-     (cond
-       [(integer-zerop op1) (icst t 0)]
-       [(integer-onep op1) (gf-convert t op0)]
-       ;; (mult (mult @0 INTEGER_CST@1) INTEGER_CST@2) when the product does not overflow
-       [(and (icst? op1) (eq? (tree-code op0) 'mult_expr) (icst? (tree-operand op0 1)))
-        (define-values (c ovf) (const-binop 'mult_expr t (tree-operand op0 1) op1))
-        (and c (not ovf) (gf-build2 'mult_expr t (tree-operand op0 0) c))]
-       [else #f])]
+    [(mult_expr) (simplify-mult t op0 op1)]
     [else #f]))
+
+;; the match.pd rules rooted at MULT_EXPR that fire on integer GENERIC,
+;; in match.pd order (12.5 / 15.2 line numbers)
+(define (simplify-mult t op0 op1)
+  (define v15? (>= (gcc-major-version (gs)) 15))
+  (define (strip-conv x) (if (nop? x) (tree-operand x 0) x))
+  (define (types-match? a b) (eqv? (type-main-variant (gs) a) (type-main-variant (gs) b)))
+  (define (wide-mul a b) ; wi::mul (a, b, TYPE_SIGN (t)): (values product overflow?)
+    (define p (* (signed-or-unsigned (icst-val a) (tree-type a)) (signed-or-unsigned (icst-val b) (tree-type b))))
+    (values p (not (int-fits-type? p t))))
+  (cond
+    [(integer-zerop op1) (icst t 0)]
+    [(integer-onep op1) (gf-convert t op0)]
+    ;; 490 / 640: (mult (mult @0 INTEGER_CST@1) INTEGER_CST@2) unless the
+    ;; product overflows a type whose overflow is undefined
+    [(and (icst? op1) (eq? (tree-code op0) 'mult_expr) (icst? (tree-operand op0 1))
+          (let-values ([(p ovf) (wide-mul (tree-operand op0 1) op1)])
+            (and (or (not ovf) (ty-wraps? t)) (gf-build2 'mult_expr t (tree-operand op0 0) (icst t p)))))]
+    ;; 15: 654: (mult (plus (mult @0 C1) C2) C3) -> (plus (mult @0 C1*C3) C2*C3),
+    ;; on GENERIC only when the type wraps
+    [(and v15? (icst? op1) (not (ty-undef? t)) (eq? (tree-code op0) 'plus_expr) (icst? (tree-operand op0 1))
+          (eq? (tree-code (tree-operand op0 0)) 'mult_expr) (icst? (tree-operand (tree-operand op0 0) 1)))
+     (define m (tree-operand op0 0))
+     (define-values (mul _o1) (wide-mul (tree-operand m 1) op1))
+     (define-values (add _o2) (wide-mul (tree-operand op0 1) op1))
+     (gf-build2 'plus_expr t (gf-build2 'mult_expr t (tree-operand m 0) (icst t mul)) (icst t add))]
+    ;; 1604 / 2110: (mult:c (convert1? (negate @0)) (convert2? negate_expr_p@1))
+    [(for/or ([a (in-list (list op0 op1))] [b (in-list (list op1 op0))])
+       (define na (strip-conv a))
+       (and (eq? (tree-code na) 'negate_expr) (negate-expr-p (strip-conv b))
+            (let ([x (tree-operand na 0)] [y (strip-conv b)])
+              (and (tree-nop-conversion-p t (tree-type x)) (tree-nop-conversion-p t (tree-type y))
+                   (gf-build2 'mult_expr t (gf-convert t x) (gf-convert t (gf-negate y)))))))]
+    ;; 3855 / 5584: (mult (convert1? (exact_div @0 @@1)) (convert2? @1)) -> (convert @0)
+    [(let ([d (strip-conv op0)])
+       (and (eq? (tree-code d) 'exact_div_expr) (operand-equal? (tree-operand d 1) (strip-conv op1))
+            (gf-convert t (tree-operand d 0))))]
+    ;; 15: 5589: (mult (convert? (exact_div @0 INTEGER_CST@1)) INTEGER_CST@2), @2 a multiple of @1
+    [(and v15? (icst? op1)
+          (let ([d (strip-conv op0)])
+            (and (eq? (tree-code d) 'exact_div_expr) (icst? (tree-operand d 1))
+                 (let ([c1 (signed-or-unsigned (icst-val (tree-operand d 1)) (tree-type (tree-operand d 1)))]
+                       [c2 (signed-or-unsigned (icst-val op1) (tree-type op1))])
+                   (and (not (zero? c1)) (zero? (remainder c2 c1))
+                        (gf-build2 'mult_expr t (gf-convert t (tree-operand d 0)) (icst t (quotient c2 c1))))))))]
+    ;; 3868 / 5615: ((X /[ex] A) +- B) * A
+    [(exact-div-plusminus-mult t op0 op1 v15?)]
+    ;; 3920 / 5686: x * -1 -> -x
+    [(integer-all-ones? op1) (gf-build1 'negate_expr t op0)]
+    ;; 3926 / 5692: (mult:c (mult @0 INTEGER_CST@1) @2) -> (mult (mult @0 @2) @1),
+    ;; @2 not a constant, @1 neither 0 nor -1 (single_use is true on GENERIC)
+    [(for/or ([a (in-list (list op0 op1))] [b (in-list (list op1 op0))])
+       (and (eq? (tree-code a) 'mult_expr) (icst? (tree-operand a 1)) (not (icst? b))
+            (not (integer-zerop (tree-operand a 1)))
+            (not (integer-all-ones? (tree-operand a 1)))
+            (gf-build2 'mult_expr t (gf-build2 'mult_expr t (tree-operand a 0) b) (tree-operand a 1))))]
+    [else #f]))
+
+;; integer_minus_onep: all ones in the constant's precision
+(define (integer-all-ones? c)
+  (and (icst? c) (let ([m (sub1 (arithmetic-shift 1 (ty-prec (tree-type c))))]) (= (bitwise-and (icst-val c) m) m))))
+
+;; ((X /[ex] A) +- B) * A (GCC 12) and ((X /[ex] C1) +- C2) * (C1 * C3)
+;; (GCC 15; get_range_pos_neg sees constants and narrower unsigned
+;; conversions only)
+(define (exact-div-plusminus-mult t op0 op1 v15?)
+  (define (strip-conv x) (if (nop? x) (tree-operand x 0) x))
+  (define (types-match? a b) (eqv? (type-main-variant (gs) a) (type-main-variant (gs) b)))
+  (define pm (strip-conv op0))
+  (and (memq (tree-code pm) '(plus_expr minus_expr)) (icst? (tree-operand pm 1)) (icst? op1)
+       (let* ([code (tree-code pm)] [d (strip-conv (tree-operand pm 0))] [c2 (tree-operand pm 1)])
+         (and (eq? (tree-code d) 'exact_div_expr) (icst? (tree-operand d 1))
+              (let* ([x (tree-operand d 0)] [a (tree-operand d 1)]
+                     [sv (lambda (c) (signed-or-unsigned (icst-val c) (tree-type c)))]
+                     [u (lambda () (utype-for t))])
+                (and (tree-nop-conversion-p t (tree-type c2)) (tree-nop-conversion-p (tree-type x) (tree-type c2))
+                     (cond
+                       [(not v15?)
+                        ;; @1 of the pattern: the multiplier must equal A
+                        (and (operand-equal? a op1)
+                             (let* ([p (* (sv a) (sv c2))] [ovf (not (int-fits-type? p t))])
+                               (if (and (types-match? t (tree-type c2)) (types-match? (tree-type x) (tree-type c2)) (not ovf))
+                                   (gf-build2 code t x (icst t p))
+                                   (let ([ut (u)])
+                                     (gf-convert t (gf-build2 code ut (gf-convert ut x)
+                                                              (gf-build2 'mult_expr ut (gf-convert ut a) (gf-convert ut c2))))))))]
+                       [else
+                        (define c1 (sv a)) (define c3 (sv op1))
+                        (and (not (zero? c1)) (zero? (remainder c3 c1))
+                             (let* ([factor (quotient c3 c1)]
+                                    [p (* (sv c2) c3)] [ovf (not (int-fits-type? p t))]
+                                    [pos-neg (cond [(icst? x) (if (< (sv x) 0) 2 1)]
+                                                   [(and (nop? x) (ty-int? (tree-type (tree-operand x 0))) (ty-uns? (tree-type (tree-operand x 0)))
+                                                         (< (ty-prec (tree-type (tree-operand x 0))) (ty-prec (tree-type x))))
+                                                    1]
+                                                   [else 3])])
+                               (if (and (types-match? t (tree-type c2)) (types-match? (tree-type x) (tree-type c2)) (not ovf)
+                                        (or (ty-uns? t) (= factor 1)
+                                            (not (= 3 (bitwise-ior pos-neg (if (not (eq? (eq? code 'plus_expr) (< (sv c2) 0))) 1 2))))))
+                                   (gf-build2 code t (gf-build2 'mult_expr t x (icst t factor)) (icst t p))
+                                   (let ([ut (u)])
+                                     (gf-convert t (gf-build2 code ut (gf-build2 'mult_expr ut (gf-convert ut x) (icst ut factor))
+                                                              (gf-build2 'mult_expr ut (gf-convert ut op1) (gf-convert ut c2))))))))])))))))
 
 ;; (A +- CST1) +- CST2 -> A + CST3, with an optional nop conversion
 ;; around the inner operation
@@ -424,7 +601,10 @@
 (define (extract-muldiv-1 t c wide-type)
   (define type (tree-type t))
   (define tcode (tree-code t))
-  (define ctype (if (and wide-type (> (ty-prec wide-type) (ty-prec type))) wide-type type))
+  ;; GET_MODE_SIZE (SCALAR_INT_TYPE_MODE) of both types: the narrowest
+  ;; integer mode holding the precision
+  (define (mode-size ty) (let ([p (ty-prec ty)]) (cond [(<= p 8) 1] [(<= p 16) 2] [(<= p 32) 4] [(<= p 64) 8] [else 16])))
+  (define ctype (if (and wide-type (> (mode-size wide-type) (mode-size type))) wide-type type))
   (define (op i) (tree-operand t i))
   (cond
     [(integer-zerop c) #f]
@@ -527,9 +707,12 @@
        [else #f])]
     [(plus_expr minus_expr)
      (cond
-       ;; A - CST -> A + -CST
-       [(and (eq? code 'minus_expr) (icst? op1) (negate-expr-p op1) (ty-int? t))
-        (gf-build2 'plus_expr t (gf-convert t op0) (gf-negate op1))]
+       ;; (-A) - B -> (-B) - A where B is easily negated
+       [(and (eq? code 'minus_expr) (eq? (tree-code arg0) 'negate_expr) (negate-expr-p op1))
+        (gf-build2 'minus_expr t (gf-negate op1) (gf-convert t (tree-operand arg0 0)))]
+       ;; A - B -> A + (-B) if B is easily negatable
+       [(and (eq? code 'minus_expr) (negate-expr-p op1) (ty-int? t))
+        (gf-build2 'plus_expr t (gf-convert t arg0) (gf-negate op1))]
        [(and (or (eq? (tree-code arg0) 'mult_expr) (eq? (tree-code arg1) 'mult_expr))
              (eq? (ty-uns? t) (ty-uns? (tree-type arg0))) (eq? (ty-uns? t) (ty-uns? (tree-type arg1))))
         (plusminus-mult code t arg0 arg1)]
