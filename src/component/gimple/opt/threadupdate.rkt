@@ -6,7 +6,7 @@
 ;; ============================================================
 ;;
 ;;   (thread-through-all-blocks st fndecl cfg paths loops)
-;;     -> (values cfg st table)
+;;     -> (values cfg st table threaded?)
 ;;   PATHS: the registered jump threads in registration order, each a
 ;;   list of (src dest type) with type start / copy-src / copy-joiner /
 ;;   no-copy (EDGE_START_JUMP_THREAD, EDGE_COPY_SRC_BLOCK,
@@ -30,9 +30,16 @@
 ;; and ssa_redirect_edges (the incoming edge goes to the duplicate, the
 ;; PHI arguments of the old destination with it).
 ;;
-;; Not ported (an error when reached): thread_through_loop_header, a
-;; second distinct path through one block (the copies of the template
-;; block), the paths of a removed edge.  Edges are identified by their
+;; The redirection data live in a model of GCC's hash_table (open
+;; addressing over prime_tab sizes, hash = index of the final
+;; destination, double hashing, expansion at 3/4), so they are visited
+;; in GCC's slot order: the first one's copy is the template, the
+;; others are copies of the template (their names replace the
+;; template's names and, through them, the original ones).
+;;
+;; Not ported: thread_through_loop_header (an error when a thread
+;; through a loop header remains), the removed-edge filter of update_cfg
+;; (m_removed_edges), debug statements.  Edges are identified by their
 ;; (src . dest) pair, so a path whose later edge was redirected by an
 ;; earlier thread (GCC follows the edge object) is not followed.
 ;; ============================================================
@@ -375,7 +382,7 @@
 
   ;; thread_block_1
   (define (thread-block-1! bb joiners?)
-    (define rds '())                             ; redirection data, creation order
+    (define rds (htab-new (length (succ-dests bb)) (lambda (rd) (rd-hash (rd-path rd)))))
     (define need-correction? #f)
     (define last-e2 #f)
     (for ([p (in-list (preds bb))])
@@ -403,24 +410,32 @@
            (void)]
           [else
            ;; lookup_redirection_data (e, INSERT)
-           (define rd (findf (lambda (rd) (paths-equal? (rd-path rd) path)) rds))
-           (if rd
-               (set-rd-incoming! rd (cons e (rd-incoming rd)))
-               (set! rds (append rds (list (rdata path (list e) (vector #f #f))))))
+           (htab-insert! rds (rd-hash path)
+                         (lambda (rd) (paths-equal? (rd-path rd) path))
+                         (lambda () (rdata path (list e) (vector #f #f)))
+                         (lambda (rd) (set-rd-incoming! rd (cons e (rd-incoming rd)))))
            (when (eq? (type-of (cadr path)) 'copy-joiner)
              (if (not last-e2) (set! last-e2 e2) (unless (equal? e2 last-e2) (set! need-correction? #t))))])))
-    (when (> (length rds) 1)
-      (error 'thread-through-all-blocks "~a distinct jump threads through bb ~a: the template block copies are not ported" (length rds) bb))
-    ;; ssa_create_duplicates
-    (for ([rd (in-list rds)])
+    ;; ssa_create_duplicates: the first redirection data's copy is the
+    ;; template; the others copy the template (which still has its
+    ;; control statement and edges) and get their edges at once
+    (define template #f)
+    (for ([rd (in-list (htab-entries rds))])
       (define path (rd-path rd))
       (for/first ([pe (in-list (cddr path))] #:when (memq (type-of pe) '(copy-src copy-joiner)))
         (vector-set! (rd-dups rd) 1 (create-block-for-threading! (car pe))))
-      (vector-set! (rd-dups rd) 0 (create-block-for-threading! (car (cadr path)))))
+      (cond
+        [(not template)
+         (vector-set! (rd-dups rd) 0 (create-block-for-threading! (car (cadr path))))
+         (set! template (vector-ref (rd-dups rd) 0))]
+        [else
+         (vector-set! (rd-dups rd) 0 (create-block-for-threading! template))
+         (fix-duplicate-block-edges! rd bb need-correction?)]))
     ;; ssa_fixup_template_block
-    (for ([rd (in-list rds)]) (fix-duplicate-block-edges! rd bb need-correction?))
+    (for/first ([rd (in-list (htab-entries rds))] #:when (eqv? (vector-ref (rd-dups rd) 0) template))
+      (fix-duplicate-block-edges! rd bb need-correction?))
     ;; ssa_redirect_edges
-    (for* ([rd (in-list rds)] [e (in-list (rd-incoming rd))])
+    (for* ([rd (in-list (htab-entries rds))] [e (in-list (rd-incoming rd))])
       (define dup (vector-ref (rd-dups rd) 0))
       (define saved (for/list ([ph (in-pvector (phis (cdr e)))]) (phi-arg ph (car e))))
       (define-values (e2 created?) (redirect-and-branch! (car e) (cdr e) dup))
@@ -428,7 +443,7 @@
       ;; flush_pending_stmts
       (for ([v (in-list saved)] [k (in-naturals)] #:when v) (set-phi-arg! dup (car e) k v))
       (hash-remove! aux e))
-    (pair? rds))
+    (pair? (htab-entries rds)))
 
   ;; update_cfg: the threaded blocks in post order
   (define order (post-order cfg))
@@ -444,8 +459,41 @@
     (error 'thread-through-all-blocks "a jump thread through the header of loop ~a: thread_through_loop_header is not ported" (Loop-num l)))
   (values cfg st (reverse table) threaded?))
 
+;; ---- hash_table (hash-table.h) for the redirection data -----------------
+(define PRIMES '(7 13 31 61 127 251 509 1021 2039 4093 8191 16381 32749 65521 131071 262139 524287 1048573))
+(define (higher-prime n) (for/first ([p (in-list PRIMES)] #:when (>= p n)) p))
+(struct htab ([slots #:mutable] [n #:mutable] hash-of))
+(define (htab-new n hash-of) (htab (make-vector (higher-prime n) #f) 0 hash-of))
+;; the slot of an equal entry, or the first empty slot of the probe sequence
+(define (htab-probe slots h same?)
+  (define size (vector-length slots))
+  (define h2 (add1 (modulo h (- size 2))))
+  (let loop ([i (modulo h size)])
+    (define x (vector-ref slots i))
+    (if (or (not x) (same? x)) i (loop (let ([j (+ i h2)]) (if (>= j size) (- j size) j))))))
+(define (htab-expand! t)
+  (define old (htab-slots t))
+  (define elts (htab-n t))
+  (define nsize (if (> (* elts 2) (vector-length old)) (higher-prime (* elts 2)) (vector-length old)))
+  (define new (make-vector nsize #f))
+  (for ([x (in-vector old)] #:when x)
+    (vector-set! new (htab-probe new ((htab-hash-of t) x) (lambda (y) #f)) x))
+  (set-htab-slots! t new))
+;; find_slot_with_hash (INSERT): MAKE a new entry or UPDATE! the equal one
+(define (htab-insert! t h same? make update!)
+  (when (<= (* (vector-length (htab-slots t)) 3) (* (htab-n t) 4)) (htab-expand! t))
+  (define i (htab-probe (htab-slots t) h same?))
+  (define x (vector-ref (htab-slots t) i))
+  (cond
+    [x (update! x)]
+    [else (vector-set! (htab-slots t) i (make)) (set-htab-n! t (add1 (htab-n t)))]))
+;; traverse: slot order
+(define (htab-entries t) (for/list ([x (in-vector (htab-slots t))] #:when x) x))
+
 ;; redirection_data
 (struct rdata (path [incoming #:mutable] dups))
+;; redirection_data::hash: the index of the path's final destination
+(define (rd-hash path) (cadr (last path)))
 (define (rd-path rd) (rdata-path rd))
 (define (rd-incoming rd) (rdata-incoming rd))
 (define (set-rd-incoming! rd v) (set-rdata-incoming! rd v))

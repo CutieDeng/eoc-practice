@@ -1,0 +1,44 @@
+
+;; Function thr (thr, funcdef_no=0, decl_uid=3608, cgraph_uid=1, symbol_order=0)
+
+int thr (int a, int b)
+{
+  int y;
+  int x;
+  int D.3621;
+
+  if (a == 1) goto <D.3613>; else goto <D.3614>;
+  <D.3613>:
+  x = b + 1;
+  goto <D.3615>;
+  <D.3614>:
+  if (a == 2) goto <D.3616>; else goto <D.3617>;
+  <D.3616>:
+  x = b * 3;
+  goto <D.3618>;
+  <D.3617>:
+  x = b + -7;
+  <D.3618>:
+  <D.3615>:
+  _1 = x * x;
+  y = b + _1;
+  if (a == 1) goto <D.3619>; else goto <D.3620>;
+  <D.3619>:
+  D.3621 = g (y);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3624>;
+  <D.3620>:
+  if (a == 2) goto <D.3622>; else goto <D.3623>;
+  <D.3622>:
+  _2 = y + 5;
+  D.3621 = g (_2);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <D.3624>;
+  <D.3623>:
+  D.3621 = y;
+  goto <D.3624>;
+  <D.3624>:
+  return D.3621;
+}
+
+

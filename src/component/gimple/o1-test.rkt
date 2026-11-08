@@ -126,7 +126,7 @@
 
 (module+ test
   (for* ([ver '("15.2.0" "12.5.0")]
-         [name '("basic.c" "calls.c" "struct.c" "ccp.c")])
+         [name '("basic.c" "calls.c" "struct.c" "ccp.c" "thread.c")])
     (define tu (read-gccast-file (build-path fixtures (format "~a.~a.O1.dat" name ver))))
     (define texts (o1-stage-texts tu))
     (define stages (append lowering-stages (map pass-name (o1-passes (import-tu tu #:optimize 1)))

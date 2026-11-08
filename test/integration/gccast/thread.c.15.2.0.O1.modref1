@@ -1,0 +1,114 @@
+
+;; Function thr (thr, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+
+
+
+modref analyzing 'thr/1' (ipa=0)
+Analyzing flags of ssa name: a_6(D)
+  Analyzing stmt: if (a_6(D) == 2)
+  current flags of a_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: if (a_6(D) == 1)
+  current flags of a_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: if (a_6(D) == 2)
+  current flags of a_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: if (a_6(D) == 1)
+  current flags of a_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name a_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+Analyzing flags of ssa name: b_7(D)
+  Analyzing stmt: y_11 = _1 + b_7(D);
+    Analyzing flags of ssa name: y_11
+      Analyzing stmt: _4 = PHI <_17(8), _15(10), y_11(9)>
+        Analyzing flags of ssa name: _4
+          Analyzing stmt: return _4;
+          current flags of _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name _4 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+      current flags of y_11 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+      Analyzing stmt: _17 = g (y_11);
+        Analyzing flags of ssa name: _17
+          Analyzing stmt: _4 = PHI <_17(8), _15(10), y_11(9)>
+          current flags of _17 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+        flags of ssa name _17 no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_indirectly no_direct_read no_indirect_read
+      current flags of y_11
+    flags of ssa name y_11
+  current flags of b_7(D)
+flags of ssa name b_7(D)
+Always executed bbbs (assuming return or EH): 2, 7, 11
+ - Analyzing call:_17 = g (y_11);
+ - Function availability <= AVAIL_INTERPOSABLE.
+ - Analyzing call:_15 = g (_2);
+ - Function availability <= AVAIL_INTERPOSABLE.
+ - modref done with result: tracked.
+  loads:
+    Every base
+  stores:
+    Every base
+  Side effects
+  Nondeterministic
+  Global memory read
+  Global memory written
+  parm 0 flags: no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+int thr (int a, int b)
+{
+  int y;
+  int x;
+  int _1;
+  int _2;
+  int _4;
+  int _15;
+  int _17;
+
+  <bb 2> [local count: 1073741820]:
+  if (a_6(D) == 1)
+    goto <bb 3>; [34.00%]
+  else
+    goto <bb 4>; [66.00%]
+
+  <bb 3> [local count: 365072223]:
+  x_10 = b_7(D) + 1;
+  goto <bb 7>; [100.00%]
+
+  <bb 4> [local count: 708669597]:
+  if (a_6(D) == 2)
+    goto <bb 5>; [34.00%]
+  else
+    goto <bb 6>; [66.00%]
+
+  <bb 5> [local count: 240947666]:
+  x_9 = b_7(D) * 3;
+  goto <bb 7>; [100.00%]
+
+  <bb 6> [local count: 467721932]:
+  x_8 = b_7(D) + -7;
+
+  <bb 7> [local count: 1073741822]:
+  # x_3 = PHI <x_10(3), x_9(5), x_8(6)>
+  _1 = x_3 * x_3;
+  y_11 = _1 + b_7(D);
+  if (a_6(D) == 1)
+    goto <bb 8>; [11.56%]
+  else
+    goto <bb 9>; [88.44%]
+
+  <bb 8> [local count: 124124552]:
+  _17 = g (y_11);
+  // predicted unlikely by early return (on trees) predictor.
+  goto <bb 11>; [100.00%]
+
+  <bb 9> [local count: 949617270]:
+  if (a_6(D) == 2)
+    goto <bb 10>; [11.56%]
+  else
+    goto <bb 11>; [88.44%]
+
+  <bb 10> [local count: 109775754]:
+  _2 = y_11 + 5;
+  _15 = g (_2);
+  // predicted unlikely by early return (on trees) predictor.
+
+  <bb 11> [local count: 1073741824]:
+  # _4 = PHI <_17(8), _15(10), y_11(9)>
+  return _4;
+
+}
+
+

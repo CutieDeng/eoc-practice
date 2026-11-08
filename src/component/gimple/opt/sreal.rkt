@@ -129,7 +129,7 @@
     [(<= e (- PART-BITS)) 0]
     [(>= e PART-BITS) (* sign 9223372036854775807)]
     [(> e 0) (* sign (arithmetic-shift a e))]
-    [(< e 0) (* sign (+ (arithmetic-shift a e) (bitwise-and (arithmetic-shift a (- (- e) 1)) 1)))]
+    [(< e 0) (* sign (+ (arithmetic-shift a e) (bitwise-and (arithmetic-shift a (+ e 1)) 1)))]   ; (a >> -e) + ((a >> (-e - 1)) & 1)
     [else (sreal-sig r)]))
 
 (define (sreal->exact r) (* (sreal-sig r) (expt 2 (sreal-exp r))))

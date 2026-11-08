@@ -25,6 +25,8 @@ for i,a in enumerate(args):
     if a=='--suite': SUITE=args[i+1]
 S=tempfile.mkdtemp(prefix='gcc-pass-sheet-')+'/'
 FIX=os.path.join(REPO,'gccast-plugin','tests','struct.c')
+# the o1-test.rkt fixtures (gccast-plugin/tests/<name>.c)
+FIXTURES=['basic','calls','struct','ccp','thread']
 def run(cmd, out):
     with open(out,'w') as f: subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=False)
 run([GCC15,'-O1','-fdump-passes','-c','-o','/dev/null',FIX], S+'passes15.txt')
@@ -37,7 +39,7 @@ for o in '0123':
             if m: f.write(m.group(1)+' '+m.group(2).strip()+'\n')
 for ver,cc in [('15',GCC15),('12',GCC12)]:
     os.makedirs(S+'dumps'+ver,exist_ok=True)
-    for fx in ['basic','calls','struct','ccp']:
+    for fx in FIXTURES:
         subprocess.run([cc,'-O1','-c','-fdump-tree-all','-o','/dev/null',os.path.join(REPO,'gccast-plugin','tests',fx+'.c')],cwd=S+'dumps'+ver,capture_output=True)
 def parse(path):
     out=[]
@@ -104,7 +106,7 @@ status={
  'tree-uncprop1':'恒等','tree-nrv':'恒等','tree-isel':'恒等',
  'tree-waccess3':'完成（警告未移植；后期实例在夹具上不做 pointer query，计数为 0）',
  'tree-optimized':'完成（execute_fixup_cfg + cleanup_tree_cfg，TODO_remove_unused_locals）',
- 'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；未做关系 oracle；path ranger 与线程化 CFG 更新见 dom3）',
+ 'tree-dom2':'完成（`opt/dom.rkt`：边等价 / 条件等价、常量与拷贝表、可用表达式表、cprop（含 ranger 单值）、PHI 等价、前向线程化的语句计数与 cancel_invalid_paths；`opt/ranger.rkt` + `irange.rkt` + `range-op.rkt`：≥15 的 Global Exported；thread.c 的 3 条线程经过同一块：`opt/threadupdate.rkt` 的模板块复制、GCC hash_table 槽序、update_ssa 的替换集合（x_20 -> { x_3 x_17 }）与待释放名；未做关系 oracle；path ranger 见 dom3）',
 }
 reuse={'ccp','forwprop','fre','dse','dce','cddce','phiprop','mergephi','sccopy','local-pure-const','modref','profile_estimate','fixup_cfg','strip_predict_hints','release_ssa','einline'}
 # -fdump-passes evaluates each gate once, before any function is compiled, so
@@ -120,7 +122,7 @@ def executed(n,st):
     return (n in ran15) if n.startswith('tree-') else st=='ON'
 def our_status(n,st,seen):
     if n in status and seen[n]==0: return status[n]
-    if n.startswith('tree-') and st=='ON' and n not in ran15: return '未执行（-O1 下 4 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假）'
+    if n.startswith('tree-') and st=='ON' and n not in ran15: return '未执行（-O1 下 %d 个夹具都没有该 pass 的 dump：所在分组关闭或函数级 gate 为假）' % len(FIXTURES)
     if st=='OFF' and not executed(n,st): return 'gate 关闭（-O1 不执行）'
     base=re.sub(r'\d+$','',n.split('-',1)[1] if '-' in n else n.lstrip('*'))
     if n.startswith('rtl-'): return '范围外（RTL 后端）'
@@ -145,7 +147,7 @@ flag_status={
  '-ftree-ccp':'完成（ccp1）','-ftree-bit-ccp':'完成（ccp1）','-ftree-forwprop':'完成（forwprop1）','-ftree-fre':'完成（fre1）','-ftree-dse':'完成（dse1）',
  '-ftree-dce':'完成（cddce1、dce2；后续实例未）','-ftree-builtin-call-dce':'恒等（cdce）','-fguess-branch-probability':'完成（profile_estimate）',
  '-fipa-pure-const':'完成（local 实例）；IPA 传播未','-fipa-modref':'完成（local 实例）；IPA 传播未','-fipa-strict-aliasing':'-O1 无 strict aliasing，alias set 恒 0',
- '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（单一路径 / 块；模板块复制与循环头线程化未移植）；后向线程器 ethread / thread 未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
+ '-ftree-phiprop':'恒等','-fthread-jumps':'部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（含同一块多条路径的模板块复制；循环头线程化未移植）；后向线程器 ethread / thread 未移植）','-ftree-sra':'恒等（esra）/ 未移植（sra）','-ftree-pta':'恒等 / 未移植（PTA）','-fssa-phiopt':'恒等 / 未移植',
  '-fearly-inlining':'恒等（不内联）','-finline':'未移植','-finline-functions-called-once':'未移植','-finline-atomics':'未移植','-fno-inline-stringops':'未移植',
  '-fipa-profile':'范围外','-fipa-reference':'范围外','-fipa-reference-addressable':'范围外','-fipa-stack-alignment':'范围外',
  '-ftree-copy-prop':'完成（copyprop1/2）','-ftree-dominator-opts':'完成（dom2）','-ftree-reassoc':'完成（reassoc1 串行子集）','-ftree-ch':'完成（ch2）','-ftree-loop-optimize':'完成（loop 到 loopdone、no_loop）','-ftree-loop-im':'未移植',
@@ -178,7 +180,7 @@ def body(path):
     return bodies
 def late_impact(ver):
     out={}
-    for fx in ['basic','calls','struct','ccp']:
+    for fx in FIXTURES:
         d=S+'dumps'+ver+'/'
         files=sorted([f for f in os.listdir(d) if re.match(fx+r'\.c\.\d+t\.',f)], key=lambda f:int(f.split('.')[2][:-1]))
         start=[i for i,f in enumerate(files) if f.endswith('.release_ssa')]
@@ -203,7 +205,7 @@ L.append("## 0. 数据来源与口径\n")
 L.append("- **pass 清单**：`gcc-15 -O1 -fdump-passes` 与 `gcc-12 -O1 -fdump-passes`（Homebrew gcc 15.2.0 / gcc@12 12.5.0）打印的完整 pass 树，含 gate 关闭的 pass。这是 GCC 对 `passes.def` 的实例化结果。此前版本的表只列了夹具实际产生 dump 文件的 pass，漏掉了无 dump 名的 `*` pass 与 gate 关闭的 pass。")
 L.append("- **passes.def 规模**（`gcc.git` 的 releases/gcc-15 与 releases/gcc-12 分支）：NEXT_PASS / INSERT_PASS 条目 426（gcc-15）、406（gcc-12）；不同 pass 名 294（gcc-15）。-fdump-passes 展开为 %d 个实例（gcc-15）、%d 个（gcc-12）。" % (len(rows), len(p12)))
 L.append("- **优化开关**：`gcc-15 -O{0,1,2,3} -Q --help=optimizers`：%d 个开关；-O0 启用 54，-O1 新增 43（共 96），-O2 再增 46（共 142），-O3 再增 14（共 156），135 个在 -O0 到 -O3 下都不默认启用。另有 316 个 `--param`，不在本表。" % len(levels))
-L.append("- **对齐判据**：`src/component/gimple/o1-test.rkt`，4 夹具（basic.c、calls.c、struct.c、ccp.c）× 2 版本逐函数比较归一化 dump。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。\n")
+L.append("- **对齐判据**：`src/component/gimple/o1-test.rkt`，%d 夹具（%s）× 2 版本逐函数比较归一化 dump。状态：**完成** = 已移植且对齐；**恒等** = 未移植算法、夹具上 GCC 不改变函数、dump 对齐（换夹具可能触发差异）；**未移植**；**不比较** = 无函数 dump 或夹具上无效果；**范围外** = IPA 跨函数 / RTL 后端（后端为自有 aarch64）；**gate 关闭** = -O1 下 GCC 不执行。\n" % (len(FIXTURES), '、'.join(f+'.c' for f in FIXTURES)))
 L.append("- **执行与否**：`-fdump-passes` 在编译任何函数之前对每个 gate 求值一次，所以看函数的 gate（循环 pass、postreload）打印 OFF，而关闭分组里的子 pass 可能打印 ON。GIMPLE pass 改用夹具的 dump 文件判定：4 个夹具中任一个有该 pass 的 dump 文件即为执行；两者不一致时 gcc-15 列写成 `ON（实际未执行）` / `OFF（实际执行）`。IPA、RTL 与无 dump 名的 pass 仍按 `-fdump-passes`。统计表的“执行 / 不执行”按此口径。\n")
 L.append("## 1. 统计（gcc-15 pass 树实例，-O1）\n")
 L.append("| 类别 | 执行 | 不执行 | 完成 | 恒等 | 未移植（执行） |\n|---|---|---|---|---|---|")
@@ -234,7 +236,7 @@ def port_state(dumpname):
 for ver,imp in [('15',impact),('12',impact12)]:
     L.append("**gcc-%s**\n"%ver)
     L.append("| 夹具 | 改变代码的 pass |\n|---|---|")
-    for fx in ['basic','calls','struct','ccp']:
+    for fx in FIXTURES:
         L.append("| %s.c | %s |"%(fx, ', '.join('`'+c+'`' for c in imp[fx])))
     L.append("")
 for ver,imp in [('15',impact),('12',impact12)]:
@@ -263,7 +265,7 @@ L.append("\n● 启用，○ 关闭，其他为开关的非布尔取值。\n")
 L.append("## 6. 测试\n")
 if O1_TESTS or SUITE:
     o1=O1_TESTS or '未记录'
-    o1s=("%s 项通过（4 夹具 × 2 版本 × 阶段；未通过的见第 2 节的未完成 pass）" % o1) if '/' in o1 else ("%s 项（4 夹具 × 2 版本 × 阶段）全部通过" % o1)
+    o1s=("%s 项通过（%d 夹具 × 2 版本 × 阶段；未通过的见第 2 节的未完成 pass）" % (o1, len(FIXTURES))) if '/' in o1 else ("%s 项（%d 夹具 × 2 版本 × 阶段）全部通过" % (o1, len(FIXTURES)))
     nfail=None
     if SUITE and '/' in SUITE:
         a,b=SUITE.split('/'); nfail=int(b)-int(a)

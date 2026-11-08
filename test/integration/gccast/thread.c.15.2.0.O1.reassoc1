@@ -1,0 +1,66 @@
+
+;; Function thr (thr, funcdef_no=0, decl_uid=4465, cgraph_uid=1, symbol_order=0)
+
+;; 1 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5 6 7
+;; 2 succs { 3 4 }
+;; 3 succs { 7 }
+;; 4 succs { 5 6 }
+;; 5 succs { 7 }
+;; 6 succs { 7 }
+;; 7 succs { 1 }
+int thr (int a, int b)
+{
+  int y;
+  int x;
+  int _2;
+  int _4;
+  int _14;
+  int _16;
+  int _18;
+  int _21;
+  int _24;
+
+  <bb 2> [local count: 1073741820]:
+  if (a_6(D) == 1)
+    goto <bb 3>; [34.00%]
+  else
+    goto <bb 4>; [66.00%]
+
+  <bb 3> [local count: 365072223]:
+  x_10 = b_7(D) + 1;
+  _18 = x_10 * x_10;
+  y_19 = _18 + b_7(D);
+  _16 = g (y_19);
+  goto <bb 7>; [100.00%]
+
+  <bb 4> [local count: 708669597]:
+  if (a_6(D) == 2)
+    goto <bb 5>; [34.00%]
+  else
+    goto <bb 6>; [66.00%]
+
+  <bb 5> [local count: 240947666]:
+  x_9 = b_7(D) * 3;
+  _21 = x_9 * x_9;
+  y_22 = _21 + b_7(D);
+  _2 = y_22 + 5;
+  _14 = g (_2);
+  goto <bb 7>; [100.00%]
+
+  <bb 6> [local count: 467721932]:
+  x_8 = b_7(D) + -7;
+  _24 = x_8 * x_8;
+  y_25 = _24 + b_7(D);
+
+  <bb 7> [local count: 1073741824]:
+  # _4 = PHI <_16(3), _14(5), y_25(6)>
+  return _4;
+
+}
+
+
