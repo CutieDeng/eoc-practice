@@ -137,3 +137,66 @@ int thr_join (int a, int b)
 }
 
 
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=3622, cgraph_uid=3, symbol_order=2)
+
+Created preheader block for loop 1
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 7 3 4 5 8 6
+;;
+;; Loop 1
+;;  header 3, latch 8
+;;  depth 1, outer 0
+;;  nodes: 3 8 5 4
+;; 2 succs { 7 6 }
+;; 7 succs { 3 }
+;; 3 succs { 4 5 }
+;; 4 succs { 5 }
+;; 5 succs { 8 6 }
+;; 8 succs { 3 }
+;; 6 succs { 1 }
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> [local count: 118111600]:
+  if (n_6(D) > 0)
+    goto <bb 7>; [89.00%]
+  else
+    goto <bb 6>; [11.00%]
+
+  <bb 7> [local count: 105119324]:
+
+  <bb 3> [local count: 955630225]:
+  # first_13 = PHI <0(8), 1(7)>
+  # i_14 = PHI <i_9(8), 0(7)>
+  if (first_13 != 0)
+    goto <bb 4>; [33.00%]
+  else
+    goto <bb 5>; [67.00%]
+
+  <bb 4> [local count: 315357972]:
+  g (-1);
+
+  <bb 5> [local count: 955630225]:
+  g (i_14);
+  i_9 = i_14 + 1;
+  if (n_6(D) > i_9)
+    goto <bb 8>; [89.00%]
+  else
+    goto <bb 6>; [11.00%]
+
+  <bb 8> [local count: 850510901]:
+  goto <bb 3>; [100.00%]
+
+  <bb 6> [local count: 118111600]:
+  return;
+
+}
+
+

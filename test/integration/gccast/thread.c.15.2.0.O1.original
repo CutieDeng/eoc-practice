@@ -67,3 +67,31 @@
   return y;
 }
 
+
+;; Function thr_loop (null)
+;; enabled by -tree-original
+
+
+{
+  int first = 1;
+
+    int first = 1;
+  {
+    int i = 0;
+
+        int i = 0;
+    goto <D.4486>;
+    <D.4485>:;
+    if (first != 0)
+      {
+        g (-1);
+      }
+    first = 0;
+    g (i);
+    i++ ;
+    <D.4486>:;
+    if (i < n) goto <D.4485>; else goto <D.4483>;
+    <D.4483>:;
+  }
+}
+

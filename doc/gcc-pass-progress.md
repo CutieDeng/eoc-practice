@@ -35,7 +35,7 @@
 | calls.c | `100t.fixup_cfg3`, `117t.forwprop2`, `126t.dce2`, `154t.sink1`, `197t.veclower21`, `224t.crited1`, `270t.optimized` |
 | struct.c | `109t.ccp2`, `129t.cselim`, `140t.dom2`, `143t.reassoc1`, `151t.lim2`, `154t.sink1`, `162t.loopinit`, `191t.ivopts`, `193t.loopdone`, `198t.switchlower1`, `207t.dom3`, `208t.strlen1`, `211t.ccp4`, `215t.forwprop4`, `224t.crited1`, `270t.optimized` |
 | ccp.c | `135t.ch2`, `151t.lim2`, `154t.sink1`, `161t.loop`, `162t.loopinit`, `165t.sccp`, `168t.cddce2`, `191t.ivopts`, `193t.loopdone`, `194t.no_loop`, `197t.veclower21`, `207t.dom3`, `208t.strlen1`, `215t.forwprop4`, `216t.sink2`, `224t.crited1`, `270t.optimized` |
-| thread.c | `140t.dom2`, `141t.copyprop2`, `143t.reassoc1`, `145t.forwprop3`, `154t.sink1`, `197t.veclower21`, `201t.reassoc2`, `215t.forwprop4`, `224t.crited1`, `270t.optimized` |
+| thread.c | `135t.ch2`, `140t.dom2`, `141t.copyprop2`, `143t.reassoc1`, `145t.forwprop3`, `151t.lim2`, `154t.sink1`, `161t.loop`, `191t.ivopts`, `193t.loopdone`, `194t.no_loop`, `197t.veclower21`, `201t.reassoc2`, `208t.strlen1`, `215t.forwprop4`, `216t.sink2`, `224t.crited1`, `270t.optimized` |
 | sink.c | `154t.sink1` |
 
 **gcc-12**
@@ -46,12 +46,12 @@
 | calls.c | `094t.fixup_cfg3`, `109t.forwprop2`, `118t.stdarg`, `144t.sink1`, `186t.veclower21`, `211t.crited1`, `252t.optimized` |
 | struct.c | `102t.ccp2`, `120t.cselim`, `130t.dom2`, `133t.reassoc1`, `141t.lim2`, `144t.sink1`, `152t.loopinit`, `180t.ivopts`, `182t.loopdone`, `187t.switchlower1`, `195t.dom3`, `196t.strlen1`, `199t.ccp4`, `201t.dse5`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
 | ccp.c | `126t.ch2`, `141t.lim2`, `144t.sink1`, `151t.loop`, `152t.loopinit`, `154t.sccp`, `158t.cddce2`, `180t.ivopts`, `182t.loopdone`, `183t.no_loop`, `186t.veclower21`, `195t.dom3`, `196t.strlen1`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
-| thread.c | `130t.dom2`, `131t.copyprop2`, `133t.reassoc1`, `135t.forwprop3`, `144t.sink1`, `186t.veclower21`, `189t.reassoc2`, `203t.forwprop4`, `211t.crited1`, `252t.optimized` |
+| thread.c | `126t.ch2`, `130t.dom2`, `131t.copyprop2`, `133t.reassoc1`, `135t.forwprop3`, `141t.lim2`, `144t.sink1`, `151t.loop`, `180t.ivopts`, `182t.loopdone`, `183t.no_loop`, `186t.veclower21`, `189t.reassoc2`, `196t.strlen1`, `203t.forwprop4`, `204t.sink2`, `211t.crited1`, `252t.optimized` |
 | sink.c | `144t.sink1` |
 
-gcc-15 合并去重：已对齐 32 个（`sink1`, `veclower21`, `crited1`, `optimized`, `dom2`, `lim2`, `loopinit`, `dom3`, `forwprop4`, `ch2`, `copyprop2`, `loop`, `sccp`, `cddce2`, `no_loop`, `reassoc2`, `ccp4`, `reassoc1`, `ivopts`, `loopdone`, `strlen1`, `ivcanon`, `cunroll`, `dce7`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`, `switchlower1`, `sink2`, `forwprop3`）；仍需移植 0 个（按出现次数）：。
+gcc-15 合并去重：已对齐 32 个（`sink1`, `lim2`, `veclower21`, `crited1`, `optimized`, `ch2`, `dom2`, `loop`, `loopinit`, `no_loop`, `dom3`, `ivopts`, `loopdone`, `strlen1`, `forwprop4`, `copyprop2`, `sccp`, `cddce2`, `reassoc2`, `ccp4`, `reassoc1`, `sink2`, `ivcanon`, `cunroll`, `dce7`, `fixup_cfg3`, `forwprop2`, `dce2`, `ccp2`, `cselim`, `switchlower1`, `forwprop3`）；仍需移植 0 个（按出现次数）：。
 
-gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `veclower21`, `crited1`, `dom2`, `lim2`, `loopinit`, `dom3`, `forwprop4`, `ch2`, `copyprop2`, `loop`, `sccp`, `cddce2`, `no_loop`, `reassoc2`, `ccp4`, `reassoc1`, `ivopts`, `loopdone`, `strlen1`, `sink2`, `ivcanon`, `copyprop3`, `cunroll`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`, `switchlower1`, `dse5`, `forwprop3`）；仍需移植 0 个（按出现次数）：。
+gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `lim2`, `veclower21`, `crited1`, `ch2`, `dom2`, `loop`, `loopinit`, `no_loop`, `dom3`, `ivopts`, `loopdone`, `strlen1`, `forwprop4`, `sink2`, `copyprop2`, `sccp`, `cddce2`, `reassoc2`, `ccp4`, `reassoc1`, `ivcanon`, `copyprop3`, `cunroll`, `fixup_cfg3`, `forwprop2`, `stdarg`, `ccp2`, `cselim`, `switchlower1`, `dse5`, `forwprop3`）；仍需移植 0 个（按出现次数）：。
 
 `optimized` 的变化来自 pass_cleanup_cfg_post_optimizing 与 out-of-SSA 前的整理。
 
@@ -229,13 +229,13 @@ gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `veclower21`, `cr
 | 168 | 　　`tree-dce4` | ON | ON | 完成（复用 dce） |
 | 169 | 　　`tree-fix_loops` | ON | ON | 恒等 |
 | 170 | 　　`tree-loop` | ON | ON | 完成（gate_loop：函数有循环才进入子流水线；`opt/loop-pipeline.rkt` 记录 loop-pipeline 与 loops-state 标志） |
-| 171 | 　　　`tree-loopinit` | ON | ON | 完成（loop_optimizer_init (LOOPS_NORMAL) + rewrite_into_loop_closed_ssa（`opt/update-ssa.rkt` 的增量 update_ssa 与 dump）；loops-state 置 preheaders / simple-latches / lcssa / scev：cleanup 保护 latch 与 preheader、不压缩块号） |
+| 171 | 　　　`tree-loopinit` | ON | ON | 完成（loop_optimizer_init (LOOPS_NORMAL) + rewrite_into_loop_closed_ssa（`opt/update-ssa.rkt` 的增量 update_ssa 与 dump；12 只处理实际操作数（SSA_OP_USE），≥13 含虚拟操作数（SSA_OP_ALL_USES））；loops-state 置 preheaders / simple-latches / lcssa / scev：cleanup 保护 latch 与 preheader、不压缩块号） |
 | 172 | 　　　`tree-unswitch` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 173 | 　　　`tree-lsplit` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 174 | 　　　`tree-sccp` | ON | ON | 完成（`opt/sccp.rkt` final_value_replacement_loop；`opt/scev.rkt` 标量演化 + 迭代次数（lt/le、单位步长）；`opt/generic-fold.rkt` GENERIC fold 子集；≥13 常量直接替换使用） |
 | 175 | 　　　`tree-lversion` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 176 | 　　　`tree-unrolljam` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 177 | 　　　`tree-cddce2` | ON | ON | 完成（复用 dce；释放顺序按 GCC 的支配树 BFS 逆序） |
+| 177 | 　　　`tree-cddce2` | ON | ON | 完成（复用 dce；释放顺序按 GCC 的支配树 BFS 逆序；≥13 在 loop-closed SSA 下保留退化的虚拟 PHI） |
 | 178 | 　　　`tree-ivcanon` | ON | ON | 完成（`opt/ivcanon.rkt` create_canonical_iv；try_unroll 的 UL_SINGLE_ITER 只对不迭代的循环生效，未移植） |
 | 179 | 　　　`tree-ldist` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 180 | 　　　`tree-crc` | OFF | 无 | gate 关闭（-O1 不执行） |
@@ -275,7 +275,7 @@ gcc-12 合并去重：已对齐 33 个（`optimized`, `sink1`, `veclower21`, `cr
 | 214 | 　　`tree-tracer` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 215 | 　　`tree-fre5` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 216 | 　　`tree-thread2` | OFF | OFF | gate 关闭（-O1 不执行） |
-| 217 | 　　`tree-dom3` | ON | ON | 完成（复用 dom；PROP_loop_opts_done 下 cancel_invalid_paths 只做出口检查；gcc 15 struct.c 的线程 (4,5)(5,6)(6,9)：path ranger 判定条件、`opt/threadupdate.rkt` 复制块 / 重定向边 / update_profile、cleanup 中的 update_ssa 替换表） |
+| 217 | 　　`tree-dom3` | ON | ON | 完成（复用 dom，may_peel_loop_headers = false；PROP_loop_opts_done 下 cancel_invalid_paths 只做出口检查；thread.c 的 thr_loop：latch → 循环头的线程被 thread_through_loop_header 的失败分支取消；gcc 15 struct.c 的线程 (4,5)(5,6)(6,9)：path ranger 判定条件、`opt/threadupdate.rkt` 复制块 / 重定向边 / update_profile、cleanup 中的 update_ssa 替换表） |
 | 218 | 　　`tree-strlen1` | ON | ON | 完成（只有 loop_optimizer_init (LOOPS_NORMAL)；无字符串函数） |
 | 219 | 　　`tree-threadfull2` | OFF | OFF | gate 关闭（-O1 不执行） |
 | 220 | 　　`tree-vrp2` | OFF | OFF | gate 关闭（-O1 不执行） |
@@ -666,7 +666,7 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 | `-fstrict-aliasing` | ○ | ○ | ● | ● | 不在 -O1 范围（-O2） |
 | `-fstrict-enums` | available in C++, ObjC++ | available in C++, ObjC++ | available in C++, ObjC++ | available in C++, ObjC++ | 不在 -O1 范围（默认关闭） |
 | `-fstrict-volatile-bitfields` | ● | ● | ● | ● | -O0 即启用（语义 / 后端开关） |
-| `-fthread-jumps` | ○ | ● | ● | ● | 部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（含同一块多条路径的模板块复制、joiner 块复制（thread.c 的 thr_join）；循环头线程化未移植）；后向线程器 ethread / thread 未移植） |
+| `-fthread-jumps` | ○ | ● | ● | ● | 部分（dom 的前向线程化：分析、path ranger（≥13）、取消规则、`opt/threadupdate.rkt` 的 CFG 更新（含同一块多条路径的模板块复制、joiner 块复制（thread.c 的 thr_join）、thread_through_loop_header 的判定与取消（thr_loop）；循环头剥离变换未移植）；后向线程器 ethread / thread 未移植） |
 | `-ftoplevel-reorder` | ○ | ● | ● | ● | 简化模型 |
 | `-ftracer` | ○ | ○ | ○ | ○ | 不在 -O1 范围（默认关闭） |
 | `-ftrapping-math` | ● | ● | ● | ● | 部分 |
@@ -738,5 +738,5 @@ gcc-12 独有的 pass（gcc-15 树中不存在）：`tree-phiprop`, `rtl-tag_col
 
 ## 6. 测试
 
-- 最近一次实测：`o1-test.rkt` 1078 项（6 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1431/1432 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
+- 最近一次实测：`o1-test.rkt` 1098 项（6 夹具 × 2 版本 × 阶段）全部通过；全套 `raco test -x -j 4 src test` 1451/1452 通过（唯一的失败是 aarch64 scribble 文档模块，缺 scribble collection 无法加载，与本工作无关）。
 - 测试驱动按 GCC 的阶段顺序：先对全部函数 gimplify 到 SSA（`ipa-build_ssa_passes`），再逐函数跑 `ipa-opt_local_passes`；调用的 ECF 位按被调声明动态查询（`gimple_call_flags` 语义）。

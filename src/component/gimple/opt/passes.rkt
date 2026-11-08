@@ -175,7 +175,7 @@
          (p 'phiopt2 identity-pass)
          (p 'ch2 ch-pass) (p 'cplxlower1 identity-pass))
    (if (>= major 14) (list (p 'bitintlower1 identity-pass)) '())
-   (list (p 'sra identity-pass) (p 'dom2 dom-pass)
+   (list (p 'sra identity-pass) (p 'dom2 (dom-pass* #t))
          (p 'copyprop2 copyprop) (p 'reassoc1 (reassoc-pass #t)) (p 'dce3 dce) (p 'forwprop3 forwprop)
          (p 'phiopt3 identity-pass) (p 'ccp3 ccp2)
          ;; pass_cse_pow (GCC 15) / pass_cse_sincos (before): no pow / sincos calls on the fixtures
@@ -193,7 +193,7 @@
          ;; pass_lower_vector_ssa: TODO_cleanup_cfg
          (p 'veclower21 cleanup-pass) (p 'switchlower1 switchlower-pass))
    (if (>= major 15) (list (p 'sincos identity-pass)) '())
-   (list (p 'reassoc2 (reassoc-pass #f)) (p 'slsr identity-pass) (p 'dom3 dom-pass) (p 'strlen1 loops-normal-pass)
+   (list (p 'reassoc2 (reassoc-pass #f)) (p 'slsr identity-pass) (p 'dom3 (dom-pass* #f)) (p 'strlen1 loops-normal-pass)
          (p 'ccp4 ccp2) (p 'wrestrict identity-pass) (p 'dse5 dse))
    (if (>= major 15)
        (list (p 'dce7 dce #t) (p 'forwprop4 forwprop) (p 'sink2 (sink-pass #t)) (p 'phiopt4 identity-pass)

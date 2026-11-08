@@ -38,3 +38,18 @@ int thr_join(int a, int b)
     }
   return y;
 }
+
+/* dom3 registers the thread latch -> header -> the call g (-1) block is
+   skipped ((7, 3) incoming; (3, 4) normal); thread_through_loop_header
+   rejects it because the entry edge of the loop is not threaded */
+void thr_loop(int n)
+{
+  int first = 1;
+  for (int i = 0; i < n; i++)
+    {
+      if (first)
+        g (-1);
+      first = 0;
+      g (i);
+    }
+}

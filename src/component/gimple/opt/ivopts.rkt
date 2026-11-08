@@ -2318,7 +2318,9 @@
         (when (eq? (tree-code op) 'ssa_name)
           (define x (get-iv op))
           (when (and x (integer-zerop (iv-step x))) (return (void))))))
-    (error 'ivopts "rewriting a nonlinear use by another candidate is not ported")))
+    ;; a PHI: a biv kept by a selected original candidate is not replaced
+    (when (and (gphi? g) (vinfo-preserve-biv (name-info (gphi-result g)))) (return (void)))
+    (error 'ivopts "rewriting a nonlinear use by another candidate (the recomputation of rewrite_use_nonlinear_expr) is not ported")))
 
 ;; adjust_iv_update_pos
 (define (adjust-iv-update-pos! c u)

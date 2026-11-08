@@ -48,6 +48,9 @@
 
 (define (dce st fndecl cfg0)
   (define st0 (gs-set-fndecl st fndecl))
+  ;; GCC >= 13 keeps degenerate virtual PHIs in loop-closed SSA
+  (define keep-degenerate-vphis?
+    (and (>= (gcc-major-version st0) 13) (memq 'lcssa (decl-flag st0 fndecl 'loops-state '())) #t))
   (define cfg (cfg-clear-messages cfg0))
   (define m (gcfg->mfn cfg))
   (define dom (compute-dom (pvector-cons-left (pvector-cons-left (cfg-bbs cfg) EXIT) ENTRY) ENTRY
@@ -188,7 +191,7 @@
           [(ssa-virtual? res)
            (define args (map cdr (pvector->list (gphi-args ph))))
            (cond
-             [(for/and ([a (in-list (cdr args))]) (equal? a (car args)))
+             [(and (not keep-degenerate-vphis?) (for/and ([a (in-list (cdr args))]) (equal? a (car args))))
               ;; degenerate: its uses take the argument
               (define vuse (car args))
               (for ([uid (in-list (mfn-use-ids m res))])

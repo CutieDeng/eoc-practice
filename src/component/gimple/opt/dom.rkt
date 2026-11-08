@@ -62,7 +62,7 @@
          "threadupdate.rkt"
          (only-in "update-ssa.rkt" update-ssa))
 
-(provide dom-pass)
+(provide dom-pass dom-pass*)
 
 (define PARAM-MAX-JUMP-THREAD-PATHS 64)
 (define PARAM-MAX-JUMP-THREAD-DUPLICATION-STMTS 15)
@@ -73,7 +73,9 @@
 ;; edge_info: simple equivalences (lhs . rhs) and condition equivalences (key . value)
 (struct ei ([simple #:mutable] [conds #:mutable]))
 
-(define (dom-pass st0 fndecl cfg0)
+(define (dom-pass st0 fndecl cfg0) ((dom-pass* #t) st0 fndecl cfg0))
+;; MAY-PEEL-LOOP-HEADERS?: pass_dominator's parameter (dom2 #t, dom3 #f)
+(define ((dom-pass* may-peel-loop-headers?) st0 fndecl cfg0)
   (define major (gcc-major-version st0))
   (define st (gs-set-fndecl st0 fndecl))
   (define loop-opts-done (decl-flag st0 fndecl 'loop-opts-done #f))   ; PROP_loop_opts_done
@@ -998,6 +1000,6 @@
   (cond
     [(null? paths) (cleanup-tree-cfg st1 cfg1 print-cond-rhs)]
     [else
-     (define-values (cfg2 st2 table _threaded?) (thread-through-all-blocks st1 fndecl cfg1 (reverse paths) loops))
+     (define-values (cfg2 st2 table _threaded?) (thread-through-all-blocks st1 fndecl cfg1 (reverse paths) loops #:may-peel-loop-headers? may-peel-loop-headers?))
      (cleanup-tree-cfg st2 cfg2 print-cond-rhs
                        #:after-pre (lambda (st c) (if (null? table) (values c st) (update-ssa st fndecl c table))))]))

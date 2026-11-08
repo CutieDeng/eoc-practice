@@ -5,7 +5,7 @@ int thr (int a, int b)
 {
   int y;
   int x;
-  int D.3630;
+  int D.3639;
   int _1;
   int _2;
   int _4;
@@ -85,7 +85,7 @@ int thr_join (int a, int b)
   int z;
   int y;
   int x;
-  int D.3641;
+  int D.3650;
   int _1;
   int _3;
   int _14;
@@ -143,6 +143,52 @@ int thr_join (int a, int b)
 <L7>:
   # VUSE <.MEM_5>
   return _3;
+
+}
+
+
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=3622, cgraph_uid=3, symbol_order=2)
+
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> :
+  first_5 = 1;
+  i_6 = 0;
+  goto <bb 6>; [INV]
+
+  <bb 3> :
+  if (first_1 != 0)
+    goto <bb 4>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 4> :
+  # .MEM_9 = VDEF <.MEM_4>
+  g (-1);
+
+  <bb 5> :
+  # .MEM_3 = PHI <.MEM_4(3), .MEM_9(4)>
+  first_10 = 0;
+  # .MEM_11 = VDEF <.MEM_3>
+  g (i_2);
+  i_12 = i_2 + 1;
+
+  <bb 6> :
+  # first_1 = PHI <first_5(2), first_10(5)>
+  # i_2 = PHI <i_6(2), i_12(5)>
+  # .MEM_4 = PHI <.MEM_7(D)(2), .MEM_11(5)>
+  if (i_2 < n_8(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 7>; [INV]
+
+  <bb 7> :
+  # VUSE <.MEM_4>
+  return;
 
 }
 

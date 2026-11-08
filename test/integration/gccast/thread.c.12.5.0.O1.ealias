@@ -327,3 +327,122 @@ int thr_join (int a, int b)
 }
 
 
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=3622, cgraph_uid=3, symbol_order=2)
+
+Points-to analysis
+
+Constraints:
+
+ANYTHING = &ANYTHING
+ESCAPED = *ESCAPED
+ESCAPED = ESCAPED + UNKNOWN
+*ESCAPED = NONLOCAL
+NONLOCAL = &NONLOCAL
+NONLOCAL = &ESCAPED
+INTEGER = &ANYTHING
+n = &NONLOCAL
+callescape(10) = NONLOCAL
+CALLUSED(11) = callescape(10)
+callarg(13) = &NONLOCAL
+callarg(13) = callarg(13) + UNKNOWN
+callarg(13) = *callarg(13) + UNKNOWN
+CALLUSED(11) = callarg(13)
+*callarg(13) = callescape(10)
+CALLCLOBBERED(12) = callarg(13)
+callescape(10) = callarg(13)
+ESCAPED = &NONLOCAL
+callescape(14) = NONLOCAL
+CALLUSED(15) = callescape(14)
+callarg(17) = i_2
+callarg(17) = callarg(17) + UNKNOWN
+callarg(17) = *callarg(17) + UNKNOWN
+CALLUSED(15) = callarg(17)
+*callarg(17) = callescape(14)
+CALLCLOBBERED(16) = callarg(17)
+callescape(14) = callarg(17)
+ESCAPED = i_2
+i_12 = i_2
+i_12 = &NONLOCAL
+first_1 = &NONLOCAL
+first_1 = &NULL
+i_2 = &NULL
+i_2 = i_12
+
+Collapsing static cycles and doing variable substitution
+Building predecessor graph
+Detecting pointer and location equivalences
+Rewriting constraints and unifying variables
+Uniting pointer but not location equivalent variables
+Finding indirect cycles
+Solving graph
+
+Points-to sets
+
+ANYTHING = { ANYTHING }
+ESCAPED = { NULL ESCAPED NONLOCAL }
+NONLOCAL = { ESCAPED NONLOCAL }
+STOREDANYTHING = { }
+INTEGER = { ANYTHING }
+n = { NONLOCAL }
+g = { }
+callescape(10) = { ESCAPED NONLOCAL }
+CALLUSED(11) = { ESCAPED NONLOCAL } same as callescape(10)
+CALLCLOBBERED(12) = { ESCAPED NONLOCAL } same as callarg(13)
+callarg(13) = { ESCAPED NONLOCAL }
+callescape(14) = { NULL ESCAPED NONLOCAL }
+CALLUSED(15) = { NULL ESCAPED NONLOCAL } same as callescape(14)
+CALLCLOBBERED(16) = { NULL ESCAPED NONLOCAL } same as callarg(17)
+callarg(17) = { NULL ESCAPED NONLOCAL }
+i_2 = { NULL NONLOCAL }
+i_12 = { NULL NONLOCAL } same as i_2
+first_1 = { NULL NONLOCAL } same as i_2
+
+
+Alias information for thr_loop
+
+Aliased symbols
+
+
+Call clobber information
+
+ESCAPED, points-to non-local, points-to NULL, points-to vars: { }
+
+Flow-insensitive points-to information
+
+
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> :
+  goto <bb 6>; [INV]
+
+  <bb 3> :
+  if (first_1 != 0)
+    goto <bb 4>; [INV]
+  else
+    goto <bb 5>; [INV]
+
+  <bb 4> :
+  g (-1);
+
+  <bb 5> :
+  g (i_2);
+  i_12 = i_2 + 1;
+
+  <bb 6> :
+  # first_1 = PHI <1(2), 0(5)>
+  # i_2 = PHI <0(2), i_12(5)>
+  if (i_2 < n_8(D))
+    goto <bb 3>; [INV]
+  else
+    goto <bb 7>; [INV]
+
+  <bb 7> :
+  return;
+
+}
+
+

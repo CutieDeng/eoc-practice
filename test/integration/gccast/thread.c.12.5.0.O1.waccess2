@@ -134,3 +134,50 @@ int thr_join (int a, int b)
 }
 
 
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=3622, cgraph_uid=3, symbol_order=2)
+
+pointer_query counters:
+  index cache size:   0
+  index entries:      0
+  access cache size:  0
+  access entries:     0
+  hits:               0
+  misses:             12
+  failures:           0
+  max_depth:          1
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> [local count: 118111600]:
+  goto <bb 6>; [100.00%]
+
+  <bb 3> [local count: 955630225]:
+  if (first_1 != 0)
+    goto <bb 4>; [33.00%]
+  else
+    goto <bb 5>; [67.00%]
+
+  <bb 4> [local count: 315357972]:
+  g (-1);
+
+  <bb 5> [local count: 955630225]:
+  g (i_2);
+  i_9 = i_2 + 1;
+
+  <bb 6> [local count: 1073741824]:
+  # first_1 = PHI <1(2), 0(5)>
+  # i_2 = PHI <0(2), i_9(5)>
+  if (i_2 < n_6(D))
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 7> [local count: 118111600]:
+  return;
+
+}
+
+

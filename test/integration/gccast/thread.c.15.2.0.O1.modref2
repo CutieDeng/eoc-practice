@@ -219,3 +219,89 @@ int thr_join (int a, int b)
 }
 
 
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=4479, cgraph_uid=3, symbol_order=2)
+
+
+
+modref analyzing 'thr_loop/3' (ipa=0)
+Past summary:
+  loads:
+    Every base
+  stores:
+    Every base
+  Side effects
+  Nondeterministic
+  Global memory read
+  Global memory written
+  parm 0 flags: no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape no_direct_read no_indirect_read
+Analyzing flags of ssa name: n_6(D)
+  Analyzing stmt: if (n_6(D) != i_9)
+  current flags of n_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+  Analyzing stmt: if (n_6(D) > 0)
+  current flags of n_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+flags of ssa name n_6(D) no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape not_returned_directly not_returned_indirectly no_direct_read no_indirect_read
+Always executed bbbs (assuming return or EH): 2, 6
+ - Analyzing call:g (-1);
+ - Function availability <= AVAIL_INTERPOSABLE.
+ - Analyzing call:g (i_14);
+ - Function availability <= AVAIL_INTERPOSABLE.
+ - modref done with result: tracked.
+  loads:
+    Every base
+  stores:
+    Every base
+  Side effects
+  Nondeterministic
+  Global memory read
+  Global memory written
+  parm 0 flags: no_direct_clobber no_indirect_clobber no_direct_escape no_indirect_escape no_direct_read no_indirect_read
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> [local count: 118111600]:
+  if (n_6(D) > 0)
+    goto <bb 7>; [89.00%]
+  else
+    goto <bb 8>; [11.00%]
+
+  <bb 8> [local count: 12992276]:
+  goto <bb 6>; [100.00%]
+
+  <bb 7> [local count: 105119324]:
+
+  <bb 3> [local count: 955630224]:
+  # first_13 = PHI <0(10), 1(7)>
+  # i_14 = PHI <i_9(10), 0(7)>
+  if (first_13 != 0)
+    goto <bb 4>; [33.00%]
+  else
+    goto <bb 9>; [67.00%]
+
+  <bb 9> [local count: 640272252]:
+  goto <bb 5>; [100.00%]
+
+  <bb 4> [local count: 315357972]:
+  g (-1);
+
+  <bb 5> [local count: 955630224]:
+  g (i_14);
+  i_9 = i_14 + 1;
+  if (n_6(D) != i_9)
+    goto <bb 10>; [89.00%]
+  else
+    goto <bb 11>; [11.00%]
+
+  <bb 10> [local count: 850510900]:
+  goto <bb 3>; [100.00%]
+
+  <bb 11> [local count: 105119324]:
+
+  <bb 6> [local count: 118111600]:
+  return;
+
+}
+
+

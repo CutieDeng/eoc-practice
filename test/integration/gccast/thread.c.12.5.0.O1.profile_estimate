@@ -204,3 +204,75 @@ int thr_join (int a, int b)
 }
 
 
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=3622, cgraph_uid=3, symbol_order=2)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5 6 7
+;;
+;; Loop 1
+;;  header 6, latch 5
+;;  depth 1, outer 0
+;;  nodes: 6 5 3 4
+;; 2 succs { 6 }
+;; 3 succs { 4 5 }
+;; 4 succs { 5 }
+;; 5 succs { 6 }
+;; 6 succs { 3 7 }
+;; 7 succs { 1 }
+Predictions for bb 2
+1 edges in bb 2 predicted to even probabilities
+Predictions for bb 3
+  DS theory heuristics: 33.00%
+  combined heuristics: 33.00%
+  call heuristics of edge 3->4: 33.00%
+Predictions for bb 4
+1 edges in bb 4 predicted to even probabilities
+Predictions for bb 5
+1 edges in bb 5 predicted to even probabilities
+Predictions for bb 6
+  first match heuristics: 89.00%
+  combined heuristics: 89.00%
+  loop exit heuristics of edge 6->7: 11.00%
+Predictions for bb 7
+1 edges in bb 7 predicted to even probabilities
+cyclic probability of bb 6 is 0.890000; turning freq 1.000000 to 9.090909
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> [local count: 118111600]:
+  goto <bb 6>; [100.00%]
+
+  <bb 3> [local count: 955630225]:
+  if (first_1 != 0)
+    goto <bb 4>; [33.00%]
+  else
+    goto <bb 5>; [67.00%]
+
+  <bb 4> [local count: 315357972]:
+  g (-1);
+
+  <bb 5> [local count: 955630225]:
+  g (i_2);
+  i_12 = i_2 + 1;
+
+  <bb 6> [local count: 1073741824]:
+  # first_1 = PHI <1(2), 0(5)>
+  # i_2 = PHI <0(2), i_12(5)>
+  if (i_2 < n_8(D))
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 7>; [11.00%]
+
+  <bb 7> [local count: 118111600]:
+  return;
+
+}
+
+

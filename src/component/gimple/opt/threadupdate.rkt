@@ -41,8 +41,15 @@
 ;; others are copies of the template (their names replace the
 ;; template's names and, through them, the original ones).
 ;;
-;; Not ported: thread_through_loop_header (an error when a thread
-;; through a loop header remains), the removed-edge filter of update_cfg
+;; thread_through_loop_header then takes the threads into a loop header
+;; (MAY-PEEL-LOOP-HEADERS? is pass_dominator's parameter: dom2 #t, dom3
+;; #f): the failure cases (a single successor, a header with statements
+;; when peeling is not allowed, an unthreaded entry edge, a joiner path,
+;; two targets, an empty latch target, a target not dominating the
+;; latch) cancel every thread into the header.
+;;
+;; Not ported: the header peeling of thread_through_loop_header (an
+;; error when a thread passes all its checks), the removed-edge filter of update_cfg
 ;; (m_removed_edges), debug statements.  Edges are identified by their
 ;; (src . dest) pair, so a path whose later edge was redirected by an
 ;; earlier thread (GCC follows the edge object) is not followed.
@@ -93,7 +100,7 @@
 (define (c< a b) (and a b (< a b)))
 (define (p> a b) (and a b (> a b)))
 
-(define (thread-through-all-blocks st0 fndecl cfg0 paths0 loops)
+(define (thread-through-all-blocks st0 fndecl cfg0 paths0 loops #:may-peel-loop-headers? [may-peel-loop-headers? #t])
   (define st st0)
   (define cfg cfg0)
   (define stamp (cfg-next-stamp cfg0))
@@ -449,6 +456,63 @@
       (hash-remove! aux e))
     (pair? (htab-entries rds)))
 
+  ;; redirection_block_p: only labels before the control statement (or nothing)
+  (define (redirection-block? bb)
+    (define real (for/list ([g (in-pvector (GBlock-stmts (block bb)))] #:unless (glabel? g)) g))
+    (or (null? real) (let ([g (car real)]) (or (gcond? g) (ggoto? g) (gswitch? g)))))
+  (define (empty-block? bb)
+    (and (pvector-empty? (phis bb)) (for/and ([g (in-pvector (GBlock-stmts (block bb)))]) (glabel? g))))
+  ;; determine_bb_domination_status: 'nondominating | 'dominating | 'loop-broken
+  (define (bb-domination-status l bb)
+    (define header (Loop-header l))
+    (define latch (and (= 1 (length (Loop-latches l))) (car (Loop-latches l))))
+    (cond
+      [(not (memv header (preds bb))) 'nondominating]
+      [(eqv? bb latch) 'dominating]
+      [else
+       ;; dfs_enumerate_from (latch) backwards, not past the header or BB
+       (define seen (make-hasheqv))
+       (let walk ([work (list latch)])
+         (unless (null? work)
+           (define b (car work))
+           (cond
+             [(hash-ref seen b #f) (walk (cdr work))]
+             [else
+              (hash-set! seen b #t)
+              (walk (append (cdr work)
+                            (for/list ([p (in-list (preds b))] #:unless (or (= p header) (= p bb) (hash-ref seen p #f))) p)))])))
+       (let/ec return
+         (define reachable
+           (for*/fold ([r #f]) ([b (in-list (hash-keys seen))] [p (in-list (preds b))])
+             (when (= p header) (return 'nondominating))
+             (or r (= p bb))))
+         (if reachable 'dominating 'loop-broken))]))
+  ;; thread_through_loop_header: the failure cases cancel every thread
+  ;; into the header; the transformations (peeling the header, the new
+  ;; latch) are not ported
+  (define (thread-through-loop-header! l)
+    (define header (Loop-header l))
+    (define latch (and (= 1 (length (Loop-latches l))) (car (Loop-latches l))))
+    (define (fail!) (for ([p (in-list (preds header))]) (hash-remove! aux (cons p header))) #f)
+    (let/ec return
+      (when (= 1 (length (succ-dests header))) (return (fail!)))
+      (unless (or may-peel-loop-headers? (redirection-block? header)) (return (fail!)))
+      (define tgt
+        (for/fold ([tgt #f]) ([p (in-list (preds header))])
+          (define path (thread-path (cons p header)))
+          (cond
+            [(not path) (if (eqv? p latch) tgt (return (fail!)))]
+            [(eq? (type-of (cadr path)) 'copy-joiner) (return (fail!))]
+            [else
+             (define atgt (cadr (cadr path)))
+             (cond [(not tgt) atgt] [(= tgt atgt) tgt] [else (return (fail!))])])))
+      (unless tgt (return #f))
+      (when (and (eqv? tgt latch) (empty-block? latch)) (return (fail!)))
+      (case (bb-domination-status l tgt)
+        [(nondominating) (fail!)]
+        [else (error 'thread-through-all-blocks "threading through the header of loop ~a into bb ~a: the header peeling of thread_through_loop_header is not ported"
+                     (Loop-num l) tgt)])))
+
   ;; update_cfg: the threaded blocks in post order
   (define order (post-order cfg))
   (define threaded?
@@ -456,11 +520,10 @@
       (define r1 (thread-block-1! bb #f))
       (define r2 (thread-block-1! bb #t))
       (or any r1 r2)))
+  ;; then the threads through loop headers, innermost loops first
   (for ([l (in-list (loops-innermost-first loops))]
-        #:when (and (hash-ref threaded-blocks (Loop-header l) #f)
-                    (cfg-block cfg (Loop-header l))
-                    (for/or ([p (in-list (preds (Loop-header l)))]) (thread-path (cons p (Loop-header l))))))
-    (error 'thread-through-all-blocks "a jump thread through the header of loop ~a: thread_through_loop_header is not ported" (Loop-num l)))
+        #:when (and (hash-ref threaded-blocks (Loop-header l) #f) (cfg-block cfg (Loop-header l))))
+    (thread-through-loop-header! l))
   (values cfg st (reverse table) threaded?))
 
 ;; ---- hash_table (hash-table.h) for the redirection data -----------------

@@ -145,3 +145,81 @@ int thr_join (int a, int b)
 }
 
 
+
+;; Function thr_loop (thr_loop, funcdef_no=2, decl_uid=4479, cgraph_uid=3, symbol_order=2)
+
+;; 2 loops found
+;;
+;; Loop 0
+;;  header 0, latch 1
+;;  depth 0, outer -1
+;;  nodes: 0 1 2 3 4 5 6 7
+;;
+;; Loop 1
+;;  header 6, latch 5
+;;  depth 1, outer 0, finite_p
+;;  upper_bound 2147483647
+;;  likely_upper_bound 2147483647
+;;  iterations by profile: 8.090909 (unreliable, maybe flat) entry count:118111600 (estimated locally, freq 1.0000)
+;;  nodes: 6 5 3 4
+;; 2 succs { 6 }
+;; 3 succs { 4 5 }
+;; 4 succs { 5 }
+;; 5 succs { 6 }
+;; 6 succs { 3 7 }
+;; 7 succs { 1 }
+
+SSA replacement table
+N_i -> { O_1 ... O_j } means that N_i replaces O_1, ..., O_j
+
+first_10 -> { first_1 }
+i_11 -> { i_2 }
+.MEM_12 -> { .MEM_4 }
+first_13 -> { first_1 }
+i_14 -> { i_2 }
+.MEM_15 -> { .MEM_4 }
+.MEM_16 -> { .MEM_4 }
+Incremental SSA update started at block: 8
+Number of blocks in CFG: 10
+Number of blocks to update: 7 ( 70%)
+
+
+Merging blocks 2 and 8
+Merging blocks 5 and 6
+Removing basic block 9
+void thr_loop (int n)
+{
+  int i;
+  int first;
+
+  <bb 2> [local count: 118111600]:
+  if (n_6(D) > 0)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 6>; [11.00%]
+
+  <bb 3> [local count: 955630224]:
+  # first_13 = PHI <0(5), 1(2)>
+  # i_14 = PHI <i_9(5), 0(2)>
+  if (first_13 != 0)
+    goto <bb 4>; [33.00%]
+  else
+    goto <bb 5>; [67.00%]
+
+  <bb 4> [local count: 315357972]:
+  g (-1);
+
+  <bb 5> [local count: 955630224]:
+  g (i_14);
+  i_9 = i_14 + 1;
+  if (n_6(D) > i_9)
+    goto <bb 3>; [89.00%]
+  else
+    goto <bb 6>; [11.00%]
+
+  <bb 6> [local count: 118111600]:
+  return;
+
+}
+
+

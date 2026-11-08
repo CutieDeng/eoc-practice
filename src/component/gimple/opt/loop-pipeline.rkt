@@ -106,8 +106,11 @@
   ;; successors first, then the statements
   (define use-blocks (make-hasheqv))
   (define names (make-hasheqv))
+  ;; GCC <= 12 renames the real uses only (SSA_OP_USE), GCC >= 13 the
+  ;; virtual operands too (SSA_OP_ALL_USES)
+  (define virtuals? (>= (gcc-major-version st0) 13))
   (define (use! bb t)
-    (when (ssa-name? t)
+    (when (and (ssa-name? t) (or virtuals? (not (ssa-virtual? t))))
       (define d (hash-ref def-bb (ssa-name-version t) #f))
       (define dl (and d (loop-father d)))
       (when (and dl (not (inside? dl bb)))
